@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createBasicAgent, StubRestApi } from "../examples/basic-agent";
+import { createBasicAgent, StubRestApi } from "../examples/basic/basic-agent";
 
 describe("basic-agent example", () => {
   it("builds an agent instance without side effects on import", () => {

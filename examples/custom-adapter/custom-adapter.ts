@@ -1,52 +1,47 @@
 import { pathToFileURL } from "node:url";
 
-import { Agent, GenericAdapter, type RestApi } from "../src/index";
+import { Agent, SimpleAdapter, type AdapterToolsProtocol, type HistoryProvider, type PlatformMessage, type RestApi } from "../../src/index";
 
-export class StubRestApi implements RestApi {
-  public async getAgentMe() {
-    return {
-      id: "agent-1",
-      name: "Example Agent",
-      description: "Example",
-    };
+class EchoAdapter extends SimpleAdapter<HistoryProvider> {
+  public async onMessage(
+    message: PlatformMessage,
+    tools: AdapterToolsProtocol,
+  ): Promise<void> {
+    await tools.sendMessage(`Custom adapter received: ${message.content}`);
   }
+}
 
+class StubRestApi implements RestApi {
+  public async getAgentMe() {
+    return { id: "agent-1", name: "Custom Agent", description: "Custom" };
+  }
   public async createChatMessage() {
     return { ok: true };
   }
-
   public async createChatEvent() {
     return { ok: true };
   }
-
   public async createChat() {
     return { id: "room-1" };
   }
-
   public async listChatParticipants() {
     return [];
   }
-
   public async addChatParticipant() {
     return { ok: true };
   }
-
   public async removeChatParticipant() {
     return { ok: true };
   }
-
   public async markMessageProcessing() {
     return { ok: true };
   }
-
   public async markMessageProcessed() {
     return { ok: true };
   }
-
   public async markMessageFailed() {
     return { ok: true };
   }
-
   public async listPeers() {
     return { data: [] };
   }
@@ -61,21 +56,21 @@ function isDirectExecution(importMetaUrl: string): boolean {
   return importMetaUrl === pathToFileURL(entry).href;
 }
 
-export function createBasicAgent(): Agent {
-  const adapter = new GenericAdapter(async ({ message, tools }) => {
-    await tools.sendMessage(`Echo: ${message.content}`);
-  });
-
+export function createCustomAdapterAgent(options?: {
+  agentId?: string;
+  apiKey?: string;
+  restApi?: RestApi;
+}): Agent {
   return Agent.create({
-    adapter,
-    agentId: "agent-1",
-    apiKey: "api-key",
+    adapter: new EchoAdapter(),
+    agentId: options?.agentId ?? "agent-1",
+    apiKey: options?.apiKey ?? "api-key",
     linkOptions: {
-      restApi: new StubRestApi(),
+      restApi: options?.restApi ?? new StubRestApi(),
     },
   });
 }
 
 if (isDirectExecution(import.meta.url)) {
-  void createBasicAgent().run();
+  void createCustomAdapterAgent().run();
 }

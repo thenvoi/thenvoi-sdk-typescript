@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createLangGraphAgent, EchoLangGraph } from "../examples/langgraph-agent";
+import { createLangGraphAgent, EchoLangGraph } from "../examples/langgraph/langgraph-agent";
 
 describe("langgraph-agent example", () => {
   it("builds a LangGraph-based agent without side effects on import", () => {

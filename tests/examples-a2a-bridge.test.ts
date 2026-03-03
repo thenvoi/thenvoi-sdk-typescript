@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { createA2ABridgeAgent, A2AExampleRestApi } from "../examples/a2a-bridge-agent";
-import { createA2ABridgeAgentWithAuth } from "../examples/a2a-bridge-auth";
+import { createA2ABridgeAgent, A2AExampleRestApi } from "../examples/a2a-bridge/a2a-bridge-agent";
+import { createA2ABridgeAgentWithAuth } from "../examples/a2a-bridge/a2a-bridge-auth";
 
 describe("a2a bridge examples", () => {
   it("builds an A2A bridge agent without import-time side effects", () => {

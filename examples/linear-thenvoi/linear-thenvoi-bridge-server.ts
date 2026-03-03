@@ -13,7 +13,7 @@ import {
   handleAgentSessionEvent,
   type LinearThenvoiBridgeConfig,
   type RoomStrategy,
-} from "../src/index";
+} from "../../src/index";
 
 class LinearThenvoiBridgeRestApi implements RestApi {
   public async getAgentMe() {

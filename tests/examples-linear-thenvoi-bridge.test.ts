@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { createLinearThenvoiBridgeApp } from "../examples/linear-thenvoi-bridge-server";
-import { createLinearThenvoiOrchestratorAgent } from "../examples/linear-thenvoi-orchestrator-agent";
-import { LinearThenvoiExampleRestApi } from "../examples/linear-thenvoi-rest-stub";
+import { createLinearThenvoiBridgeApp } from "../examples/linear-thenvoi/linear-thenvoi-bridge-server";
+import { createLinearThenvoiOrchestratorAgent } from "../examples/linear-thenvoi/linear-thenvoi-orchestrator-agent";
+import { LinearThenvoiExampleRestApi } from "../examples/linear-thenvoi/linear-thenvoi-rest-stub";
 
 describe("linear thenvoi examples", () => {
   it("builds a bridge app without import-time side effects", () => {

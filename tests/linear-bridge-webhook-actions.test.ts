@@ -7,7 +7,7 @@ import {
   type SessionRoomRecord,
   type SessionRoomStore,
 } from "../src/index";
-import { LinearThenvoiExampleRestApi } from "../examples/linear-thenvoi-rest-stub";
+import { LinearThenvoiExampleRestApi } from "../examples/linear-thenvoi/linear-thenvoi-rest-stub";
 
 class MemorySessionRoomStore implements SessionRoomStore {
   private readonly records = new Map<string, SessionRoomRecord>();

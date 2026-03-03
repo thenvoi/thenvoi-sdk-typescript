@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 
-import { A2AGatewayAdapter, Agent, type RestApi } from "../src/index";
+import { A2AGatewayAdapter, Agent, type RestApi } from "../../src/index";
 
 function isDirectExecution(importMetaUrl: string): boolean {
   const entry = process.argv[1];

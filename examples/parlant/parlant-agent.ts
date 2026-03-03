@@ -1,13 +1,13 @@
 import { pathToFileURL } from "node:url";
 
-import { Agent, OpenAIAdapter, type RestApi } from "../src/index";
+import { Agent, ParlantAdapter, type RestApi } from "../../src/index";
 
-class OpenAIExampleRestApi implements RestApi {
+export class ParlantExampleRestApi implements RestApi {
   public async getAgentMe() {
     return {
-      id: "openai-agent",
-      name: "OpenAI Agent",
-      description: "OpenAI adapter example",
+      id: "agent-parlant",
+      name: "Parlant Agent",
+      description: "Thenvoi adapter backed by parlant-client",
     };
   }
 
@@ -61,27 +61,40 @@ function isDirectExecution(importMetaUrl: string): boolean {
   return importMetaUrl === pathToFileURL(entry).href;
 }
 
-interface OpenAIExampleOptions {
-  model?: string;
+export function createParlantAgent(options: {
+  environment: string;
+  agentId: string;
   apiKey?: string;
-}
-
-export function createOpenAIAgent(options: OpenAIExampleOptions = {}): Agent {
-  const adapter = new OpenAIAdapter({
-    openAIModel: options.model ?? "gpt-4o-mini",
+}): Agent {
+  const adapter = new ParlantAdapter({
+    environment: options.environment,
+    agentId: options.agentId,
     apiKey: options.apiKey,
   });
 
   return Agent.create({
     adapter,
-    agentId: "openai-agent",
+    agentId: "agent-parlant",
     apiKey: "api-key",
     linkOptions: {
-      restApi: new OpenAIExampleRestApi(),
+      restApi: new ParlantExampleRestApi(),
     },
   });
 }
 
 if (isDirectExecution(import.meta.url)) {
-  void createOpenAIAgent().run();
+  const environment = process.env.PARLANT_ENVIRONMENT;
+  const parlantAgentId = process.env.PARLANT_AGENT_ID;
+
+  if (!environment || !parlantAgentId) {
+    throw new Error(
+      "Set PARLANT_ENVIRONMENT and PARLANT_AGENT_ID to run this example.",
+    );
+  }
+
+  void createParlantAgent({
+    environment,
+    agentId: parlantAgentId,
+    apiKey: process.env.PARLANT_API_KEY,
+  }).run();
 }

@@ -7,7 +7,7 @@ import {
   GenericAdapter,
   type RestApi,
   postFinalResponseToLinearSession,
-} from "../src/index";
+} from "../../src/index";
 
 interface LinearContextMetadata {
   sessionId: string;

@@ -1,13 +1,13 @@
 import { pathToFileURL } from "node:url";
 
-import { Agent, GeminiAdapter, type RestApi } from "../src/index";
+import { Agent, CodexAdapter, type CodexAdapterConfig, type RestApi } from "../../src/index";
 
-class GeminiExampleRestApi implements RestApi {
+class CodexExampleRestApi implements RestApi {
   public async getAgentMe() {
     return {
-      id: "gemini-agent",
-      name: "Gemini Agent",
-      description: "Gemini adapter example",
+      id: "codex-agent",
+      name: "Codex Agent",
+      description: "Codex adapter example",
     };
   }
 
@@ -61,27 +61,38 @@ function isDirectExecution(importMetaUrl: string): boolean {
   return importMetaUrl === pathToFileURL(entry).href;
 }
 
-interface GeminiExampleOptions {
+interface CodexExampleOptions {
   model?: string;
-  apiKey?: string;
+  cwd?: string;
+  approvalPolicy?: CodexAdapterConfig["approvalPolicy"];
+  sandboxMode?: CodexAdapterConfig["sandboxMode"];
+  reasoningEffort?: CodexAdapterConfig["reasoningEffort"];
 }
 
-export function createGeminiAgent(options: GeminiExampleOptions = {}): Agent {
-  const adapter = new GeminiAdapter({
-    geminiModel: options.model ?? "gemini-2.5-flash",
-    apiKey: options.apiKey,
+export function createCodexAgent(options: CodexExampleOptions = {}): Agent {
+  const adapter = new CodexAdapter({
+    config: {
+      model: options.model ?? "gpt-5.3-codex",
+      cwd: options.cwd,
+      approvalPolicy: options.approvalPolicy ?? "never",
+      sandboxMode: options.sandboxMode ?? "workspace-write",
+      reasoningEffort: options.reasoningEffort,
+      enableExecutionReporting: true,
+      emitThoughtEvents: true,
+      enableLocalCommands: true,
+    },
   });
 
   return Agent.create({
     adapter,
-    agentId: "gemini-agent",
+    agentId: "codex-agent",
     apiKey: "api-key",
     linkOptions: {
-      restApi: new GeminiExampleRestApi(),
+      restApi: new CodexExampleRestApi(),
     },
   });
 }
 
 if (isDirectExecution(import.meta.url)) {
-  void createGeminiAgent().run();
+  void createCodexAgent().run();
 }

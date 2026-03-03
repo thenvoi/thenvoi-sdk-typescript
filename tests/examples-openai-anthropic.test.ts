@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { createAnthropicAgent } from "../examples/anthropic-agent";
-import { createGeminiAgent } from "../examples/gemini-agent";
-import { createOpenAIAgent } from "../examples/openai-agent";
+import { createAnthropicAgent } from "../examples/anthropic/anthropic-agent";
+import { createGeminiAgent } from "../examples/gemini/gemini-agent";
+import { createOpenAIAgent } from "../examples/openai/openai-agent";
 
 describe("openai/anthropic examples", () => {
   it("builds an OpenAI adapter agent without import-time side effects", () => {

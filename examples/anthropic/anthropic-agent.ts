@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 
-import { Agent, AnthropicAdapter, type RestApi } from "../src/index";
+import { Agent, AnthropicAdapter, type RestApi } from "../../src/index";
 
 class AnthropicExampleRestApi implements RestApi {
   public async getAgentMe() {

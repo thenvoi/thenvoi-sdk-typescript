@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 
-import { Agent, ClaudeSDKAdapter, type RestApi } from "../src/index";
+import { Agent, ClaudeSDKAdapter, type RestApi } from "../../src/index";
 
 class ClaudeSdkExampleRestApi implements RestApi {
   public async getAgentMe() {

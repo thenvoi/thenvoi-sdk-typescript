@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   A2AGatewayExampleRestApi,
   createA2AGatewayAgent,
-} from "../examples/a2a-gateway-agent";
+} from "../examples/a2a-gateway/a2a-gateway-agent";
 import {
   ParlantExampleRestApi,
   createParlantAgent,
-} from "../examples/parlant-agent";
+} from "../examples/parlant/parlant-agent";
 
 describe("gateway/parlant examples", () => {
   it("builds an A2A gateway agent without import-time side effects", () => {

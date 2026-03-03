@@ -50,13 +50,22 @@ pnpm test
 pnpm build
 ```
 
-## Example agents
+## Example folders
 
-- `examples/openai-agent.ts`
-- `examples/anthropic-agent.ts`
-- `examples/gemini-agent.ts`
-- `examples/claude-sdk-agent.ts`
-- `examples/codex-agent.ts`
+Each example lives in its own folder so you can copy that folder out and iterate on it.
+
+- `examples/basic/`
+- `examples/openai/`
+- `examples/anthropic/`
+- `examples/gemini/`
+- `examples/claude-sdk/`
+- `examples/codex/`
+- `examples/custom-adapter/`
+- `examples/langgraph/`
+- `examples/parlant/`
+- `examples/a2a-bridge/`
+- `examples/a2a-gateway/`
+- `examples/linear-thenvoi/`
 
 ## Next adapter integration steps
 

@@ -14,11 +14,11 @@ Note: the SQLite mapping helper uses `node:sqlite`, which requires Node.js 22+.
 
 ## Files
 
-- `examples/linear-thenvoi-bridge-server.ts`
+- `examples/linear-thenvoi/linear-thenvoi-bridge-server.ts`
   Node/Express webhook server that maps Linear sessions to Thenvoi rooms.
-- `examples/linear-thenvoi-orchestrator-agent.ts`
+- `examples/linear-thenvoi/linear-thenvoi-orchestrator-agent.ts`
   Thenvoi-hosted orchestrator agent using `GenericAdapter`.
-- `examples/linear-thenvoi-rest-stub.ts`
+- `examples/linear-thenvoi/linear-thenvoi-rest-stub.ts`
   In-memory `RestApi` implementation used by the example.
 
 ## Run the bridge server example
@@ -27,7 +27,7 @@ Note: the SQLite mapping helper uses `node:sqlite`, which requires Node.js 22+.
 export LINEAR_ACCESS_TOKEN=lin_api_xxx
 export LINEAR_WEBHOOK_SECRET=your-webhook-secret
 export THENVOI_HOST_AGENT_HANDLE=linear-host
-pnpm tsx examples/linear-thenvoi-bridge-server.ts
+pnpm tsx examples/linear-thenvoi/linear-thenvoi-bridge-server.ts
 ```
 
 The direct run mode uses `LinearThenvoiExampleRestApi` (in-memory) for demonstration.
@@ -37,7 +37,7 @@ For production wiring, pass a real Thenvoi `RestApi` implementation into `create
 
 ```bash
 export LINEAR_ACCESS_TOKEN=lin_api_xxx
-pnpm tsx examples/linear-thenvoi-orchestrator-agent.ts
+pnpm tsx examples/linear-thenvoi/linear-thenvoi-orchestrator-agent.ts
 ```
 
 ## Room strategy

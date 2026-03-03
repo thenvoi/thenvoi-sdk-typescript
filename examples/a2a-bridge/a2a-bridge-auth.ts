@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 
-import { A2AAdapter, Agent, type RestApi } from "../src/index";
+import { A2AAdapter, Agent, type RestApi } from "../../src/index";
 
 function isDirectExecution(importMetaUrl: string): boolean {
   const entry = process.argv[1];
@@ -20,12 +20,12 @@ function requireA2ARemoteUrl(optionsRemoteUrl?: string): string {
   return remoteUrl;
 }
 
-export class A2AExampleRestApi implements RestApi {
+class A2AAuthExampleRestApi implements RestApi {
   public async getAgentMe() {
     return {
-      id: "agent-a2a",
-      name: "A2A Bridge Agent",
-      description: "Bridges Thenvoi chat to a remote A2A agent",
+      id: "agent-a2a-auth",
+      name: "A2A Bridge Agent (Auth)",
+      description: "Bridges Thenvoi chat to an authenticated A2A agent",
     };
   }
 
@@ -70,23 +70,34 @@ export class A2AExampleRestApi implements RestApi {
   }
 }
 
-export function createA2ABridgeAgent(options?: { remoteUrl?: string }): Agent {
+export function createA2ABridgeAgentWithAuth(options?: {
+  remoteUrl?: string;
+  apiKey?: string;
+  bearerToken?: string;
+}): Agent {
   const remoteUrl = requireA2ARemoteUrl(options?.remoteUrl);
+  const apiKey = options?.apiKey ?? process.env.A2A_API_KEY;
+  const bearerToken = options?.bearerToken ?? process.env.A2A_BEARER_TOKEN;
+
   const adapter = new A2AAdapter({
     remoteUrl,
+    auth: {
+      ...(apiKey ? { apiKey } : {}),
+      ...(bearerToken ? { bearerToken } : {}),
+    },
     streaming: true,
   });
 
   return Agent.create({
     adapter,
-    agentId: "agent-a2a",
+    agentId: "agent-a2a-auth",
     apiKey: "api-key",
     linkOptions: {
-      restApi: new A2AExampleRestApi(),
+      restApi: new A2AAuthExampleRestApi(),
     },
   });
 }
 
 if (isDirectExecution(import.meta.url)) {
-  void createA2ABridgeAgent().run();
+  void createA2ABridgeAgentWithAuth().run();
 }

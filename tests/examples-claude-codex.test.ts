@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { createClaudeSdkAgent } from "../examples/claude-sdk-agent";
-import { createCodexAgent } from "../examples/codex-agent";
+import { createClaudeSdkAgent } from "../examples/claude-sdk/claude-sdk-agent";
+import { createCodexAgent } from "../examples/codex/codex-agent";
 
 describe("claude/codex examples", () => {
   it("builds a Claude SDK adapter agent without import-time side effects", () => {

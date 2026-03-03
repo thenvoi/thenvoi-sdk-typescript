@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 
-import { Agent, LangGraphAdapter, type LangGraphGraph, type RestApi } from "../src/index";
+import { Agent, LangGraphAdapter, type LangGraphGraph, type RestApi } from "../../src/index";
 
 class LangGraphExampleRestApi implements RestApi {
   public async getAgentMe() {

@@ -1,13 +1,13 @@
 import { pathToFileURL } from "node:url";
 
-import { Agent, CodexAdapter, type CodexAdapterConfig, type RestApi } from "../src/index";
+import { Agent, GeminiAdapter, type RestApi } from "../../src/index";
 
-class CodexExampleRestApi implements RestApi {
+class GeminiExampleRestApi implements RestApi {
   public async getAgentMe() {
     return {
-      id: "codex-agent",
-      name: "Codex Agent",
-      description: "Codex adapter example",
+      id: "gemini-agent",
+      name: "Gemini Agent",
+      description: "Gemini adapter example",
     };
   }
 
@@ -61,38 +61,27 @@ function isDirectExecution(importMetaUrl: string): boolean {
   return importMetaUrl === pathToFileURL(entry).href;
 }
 
-interface CodexExampleOptions {
+interface GeminiExampleOptions {
   model?: string;
-  cwd?: string;
-  approvalPolicy?: CodexAdapterConfig["approvalPolicy"];
-  sandboxMode?: CodexAdapterConfig["sandboxMode"];
-  reasoningEffort?: CodexAdapterConfig["reasoningEffort"];
+  apiKey?: string;
 }
 
-export function createCodexAgent(options: CodexExampleOptions = {}): Agent {
-  const adapter = new CodexAdapter({
-    config: {
-      model: options.model ?? "gpt-5.3-codex",
-      cwd: options.cwd,
-      approvalPolicy: options.approvalPolicy ?? "never",
-      sandboxMode: options.sandboxMode ?? "workspace-write",
-      reasoningEffort: options.reasoningEffort,
-      enableExecutionReporting: true,
-      emitThoughtEvents: true,
-      enableLocalCommands: true,
-    },
+export function createGeminiAgent(options: GeminiExampleOptions = {}): Agent {
+  const adapter = new GeminiAdapter({
+    geminiModel: options.model ?? "gemini-2.5-flash",
+    apiKey: options.apiKey,
   });
 
   return Agent.create({
     adapter,
-    agentId: "codex-agent",
+    agentId: "gemini-agent",
     apiKey: "api-key",
     linkOptions: {
-      restApi: new CodexExampleRestApi(),
+      restApi: new GeminiExampleRestApi(),
     },
   });
 }
 
 if (isDirectExecution(import.meta.url)) {
-  void createCodexAgent().run();
+  void createGeminiAgent().run();
 }
