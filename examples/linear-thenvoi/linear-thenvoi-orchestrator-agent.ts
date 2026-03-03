@@ -117,7 +117,7 @@ export function createLinearThenvoiOrchestratorAgent(
     const specialistHandles = dedupeHandles([
       ...defaultSpecialists,
       ...extractMentionHandles(message.content),
-    ]).filter((handle) => handle !== normalizeHandle(options?.hostHandle ?? "linear-host"));
+    ]).filter((handle) => handle !== stripHandlePrefix(options?.hostHandle ?? "linear-host"));
 
     for (const specialistHandle of specialistHandles) {
       try {
@@ -197,7 +197,7 @@ function buildFinalResponse(input: {
     ? ` Specialists involved: ${input.specialistHandles.map((handle) => `@${handle}`).join(", ")}.`
     : "";
 
-  return `@${normalizeHandle(input.hostHandle)} completed orchestration for ${scope}.${specialists}\n\nSummary:\n${snippet}`;
+  return `@${stripHandlePrefix(input.hostHandle)} completed orchestration for ${scope}.${specialists}\n\nSummary:\n${snippet}`;
 }
 
 function extractMentionHandles(content: string): string[] {
@@ -221,7 +221,7 @@ function dedupeHandles(handles: string[]): string[] {
   const seen = new Set<string>();
 
   for (const handle of handles) {
-    const normalized = normalizeHandle(handle);
+    const normalized = stripHandlePrefix(handle);
     if (!normalized || seen.has(normalized)) {
       continue;
     }
@@ -233,7 +233,7 @@ function dedupeHandles(handles: string[]): string[] {
   return unique;
 }
 
-function normalizeHandle(handle: string): string {
+function stripHandlePrefix(handle: string): string {
   return handle.trim().replace(/^@+/, "").toLowerCase();
 }
 

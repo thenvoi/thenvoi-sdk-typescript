@@ -10,6 +10,7 @@ export interface ToolResult {
   toolCallId: string;
   name: string;
   output: unknown;
+  isError?: boolean;
 }
 
 export interface ToolCallingResponse {

@@ -1,4 +1,4 @@
-export function normalizeHandle(handle: string): string {
+export function stripHandlePrefix(handle: string): string {
   return handle.trim().replace(/^@+/, "").toLowerCase();
 }
 
@@ -7,7 +7,7 @@ export function dedupeHandles(handles: Iterable<string>): string[] {
   const seen = new Set<string>();
 
   for (const handle of handles) {
-    const normalized = normalizeHandle(handle);
+    const normalized = stripHandlePrefix(handle);
     if (!normalized || seen.has(normalized)) {
       continue;
     }

@@ -5,6 +5,7 @@ import { UnsupportedFeatureError } from "../../core/errors";
 import type { MessagingTools } from "../../contracts/protocols";
 import type { ChatMessageMention } from "../../client/rest/types";
 import type { PlatformMessage } from "../../runtime/types";
+import { asNonEmptyString } from "../shared/coercion";
 import { GatewayHistoryConverter } from "./history";
 import { createGatewayServer } from "./server";
 import { buildStatusEvent } from "./statusEvent";
@@ -419,14 +420,14 @@ class AsyncEventQueue<T> {
 }
 
 function toGatewayPeer(value: Record<string, unknown>): GatewayPeer | null {
-  const id = asString(value.id);
+  const id = asNonEmptyString(value.id);
   if (!id) {
     return null;
   }
 
-  const name = asString(value.name) ?? asString(value.handle) ?? id;
-  const description = asString(value.description) ?? "";
-  const handle = asString(value.handle);
+  const name = asNonEmptyString(value.name) ?? asNonEmptyString(value.handle) ?? id;
+  const description = asNonEmptyString(value.description) ?? "";
+  const handle = asNonEmptyString(value.handle);
 
   return {
     id,
@@ -524,17 +525,17 @@ function shouldRouteToPendingTask(
   pending: PendingTaskRecord,
 ): boolean {
   const metadata = message.metadata;
-  const gatewayTaskId = asString(metadata.gateway_task_id);
+  const gatewayTaskId = asNonEmptyString(metadata.gateway_task_id);
   if (gatewayTaskId) {
     return gatewayTaskId === pending.taskId;
   }
 
-  const gatewayContextId = asString(metadata.gateway_context_id);
+  const gatewayContextId = asNonEmptyString(metadata.gateway_context_id);
   if (gatewayContextId && gatewayContextId !== pending.contextId) {
     return false;
   }
 
-  const gatewayPeerId = asString(metadata.gateway_peer_id);
+  const gatewayPeerId = asNonEmptyString(metadata.gateway_peer_id);
   if (gatewayPeerId) {
     return gatewayPeerId === pending.peerId;
   }
@@ -565,13 +566,4 @@ function extractMessageText(message: GatewayA2AMessage): string | null {
   }
 
   return chunks.join("\n");
-}
-
-function asString(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
 }

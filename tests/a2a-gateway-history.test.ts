@@ -38,8 +38,7 @@ describe("GatewayHistoryConverter", () => {
     expect(state.contextToRoom).toEqual({
       "ctx-1": "room-1",
     });
-    expect(state.roomParticipants["room-1"]).toBeInstanceOf(Set);
-    expect([...state.roomParticipants["room-1"]]).toEqual([
+    expect(state.roomParticipants["room-1"]).toEqual([
       "peer-1",
       "peer-2",
     ]);

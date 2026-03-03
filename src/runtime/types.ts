@@ -64,7 +64,7 @@ export const SYNTHETIC_SENDER_TYPE = "System";
 export const SYNTHETIC_CONTACT_EVENTS_SENDER_ID = "contact-events";
 export const SYNTHETIC_CONTACT_EVENTS_SENDER_NAME = "Contact Events";
 
-export function normalizeHandle(handle: string | null | undefined): string | null {
+export function ensureHandlePrefix(handle: string | null | undefined): string | null {
   if (!handle) {
     return null;
   }

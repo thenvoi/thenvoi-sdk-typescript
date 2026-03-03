@@ -39,9 +39,14 @@ export class GatewayHistoryConverter
       roomParticipants.set(roomId, participants);
     }
 
+    const serializedParticipants: Record<string, string[]> = {};
+    for (const [roomId, participants] of roomParticipants) {
+      serializedParticipants[roomId] = [...participants];
+    }
+
     return {
       contextToRoom,
-      roomParticipants: Object.fromEntries(roomParticipants.entries()),
+      roomParticipants: serializedParticipants,
     };
   }
 }

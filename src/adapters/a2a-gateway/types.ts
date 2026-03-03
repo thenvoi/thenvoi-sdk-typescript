@@ -70,7 +70,7 @@ export interface GatewayPeer {
 
 export interface GatewaySessionState {
   contextToRoom: Record<string, string>;
-  roomParticipants: Record<string, Set<string>>;
+  roomParticipants: Record<string, string[]>;
 }
 
 export interface PendingA2ATask {

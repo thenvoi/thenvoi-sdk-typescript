@@ -4,12 +4,11 @@ import type {
   ToolCallingModelRequest,
   ToolCallingResponse,
 } from "../tool-calling";
+import { toDisplayText, toWireString } from "../shared/coercion";
 import {
   ensureToolCalls,
   mapConversationMessages,
   normalizeConversationRole,
-  toDisplayText,
-  toWireString,
 } from "../tool-calling/valueUtils";
 
 interface OpenAIChatCompletionResponseLike {

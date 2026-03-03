@@ -56,7 +56,7 @@ export {
   SYNTHETIC_SENDER_TYPE,
   SYNTHETIC_CONTACT_EVENTS_SENDER_ID,
   SYNTHETIC_CONTACT_EVENTS_SENDER_NAME,
-  normalizeHandle,
+  ensureHandlePrefix,
 } from "./runtime/types";
 export type { StreamingTransport } from "./platform/streaming/transport";
 export type {

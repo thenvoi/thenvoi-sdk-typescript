@@ -3,14 +3,12 @@ import type {
   ToolCallingModel,
   ToolCallingModelRequest,
   ToolCallingResponse,
-  ToolResult,
 } from "../tool-calling";
+import { toDisplayText, toWireString } from "../shared/coercion";
 import {
   ensureToolCalls,
   mapConversationMessages,
   normalizeConversationRole,
-  toDisplayText,
-  toWireString,
 } from "../tool-calling/valueUtils";
 
 interface AnthropicMessageResponseLike {
@@ -95,7 +93,7 @@ function toAnthropicMessages(
     type: "tool_result",
     tool_use_id: result.toolCallId,
     content: serializeToolOutput(result.output),
-    is_error: isToolError(result),
+    is_error: result.isError ?? false,
   }));
 
   messages.push({
@@ -176,14 +174,6 @@ function parseAnthropicResponse(
 
 function serializeToolOutput(output: unknown): string {
   return toWireString(output);
-}
-
-function isToolError(result: ToolResult): boolean {
-  if (typeof result.output === "string") {
-    return result.output.toLowerCase().startsWith("error");
-  }
-
-  return false;
 }
 
 async function loadAnthropicClientFactory(): Promise<AnthropicClientFactory> {

@@ -5,11 +5,10 @@ import type {
   ToolCallingResponse,
   ToolResult,
 } from "../tool-calling";
+import { toDisplayText, toWireString } from "../shared/coercion";
 import {
   ensureToolCalls,
   normalizeConversationRole,
-  toDisplayText,
-  toWireString,
 } from "../tool-calling/valueUtils";
 
 interface GeminiGenerateResponseLike {
@@ -105,9 +104,15 @@ export class GeminiToolCallingModel implements ToolCallingModel {
     }
 
     if ((request.toolResults?.length ?? 0) > 0) {
+      const partFromCall = this.createPartFromFunctionCall;
+      const partFromResponse = this.createPartFromFunctionResponse;
+      if (!partFromCall || !partFromResponse) {
+        throw new Error("Part factories not initialized. Call ensurePartFactories() first.");
+      }
+
       const toolCalls = ensureToolCalls(request);
       const modelParts = toolCalls.map((call) =>
-        this.createPartFromFunctionCall!(call.name, call.input),
+        partFromCall(call.name, call.input),
       );
       contents.push({
         role: "model",
@@ -115,7 +120,7 @@ export class GeminiToolCallingModel implements ToolCallingModel {
       });
 
       const resultParts = (request.toolResults ?? []).map((result) =>
-        this.createPartFromFunctionResponse!(
+        partFromResponse(
           result.toolCallId,
           result.name,
           asFunctionResponsePayload(result),

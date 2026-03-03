@@ -42,7 +42,7 @@ export interface CodexFactory {
 }
 
 export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools> {
-  private readonly config: CodexAdapterConfig;
+  private config: CodexAdapterConfig;
   private readonly factoryOverride?: CodexFactory;
   private codexClient: CodexClientLike | null = null;
   private readonly roomThreads = new Map<string, CodexThreadLike>();

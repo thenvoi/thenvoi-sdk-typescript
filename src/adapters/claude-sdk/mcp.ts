@@ -7,7 +7,7 @@ import {
 import { z, type ZodTypeAny } from "zod";
 
 import type { AdapterToolsProtocol } from "../../contracts/protocols";
-import { toWireString } from "../tool-calling/valueUtils";
+import { toWireString } from "../shared/coercion";
 import {
   BASE_TOOL_NAMES,
   MEMORY_TOOL_NAMES,

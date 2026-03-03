@@ -4,6 +4,7 @@ import type { ToolModelMessage } from "../../contracts/dtos";
 import type { HistoryProvider, PlatformMessage } from "../../runtime/types";
 import { formatHistoryForLlm } from "../../runtime/formatters";
 import type {
+  ToolCall,
   ToolCallingModel,
   ToolCallingModelRequest,
   ToolCallingResponse,
@@ -53,6 +54,9 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
 
     const messages = this.buildMessages(history, message, participantsMessage, contactsMessage);
 
+    const allToolCalls: ToolCall[] = [];
+    const allToolResults: ToolResult[] = [];
+
     let response = await this.model.complete({
       systemPrompt: this.systemPrompt,
       messages,
@@ -70,8 +74,11 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
         return;
       }
 
-      const toolResults: ToolResult[] = [];
-      for (const call of response.toolCalls ?? []) {
+      const roundToolCalls = response.toolCalls ?? [];
+      allToolCalls.push(...roundToolCalls);
+
+      const roundToolResults: ToolResult[] = [];
+      for (const call of roundToolCalls) {
         if (this.enableExecutionReporting) {
           try {
             await tools.sendEvent(
@@ -88,10 +95,12 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
         }
 
         const output = await tools.executeToolCall(call.name, call.input);
-        toolResults.push({
+        const isError = isToolOutputError(output);
+        roundToolResults.push({
           toolCallId: call.id,
           name: call.name,
           output,
+          isError,
         });
 
         if (this.enableExecutionReporting) {
@@ -110,12 +119,14 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
         }
       }
 
+      allToolResults.push(...roundToolResults);
+
       response = await this.model.complete({
         systemPrompt: this.systemPrompt,
         messages,
         tools: schemas,
-        toolCalls: response.toolCalls,
-        toolResults,
+        toolCalls: allToolCalls,
+        toolResults: allToolResults,
       });
     }
 
@@ -151,6 +162,18 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
 
     return base;
   }
+}
+
+function isToolOutputError(output: unknown): boolean {
+  if (typeof output === "string") {
+    return output.toLowerCase().startsWith("error");
+  }
+
+  if (output && typeof output === "object" && "ok" in output) {
+    return (output as Record<string, unknown>).ok === false;
+  }
+
+  return false;
 }
 
 export function runSingleToolRound(

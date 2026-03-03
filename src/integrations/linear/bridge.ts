@@ -8,7 +8,7 @@ import type {
   LinearThenvoiBridgeConfig,
   SessionRoomRecord,
 } from "./types";
-import { dedupeHandles, normalizeHandle } from "./handles";
+import { dedupeHandles, stripHandlePrefix } from "./handles";
 
 interface NormalizedBridgeConfig {
   roomStrategy: "issue" | "session";
@@ -148,7 +148,7 @@ function normalizeConfig(config: LinearThenvoiBridgeConfig): NormalizedBridgeCon
   return {
     roomStrategy: config.roomStrategy ?? "issue",
     writebackMode: config.writebackMode ?? "final_only",
-    hostAgentHandle: normalizeHandle(config.hostAgentHandle),
+    hostAgentHandle: stripHandlePrefix(config.hostAgentHandle),
     defaultSpecialistHandles: dedupeHandles(config.defaultSpecialistHandles ?? []),
   };
 }
@@ -267,7 +267,7 @@ async function ensureRoomParticipants(input: {
   const existingParticipants = await input.thenvoiRest.listChatParticipants(input.roomId);
   const existingHandles = new Set(
     existingParticipants
-      .map((participant) => normalizeHandle(participant.handle ?? participant.name))
+      .map((participant) => stripHandlePrefix(participant.handle ?? participant.name))
       .filter((value): value is string => value.length > 0),
   );
 
@@ -333,7 +333,7 @@ async function resolveMentionTargets(input: {
 
   const participants = await input.thenvoiRest.listChatParticipants(input.roomId);
   for (const participant of participants) {
-    const normalized = normalizeHandle(participant.handle ?? participant.name);
+    const normalized = stripHandlePrefix(participant.handle ?? participant.name);
     if (!input.handles.includes(normalized)) {
       continue;
     }
@@ -374,8 +374,8 @@ async function lookupPeerIdsByHandle(
       }
 
       const handleCandidates = [
-        typeof peer.handle === "string" ? normalizeHandle(peer.handle) : "",
-        typeof peer.name === "string" ? normalizeHandle(peer.name) : "",
+        typeof peer.handle === "string" ? stripHandlePrefix(peer.handle) : "",
+        typeof peer.name === "string" ? stripHandlePrefix(peer.name) : "",
       ].filter((value): value is string => value.length > 0);
 
       for (const candidate of handleCandidates) {

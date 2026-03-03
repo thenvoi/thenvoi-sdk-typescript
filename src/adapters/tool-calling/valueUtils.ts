@@ -1,5 +1,4 @@
 import type { ToolCall, ToolCallingModelRequest } from "./types";
-import { toDisplayText, toWireString } from "../shared/coercion";
 
 export function ensureToolCalls(request: ToolCallingModelRequest): ToolCall[] {
   if ((request.toolCalls?.length ?? 0) > 0) {
@@ -12,8 +11,6 @@ export function ensureToolCalls(request: ToolCallingModelRequest): ToolCall[] {
     input: {},
   }));
 }
-
-export { toDisplayText, toWireString };
 
 export function normalizeConversationRole(
   value: unknown,

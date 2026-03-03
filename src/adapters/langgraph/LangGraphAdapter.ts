@@ -2,7 +2,7 @@ import { SimpleAdapter } from "../../core/simpleAdapter";
 import type { AdapterToolsProtocol } from "../../contracts/protocols";
 import { renderSystemPrompt } from "../../runtime/prompts";
 import type { HistoryProvider, PlatformMessage } from "../../runtime/types";
-import { asErrorMessage } from "../shared/coercion";
+import { asErrorMessage, asRecord } from "../shared/coercion";
 
 type LangGraphRole = "system" | "user" | "assistant";
 type LangGraphTupleMessage = [LangGraphRole, string];
@@ -370,14 +370,6 @@ function asMessageContent(value: unknown): string | null {
   }
 
   return null;
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  if (value && typeof value === "object") {
-    return value as Record<string, unknown>;
-  }
-
-  return {};
 }
 
 let langGraphSdkPromise: Promise<LangGraphSdk> | null = null;

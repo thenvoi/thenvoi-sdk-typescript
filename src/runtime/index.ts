@@ -12,7 +12,7 @@ export {
   SYNTHETIC_SENDER_TYPE,
   SYNTHETIC_CONTACT_EVENTS_SENDER_ID,
   SYNTHETIC_CONTACT_EVENTS_SENDER_NAME,
-  normalizeHandle,
+  ensureHandlePrefix,
 } from "./types";
 
 export { AgentRuntime } from "./AgentRuntime";

@@ -1,4 +1,5 @@
 import type { HistoryConverter } from "../../contracts/protocols";
+import { asNonEmptyString } from "../shared/coercion";
 
 export interface ParlantMessage {
   role: "user" | "assistant";
@@ -16,26 +17,26 @@ export class ParlantHistoryConverter
     const messages: ParlantMessages = [];
 
     for (const entry of raw) {
-      const messageType = asString(entry.message_type) ?? "text";
+      const messageType = asNonEmptyString(entry.message_type) ?? "text";
       if (messageType !== "text") {
         continue;
       }
 
-      const content = asString(entry.content);
+      const content = asNonEmptyString(entry.content);
       if (!content) {
         continue;
       }
 
       const sender =
-        asString(entry.sender_name) ??
-        asString(entry.senderName) ??
+        asNonEmptyString(entry.sender_name) ??
+        asNonEmptyString(entry.senderName) ??
         "";
       const senderType =
-        asString(entry.sender_type) ??
-        asString(entry.senderType) ??
+        asNonEmptyString(entry.sender_type) ??
+        asNonEmptyString(entry.senderType) ??
         "User";
       const role =
-        (asString(entry.role) ?? "user").toLowerCase() === "assistant"
+        (asNonEmptyString(entry.role) ?? "user").toLowerCase() === "assistant"
           ? "assistant"
           : "user";
 
@@ -59,13 +60,4 @@ export class ParlantHistoryConverter
 
     return messages;
   }
-}
-
-function asString(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
 }

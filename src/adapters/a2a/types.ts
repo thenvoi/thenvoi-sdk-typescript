@@ -1,4 +1,5 @@
 import type { HistoryConverter } from "../../contracts/protocols";
+import { asNonEmptyString } from "../shared/coercion";
 import { findLatestTaskMetadata } from "../shared/history";
 
 export interface A2AAuth {
@@ -37,9 +38,9 @@ export class A2AHistoryConverter implements HistoryConverter<A2ASessionState> {
     );
     if (metadata) {
       return {
-        contextId: asNullableString(metadata.a2a_context_id),
-        taskId: asNullableString(metadata.a2a_task_id),
-        taskState: asNullableString(metadata.a2a_task_state),
+        contextId: asNonEmptyString(metadata.a2a_context_id),
+        taskId: asNonEmptyString(metadata.a2a_task_id),
+        taskState: asNonEmptyString(metadata.a2a_task_state),
       };
     }
 
@@ -49,12 +50,4 @@ export class A2AHistoryConverter implements HistoryConverter<A2ASessionState> {
       taskState: null,
     };
   }
-}
-
-function asNullableString(value: unknown): string | null {
-  if (typeof value !== "string" || value.length === 0) {
-    return null;
-  }
-
-  return value;
 }

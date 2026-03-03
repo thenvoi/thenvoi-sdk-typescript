@@ -1,4 +1,5 @@
-import { execSync } from "node:child_process";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 
 import { describe, expect, expectTypeOf, it } from "vitest";
 
@@ -40,10 +41,34 @@ describe("contracts/protocols", () => {
   });
 
   it("keeps contracts/protocols as the single import surface", () => {
-    const output = execSync(
-      "rg -n \"core/protocols\" src || true",
-      { encoding: "utf8" },
-    ).trim();
-    expect(output).toBe("");
+    const srcDir = join(__dirname, "..", "src");
+    const violations: string[] = [];
+
+    function walkDir(dir: string): void {
+      for (const entry of readdirSync(dir)) {
+        const fullPath = join(dir, entry);
+        const stat = statSync(fullPath);
+        if (stat.isDirectory()) {
+          walkDir(fullPath);
+          continue;
+        }
+
+        if (!entry.endsWith(".ts") && !entry.endsWith(".tsx")) {
+          continue;
+        }
+
+        const content = readFileSync(fullPath, "utf8");
+        const lines = content.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].includes("core/protocols")) {
+            const relativePath = fullPath.replace(srcDir + "/", "");
+            violations.push(`${relativePath}:${i + 1}: ${lines[i].trim()}`);
+          }
+        }
+      }
+    }
+
+    walkDir(srcDir);
+    expect(violations).toEqual([]);
   });
 });
