@@ -3,6 +3,9 @@ import type { AdapterToolsProtocol, AgentToolsCapabilities } from "../contracts/
 import type { MetadataMap, ParticipantRecord } from "../contracts/dtos";
 import type { PlatformMessage } from "./types";
 import { AgentTools } from "./tools/AgentTools";
+import { MessageRetryTracker } from "./retryTracker";
+
+export type ExecutionState = "starting" | "idle" | "processing";
 
 interface ExecutionContextLink {
   rest: AgentToolsRestApi;
@@ -13,6 +16,7 @@ interface ExecutionContextOptions {
   roomId: string;
   link: ExecutionContextLink;
   maxContextMessages: number;
+  maxMessageRetries?: number;
 }
 
 export class ExecutionContext {
@@ -27,10 +31,16 @@ export class ExecutionContext {
   private contactsMessage: string | null = null;
   private bootstrap = true;
 
+  private _state: ExecutionState = "starting";
+  private readonly retryTrackerInstance: MessageRetryTracker;
+  private _llmInitialized = false;
+  private readonly _pendingSystemMessages: string[] = [];
+
   public constructor(options: ExecutionContextOptions) {
     this.roomId = options.roomId;
     this.link = options.link;
     this.maxContextMessages = options.maxContextMessages;
+    this.retryTrackerInstance = new MessageRetryTracker(options.maxMessageRetries ?? 1);
     this.tools = new AgentTools({
       roomId: this.roomId,
       rest: this.link.rest,
@@ -38,6 +48,36 @@ export class ExecutionContext {
       capabilities: this.link.capabilities,
     });
     this.adapterTools = this.tools.getAdapterTools();
+  }
+
+  public get state(): ExecutionState {
+    return this._state;
+  }
+
+  public setState(state: ExecutionState): void {
+    this._state = state;
+  }
+
+  public getRetryTracker(): MessageRetryTracker {
+    return this.retryTrackerInstance;
+  }
+
+  public get isLlmInitialized(): boolean {
+    return this._llmInitialized;
+  }
+
+  public markLlmInitialized(): void {
+    this._llmInitialized = true;
+  }
+
+  public injectSystemMessage(message: string): void {
+    this._pendingSystemMessages.push(message);
+  }
+
+  public consumeSystemMessages(): string[] {
+    const copy = [...this._pendingSystemMessages];
+    this._pendingSystemMessages.length = 0;
+    return copy;
   }
 
   public getTools(): AdapterToolsProtocol {
@@ -106,6 +146,11 @@ export class ExecutionContext {
   }
 
   public consumeBootstrap(): boolean {
+    if (!this._llmInitialized) {
+      this._llmInitialized = true;
+      this.bootstrap = false;
+      return true;
+    }
     const value = this.bootstrap;
     this.bootstrap = false;
     return value;

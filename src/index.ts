@@ -46,6 +46,7 @@ export type {
   AgentInput,
   ContactEventConfig,
   ContactEventStrategy,
+  ContactEventCallback,
   ConversationContext,
   HistoryProvider,
   MessageHandler,
@@ -58,6 +59,10 @@ export {
   SYNTHETIC_CONTACT_EVENTS_SENDER_NAME,
   ensureHandlePrefix,
 } from "./runtime/types";
+export { ContactEventHandler, HUB_ROOM_SYSTEM_PROMPT } from "./runtime/ContactEventHandler";
+export type { ExecutionState } from "./runtime/ExecutionContext";
+export { FakeAgentTools } from "./testing";
+export { loadAgentConfig, type AgentConfigResult } from "./config";
 export type { StreamingTransport } from "./platform/streaming/transport";
 export type {
   RestApi,

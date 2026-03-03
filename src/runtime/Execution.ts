@@ -20,10 +20,12 @@ export class Execution {
   public enqueue(event: PlatformEvent): Promise<void> {
     const run = this.queue.catch(() => undefined).then(async () => {
       this.inFlight += 1;
+      this.context.setState("processing");
       try {
         await this.onExecute(this.context, event);
       } finally {
         this.inFlight -= 1;
+        this.context.setState("idle");
       }
     });
 

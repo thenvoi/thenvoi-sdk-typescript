@@ -19,10 +19,16 @@ export interface SessionConfig {
 
 export type ContactEventStrategy = "disabled" | "callback" | "hub_room";
 
+export type ContactEventCallback = (
+  event: import("../platform/events").ContactEvent,
+  tools: AdapterToolsProtocol,
+) => Promise<void>;
+
 export interface ContactEventConfig {
   strategy?: ContactEventStrategy;
   hubTaskId?: string;
   broadcastChanges?: boolean;
+  onEvent?: ContactEventCallback;
 }
 
 export type PlatformMessage = PlatformMessageLike;

@@ -6,6 +6,7 @@ export type {
   MessageHandler,
   ContactEventConfig,
   ContactEventStrategy,
+  ContactEventCallback,
 } from "./types";
 export {
   HistoryProvider,
@@ -14,6 +15,9 @@ export {
   SYNTHETIC_CONTACT_EVENTS_SENDER_NAME,
   ensureHandlePrefix,
 } from "./types";
+
+export { ContactEventHandler, HUB_ROOM_SYSTEM_PROMPT } from "./ContactEventHandler";
+export type { ExecutionState } from "./ExecutionContext";
 
 export { AgentRuntime } from "./AgentRuntime";
 export { Execution } from "./Execution";

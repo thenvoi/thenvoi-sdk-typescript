@@ -174,7 +174,7 @@ export class AgentRuntime {
     }
   }
 
-  private getOrCreateExecution(roomId: string): Execution {
+  public getOrCreateExecution(roomId: string): Execution {
     const existing = this.executions.get(roomId);
     if (existing) {
       return existing;

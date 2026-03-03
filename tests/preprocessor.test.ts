@@ -17,40 +17,43 @@ class FakeTransport implements StreamingTransport {
   }
 }
 
+function makeEvent(senderId = "user-1") {
+  return {
+    type: "message_created" as const,
+    roomId: "room-1",
+    payload: {
+      id: "m1",
+      content: "hello",
+      message_type: "text",
+      sender_id: senderId,
+      sender_type: "User",
+      sender_name: "Jane",
+      inserted_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+  };
+}
+
+function makeContext() {
+  const link = new ThenvoiLink({
+    agentId: "a1",
+    apiKey: "k",
+    restApi: new FakeRestApi(),
+    transport: new FakeTransport(),
+  });
+
+  return new ExecutionContext({
+    roomId: "room-1",
+    link,
+    maxContextMessages: 50,
+  });
+}
+
 describe("DefaultPreprocessor", () => {
   it("converts message_created events into AgentInput", async () => {
-    const link = new ThenvoiLink({
-      agentId: "a1",
-      apiKey: "k",
-      restApi: new FakeRestApi(),
-      transport: new FakeTransport(),
-    });
-
-    const context = new ExecutionContext({
-      roomId: "room-1",
-      link,
-      maxContextMessages: 50,
-    });
-
+    const context = makeContext();
     const preprocessor = new DefaultPreprocessor();
-    const input = await preprocessor.process(
-      context,
-      {
-        type: "message_created",
-        roomId: "room-1",
-        payload: {
-          id: "m1",
-          content: "hello",
-          message_type: "text",
-          sender_id: "user-1",
-          sender_type: "User",
-          sender_name: "Jane",
-          inserted_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-      },
-      "a1",
-    );
+    const input = await preprocessor.process(context, makeEvent(), "a1");
 
     expect(input).not.toBeNull();
     expect(input?.message.content).toBe("hello");
@@ -58,35 +61,65 @@ describe("DefaultPreprocessor", () => {
   });
 
   it("skips self-authored messages", async () => {
-    const link = new ThenvoiLink({
-      agentId: "a1",
-      apiKey: "k",
-      restApi: new FakeRestApi(),
-      transport: new FakeTransport(),
-    });
-
-    const context = new ExecutionContext({ roomId: "room-1", link, maxContextMessages: 50 });
-
+    const context = makeContext();
     const preprocessor = new DefaultPreprocessor();
-    const result = await preprocessor.process(
-      context,
-      {
-        type: "message_created",
-        roomId: "room-1",
-        payload: {
-          id: "m1",
-          content: "hello",
-          message_type: "text",
-          sender_id: "a1",
-          sender_type: "Agent",
-          sender_name: "Agent",
-          inserted_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-      },
-      "a1",
-    );
+    const result = await preprocessor.process(context, makeEvent("a1"), "a1");
 
     expect(result).toBeNull();
+  });
+
+  it("uses isLlmInitialized for bootstrap detection", async () => {
+    const context = makeContext();
+    const preprocessor = new DefaultPreprocessor();
+
+    // First call: bootstrap
+    const first = await preprocessor.process(context, makeEvent(), "a1");
+    expect(first?.isSessionBootstrap).toBe(true);
+    expect(context.isLlmInitialized).toBe(true);
+
+    // Second call: no longer bootstrap
+    const second = await preprocessor.process(
+      context,
+      { ...makeEvent(), payload: { ...makeEvent().payload, id: "m2" } },
+      "a1",
+    );
+    expect(second?.isSessionBootstrap).toBe(false);
+  });
+
+  it("drains system messages into contactsMessage", async () => {
+    const context = makeContext();
+    const preprocessor = new DefaultPreprocessor();
+
+    context.injectSystemMessage("Contact added: Alice");
+    context.injectSystemMessage("Contact removed: Bob");
+
+    const input = await preprocessor.process(context, makeEvent(), "a1");
+    expect(input?.contactsMessage).toBe("Contact added: Alice\nContact removed: Bob");
+
+    // System messages should be drained
+    expect(context.consumeSystemMessages()).toEqual([]);
+  });
+
+  it("falls back to legacy contactsMessage when no system messages", async () => {
+    const context = makeContext();
+    const preprocessor = new DefaultPreprocessor();
+
+    context.setContactsMessage("legacy contact info");
+
+    const input = await preprocessor.process(context, makeEvent(), "a1");
+    expect(input?.contactsMessage).toBe("legacy contact info");
+  });
+
+  it("prefers system messages over legacy contactsMessage", async () => {
+    const context = makeContext();
+    const preprocessor = new DefaultPreprocessor();
+
+    context.setContactsMessage("legacy contact info");
+    context.injectSystemMessage("system msg");
+
+    const input = await preprocessor.process(context, makeEvent(), "a1");
+    expect(input?.contactsMessage).toBe("system msg");
+    // Legacy message was NOT consumed since system messages took priority
+    expect(context.consumeContactsMessage()).toBe("legacy contact info");
   });
 });

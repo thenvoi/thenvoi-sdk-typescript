@@ -43,13 +43,27 @@ export class DefaultPreprocessor implements Preprocessor<PlatformEvent> {
 
     context.recordMessage(message);
 
+    const isSessionBootstrap = !context.isLlmInitialized;
+    if (isSessionBootstrap) {
+      context.markLlmInitialized();
+    }
+
+    // Drain system messages; fall back to legacy contactsMessage for backward compat
+    const systemMessages = context.consumeSystemMessages();
+    let contactsMessage: string | null;
+    if (systemMessages.length > 0) {
+      contactsMessage = systemMessages.join("\n");
+    } else {
+      contactsMessage = context.consumeContactsMessage();
+    }
+
     return {
       message,
       tools: context.getTools(),
       history: new HistoryProvider(context.getRawHistory()),
       participantsMessage: context.consumeParticipantsMessage(),
-      contactsMessage: context.consumeContactsMessage(),
-      isSessionBootstrap: context.consumeBootstrap(),
+      contactsMessage,
+      isSessionBootstrap,
       roomId: context.roomId,
     };
   }

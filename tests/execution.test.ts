@@ -26,7 +26,7 @@ describe("Execution queue resilience", () => {
     let failFirst = true;
 
     const execution = new Execution({
-      context: {} as never,
+      context: { setState: () => {} } as never,
       onExecute: async (_context, event) => {
         processed.push(event.type);
         if (failFirst) {

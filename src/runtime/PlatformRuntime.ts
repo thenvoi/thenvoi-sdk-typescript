@@ -5,6 +5,7 @@ import { AgentRuntime } from "./AgentRuntime";
 import type { AgentConfig, ContactEventConfig, SessionConfig } from "./types";
 import { RuntimeStateError } from "../core/errors";
 import { DefaultPreprocessor } from "./preprocessing/DefaultPreprocessor";
+import { ContactEventHandler } from "./ContactEventHandler";
 import type { ExecutionContext } from "./ExecutionContext";
 
 export interface PlatformRuntimeOptions {
@@ -33,6 +34,7 @@ export class PlatformRuntime {
 
   private linkInstance?: ThenvoiLink;
   private runtime?: AgentRuntime;
+  private contactHandler?: ContactEventHandler;
   private _agentName = "";
   private _agentDescription = "";
   private contactsSubscribed = false;
@@ -111,6 +113,35 @@ export class PlatformRuntime {
     await this.initialize();
     await adapter.onStarted(this._agentName, this._agentDescription);
 
+    const strategy = this.contactConfig?.strategy ?? "disabled";
+    if (strategy !== "disabled") {
+      this.contactHandler = new ContactEventHandler({
+        config: this.contactConfig ?? { strategy: "disabled" },
+        rest: this.link.rest,
+        onBroadcast: (message) => {
+          const runtime = this.runtime;
+          if (!runtime) return;
+          for (const context of runtime.contextsList()) {
+            context.injectSystemMessage(message);
+          }
+        },
+        onHubEvent: async (roomId, event) => {
+          const runtime = this.runtime;
+          if (!runtime) return;
+          const execution = runtime.getOrCreateExecution(roomId);
+          await execution.enqueue(event);
+        },
+        onHubInit: async (roomId, systemPrompt) => {
+          const runtime = this.runtime;
+          if (!runtime) return;
+          const context = runtime.getContext(roomId);
+          if (context) {
+            context.injectSystemMessage(systemPrompt);
+          }
+        },
+      });
+    }
+
     this.runtime = new AgentRuntime({
       link: this.link,
       agentId: this._agentId,
@@ -132,6 +163,7 @@ export class PlatformRuntime {
 
     const graceful = await this.runtime.stop(timeoutMs);
     this.runtime = undefined;
+    this.contactHandler = undefined;
     this.contactsSubscribed = false;
     return graceful;
   }
@@ -158,6 +190,12 @@ export class PlatformRuntime {
   }
 
   private async handleContactEvent(event: ContactEvent): Promise<void> {
+    if (this.contactHandler) {
+      await this.contactHandler.handle(event);
+      return;
+    }
+
+    // Legacy fallback: broadcast only
     if (!this.contactConfig?.broadcastChanges) {
       return;
     }
@@ -169,7 +207,7 @@ export class PlatformRuntime {
 
     const message = this.formatContactBroadcast(event);
     for (const context of runtime.contextsList()) {
-      context.setContactsMessage(message);
+      context.injectSystemMessage(message);
     }
   }
 

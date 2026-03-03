@@ -137,6 +137,10 @@ export interface PreprocessorContext {
   consumeParticipantsMessage(): string | null;
   consumeContactsMessage(): string | null;
   consumeBootstrap(): boolean;
+  readonly isLlmInitialized: boolean;
+  markLlmInitialized(): void;
+  injectSystemMessage(message: string): void;
+  consumeSystemMessages(): string[];
 }
 
 export interface FrameworkAdapter {

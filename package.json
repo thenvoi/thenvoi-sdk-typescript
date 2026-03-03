@@ -34,11 +34,13 @@
     "@linear/sdk": "^76.0.0",
     "@openai/codex-sdk": "^0.107.0",
     "express": "^5.2.1",
+    "js-yaml": "^4.1.1",
     "phoenix": "^1.8.4",
     "zod": "^3.24.2"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.13.14",
     "@typescript-eslint/eslint-plugin": "^8.26.0",
     "@typescript-eslint/parser": "^8.26.0",
