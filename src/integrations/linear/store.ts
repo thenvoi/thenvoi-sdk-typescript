@@ -1,3 +1,4 @@
+import { UnsupportedFeatureError } from "../../core/errors";
 import type { SessionRoomRecord, SessionRoomStore } from "./types";
 
 type DatabaseSync = import("node:sqlite").DatabaseSync;
@@ -129,7 +130,7 @@ class SqliteSessionRoomStore implements SessionRoomStore {
 
   private async initialize(): Promise<DatabaseSync> {
     const module = await import("node:sqlite").catch((error: unknown) => {
-      throw new Error(
+      throw new UnsupportedFeatureError(
         `SQLite store requires node:sqlite (Node.js 22+). Original error: ${
           error instanceof Error ? error.message : String(error)
         }`,

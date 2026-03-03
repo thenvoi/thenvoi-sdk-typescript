@@ -1,3 +1,4 @@
+import { RuntimeStateError, UnsupportedFeatureError, ValidationError } from "../../core/errors";
 import { SimpleAdapter } from "../../core/simpleAdapter";
 import type { AdapterToolsProtocol } from "../../contracts/protocols";
 import { renderSystemPrompt } from "../../runtime/prompts";
@@ -72,7 +73,7 @@ export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
     super();
 
     if (!options.graph && !options.graphFactory && options.llm === undefined) {
-      throw new Error("LangGraphAdapter requires `llm`, `graph`, or `graphFactory`.");
+      throw new ValidationError("LangGraphAdapter requires `llm`, `graph`, or `graphFactory`.");
     }
 
     this.llm = options.llm;
@@ -171,10 +172,10 @@ export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
     }
 
     if (this.llm === undefined) {
-      throw new Error("LangGraphAdapter is missing an `llm` instance.");
+      throw new ValidationError("LangGraphAdapter is missing an `llm` instance.");
     }
     if (!sdk) {
-      throw new Error("LangGraphAdapter SDK failed to initialize.");
+      throw new RuntimeStateError("LangGraphAdapter SDK failed to initialize.");
     }
 
     return sdk.createReactAgent({
@@ -387,12 +388,12 @@ async function loadLangGraphSdk(): Promise<LangGraphSdk> {
       ]);
 
       if (typeof createReactAgent !== "function" || typeof tool !== "function") {
-        throw new Error("LangGraph SDK exports are unavailable.");
+        throw new UnsupportedFeatureError("LangGraph SDK exports are unavailable.");
       }
 
       return { createReactAgent, tool };
     } catch (error) {
-      throw new Error(
+      throw new UnsupportedFeatureError(
         `LangGraphAdapter requires @langchain/langgraph and @langchain/core. Install them with "pnpm add @langchain/langgraph @langchain/core". (${asErrorMessage(error)})`,
       );
     }

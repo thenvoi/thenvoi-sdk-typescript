@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import { UnsupportedFeatureError } from "../../core/errors";
 import { SimpleAdapter } from "../../core/simpleAdapter";
 import type { MessagingTools } from "../../contracts/protocols";
 import type { PlatformMessage } from "../../runtime/types";
@@ -544,7 +545,7 @@ async function loadDefaultA2AClientFactory(): Promise<A2AClientFactory> {
   try {
     module = (await import("@a2a-js/sdk/client")) as Record<string, unknown>;
   } catch (error) {
-    throw new Error(
+    throw new UnsupportedFeatureError(
       `A2AAdapter requires optional dependency @a2a-js/sdk. Install it with "pnpm add @a2a-js/sdk". (${asErrorMessage(error)})`,
     );
   }
@@ -562,7 +563,7 @@ async function loadDefaultA2AClientFactory(): Promise<A2AClientFactory> {
     | undefined;
 
   if (!ClientFactoryCtor || !JsonRpcTransportFactoryCtor || !RestTransportFactoryCtor) {
-    throw new Error("Failed to initialize A2A client: missing required exports from @a2a-js/sdk/client.");
+    throw new UnsupportedFeatureError("Failed to initialize A2A client: missing required exports from @a2a-js/sdk/client.");
   }
 
   return async ({ remoteUrl, authHeaders }) => {
@@ -581,7 +582,7 @@ function createAuthFetch(
   authHeaders: Record<string, string>,
 ): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {
   if (typeof globalThis.fetch !== "function") {
-    throw new Error("A2AAdapter requires global fetch support (Node.js 20+).");
+    throw new UnsupportedFeatureError("A2AAdapter requires global fetch support (Node.js 20+).");
   }
 
   const baseFetch = globalThis.fetch.bind(globalThis);

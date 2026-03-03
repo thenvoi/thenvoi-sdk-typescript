@@ -179,6 +179,8 @@ export {
   handleAgentSessionEvent,
   postFinalResponseToLinearSession,
   createSqliteSessionRoomStore,
+  stripHandlePrefix,
+  dedupeHandles,
 } from "./integrations/linear";
 export type {
   RoomStrategy,
