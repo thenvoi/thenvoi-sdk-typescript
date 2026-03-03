@@ -128,8 +128,7 @@ export class PlatformRuntime {
         onHubEvent: async (roomId, event) => {
           const runtime = this.runtime;
           if (!runtime) return;
-          const execution = runtime.getOrCreateExecution(roomId);
-          await execution.enqueue(event);
+          await runtime.enqueueEvent(roomId, event);
         },
         onHubInit: async (roomId, systemPrompt) => {
           const runtime = this.runtime;

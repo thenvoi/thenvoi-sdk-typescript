@@ -1,1 +1,1 @@
-export { FakeAgentTools } from "./FakeAgentTools";
+export { FakeAgentTools, type FakeAgentToolsOptions } from "./FakeAgentTools";

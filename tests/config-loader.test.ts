@@ -95,4 +95,34 @@ wsUrl: "wss://example.com"
     expect(result.apiKey).toBe("key-camel");
     expect(result.ws_url).toBe("wss://example.com");
   });
+
+  it("throws for non-string agent_id", () => {
+    const path = tmpFile(`
+agent_id: 123
+api_key: "key"
+`);
+    cleanup.push(path);
+
+    expect(() => loadAgentConfig(undefined, path)).toThrow("must be non-empty strings");
+  });
+
+  it("throws for empty string values", () => {
+    const path = tmpFile(`
+agent_id: ""
+api_key: "key"
+`);
+    cleanup.push(path);
+
+    expect(() => loadAgentConfig(undefined, path)).toThrow("Missing required fields");
+  });
+
+  it("throws for whitespace-only string values", () => {
+    const path = tmpFile(`
+agent_id: "  "
+api_key: "key"
+`);
+    cleanup.push(path);
+
+    expect(() => loadAgentConfig(undefined, path)).toThrow("must be non-empty strings");
+  });
 });

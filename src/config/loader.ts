@@ -71,6 +71,16 @@ export function loadAgentConfig(
 
   const { agent_id, api_key, ...rest } = section;
 
+  const invalid = REQUIRED_FIELDS.filter(
+    (field) => typeof section[field] !== "string" || (section[field] as string).trim() === "",
+  );
+  if (invalid.length > 0) {
+    const keyHint = agentKey ? ` under key "${agentKey}"` : "";
+    throw new ValidationError(
+      `Invalid fields${keyHint} in ${filePath}: ${invalid.join(", ")} must be non-empty strings`,
+    );
+  }
+
   return {
     agentId: agent_id as string,
     apiKey: api_key as string,

@@ -74,7 +74,7 @@ export class ContactEventHandler {
 
     // Cache request info for enriching updates
     if (event.type === "contact_request_received") {
-      this.requestCache.set(event.payload.id, {
+      this.cacheRequestInfo(event.payload.id, {
         fromHandle: event.payload.from_handle,
         fromName: event.payload.from_name,
         message: event.payload.message ?? null,
@@ -216,6 +216,16 @@ export class ContactEventHandler {
         return `[System]: Contact removed: ${event.payload.id}.`;
       default:
         return `[System]: Contact event: ${event.type}.`;
+    }
+  }
+
+  private cacheRequestInfo(id: string, info: RequestInfo): void {
+    this.requestCache.set(id, info);
+    if (this.requestCache.size > LRU_MAX_SIZE) {
+      const oldest = this.requestCache.keys().next().value;
+      if (oldest !== undefined) {
+        this.requestCache.delete(oldest);
+      }
     }
   }
 

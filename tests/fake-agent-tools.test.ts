@@ -82,6 +82,26 @@ describe("FakeAgentTools", () => {
     expect(await tools.lookupPeers()).toEqual({ data: [] });
   });
 
+  it("throws on configured failOn methods", async () => {
+    const tools = new FakeAgentTools({ failOn: ["sendMessage", "executeToolCall"] });
+
+    await expect(tools.sendMessage("hello")).rejects.toThrow("configured failure");
+    await expect(tools.executeToolCall("tool", {})).rejects.toThrow("configured failure");
+
+    // Other methods still work
+    await expect(tools.sendEvent("test", "thought")).resolves.toBeDefined();
+    expect(tools.messagesSent).toEqual([]); // Never recorded because it threw
+  });
+
+  it("uses custom error factory", async () => {
+    const tools = new FakeAgentTools({
+      failOn: ["sendMessage"],
+      errorFactory: (method) => new Error(`custom: ${String(method)}`),
+    });
+
+    await expect(tools.sendMessage("hello")).rejects.toThrow("custom: sendMessage");
+  });
+
   it("resets all tracked data", async () => {
     const tools = new FakeAgentTools();
 

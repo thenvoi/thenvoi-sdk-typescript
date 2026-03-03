@@ -174,7 +174,11 @@ export class AgentRuntime {
     }
   }
 
-  public getOrCreateExecution(roomId: string): Execution {
+  public async enqueueEvent(roomId: string, event: PlatformEvent): Promise<void> {
+    await this.getOrCreateExecution(roomId).enqueue(event);
+  }
+
+  private getOrCreateExecution(roomId: string): Execution {
     const existing = this.executions.get(roomId);
     if (existing) {
       return existing;
