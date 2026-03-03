@@ -1,0 +1,38 @@
+import { ToolCallingAdapter, type ToolCallingAdapterOptions } from "../tool-calling";
+import type { ToolCallingModel } from "../tool-calling";
+import {
+  GeminiToolCallingModel,
+  type GeminiClientFactory,
+} from "./model";
+
+export interface GeminiAdapterOptions
+  extends Omit<ToolCallingAdapterOptions, "toolFormat" | "model"> {
+  model?: ToolCallingModel;
+  geminiModel?: string;
+  apiKey?: string;
+  clientFactory?: GeminiClientFactory;
+}
+
+export class GeminiAdapter extends ToolCallingAdapter {
+  public constructor(options: GeminiAdapterOptions = {}) {
+    const {
+      model,
+      geminiModel,
+      apiKey,
+      clientFactory,
+      ...adapterOptions
+    } = options;
+
+    const resolvedModel = model ?? new GeminiToolCallingModel({
+      model: geminiModel ?? "gemini-2.5-flash",
+      apiKey,
+      clientFactory,
+    });
+
+    super({
+      ...adapterOptions,
+      model: resolvedModel,
+      toolFormat: "openai",
+    });
+  }
+}

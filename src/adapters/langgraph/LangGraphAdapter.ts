@@ -1,0 +1,410 @@
+import { SimpleAdapter } from "../../core/simpleAdapter";
+import type { AdapterToolsProtocol } from "../../contracts/protocols";
+import { renderSystemPrompt } from "../../runtime/prompts";
+import type { HistoryProvider, PlatformMessage } from "../../runtime/types";
+import { asErrorMessage } from "../shared/coercion";
+
+type LangGraphRole = "system" | "user" | "assistant";
+type LangGraphTupleMessage = [LangGraphRole, string];
+
+export interface LangGraphGraph {
+  invoke?(input: Record<string, unknown>, config?: Record<string, unknown>): Promise<unknown>;
+  streamEvents?(
+    input: Record<string, unknown>,
+    config?: Record<string, unknown>,
+    options?: Record<string, unknown>,
+  ): AsyncIterable<unknown>;
+}
+
+interface LangGraphToolLike {
+  name: string;
+  description: string;
+  schema: Record<string, unknown>;
+}
+
+interface LangGraphSdk {
+  createReactAgent: (params: {
+    llm: unknown;
+    tools: unknown[];
+    checkpointer?: unknown;
+    prompt?: string;
+  }) => LangGraphGraph;
+  tool: (
+    fn: (input: Record<string, unknown>) => Promise<string>,
+    fields: {
+      name: string;
+      description: string;
+      schema: Record<string, unknown>;
+    },
+  ) => unknown;
+}
+
+export interface LangGraphAdapterOptions {
+  llm?: unknown;
+  checkpointer?: unknown;
+  graph?: LangGraphGraph;
+  graphFactory?: (tools: unknown[]) => LangGraphGraph | Promise<LangGraphGraph>;
+  additionalTools?: unknown[];
+  systemPrompt?: string;
+  customSection?: string;
+  recursionLimit?: number;
+  maxHistoryMessages?: number;
+  emitExecutionEvents?: boolean;
+  includeMemoryTools?: boolean;
+}
+
+export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterToolsProtocol> {
+  private readonly llm?: unknown;
+  private readonly checkpointer?: unknown;
+  private readonly graph?: LangGraphGraph;
+  private readonly graphFactory?: (tools: unknown[]) => LangGraphGraph | Promise<LangGraphGraph>;
+  private readonly additionalTools: unknown[];
+  private readonly systemPromptOverride?: string;
+  private readonly customSection: string;
+  private readonly recursionLimit: number;
+  private readonly maxHistoryMessages: number;
+  private readonly emitExecutionEvents: boolean;
+  private readonly includeMemoryTools: boolean;
+  private renderedSystemPrompt = "";
+  private readonly bootstrappedRooms = new Set<string>();
+
+  public constructor(options: LangGraphAdapterOptions) {
+    super();
+
+    if (!options.graph && !options.graphFactory && options.llm === undefined) {
+      throw new Error("LangGraphAdapter requires `llm`, `graph`, or `graphFactory`.");
+    }
+
+    this.llm = options.llm;
+    this.checkpointer = options.checkpointer;
+    this.graph = options.graph;
+    this.graphFactory = options.graphFactory;
+    this.additionalTools = options.additionalTools ?? [];
+    this.systemPromptOverride = options.systemPrompt;
+    this.customSection = options.customSection ?? "";
+    this.recursionLimit = options.recursionLimit ?? 50;
+    this.maxHistoryMessages = options.maxHistoryMessages ?? 100;
+    this.emitExecutionEvents = options.emitExecutionEvents ?? true;
+    this.includeMemoryTools = options.includeMemoryTools ?? false;
+  }
+
+  public async onStarted(agentName: string, agentDescription: string): Promise<void> {
+    await super.onStarted(agentName, agentDescription);
+    this.renderedSystemPrompt =
+      this.systemPromptOverride ??
+      renderSystemPrompt({
+        agentName,
+        agentDescription,
+        customSection: this.customSection,
+      });
+  }
+
+  public async onMessage(
+    message: PlatformMessage,
+    tools: AdapterToolsProtocol,
+    history: HistoryProvider,
+    participantsMessage: string | null,
+    contactsMessage: string | null,
+    context: { isSessionBootstrap: boolean; roomId: string },
+  ): Promise<void> {
+    let sdk: LangGraphSdk | undefined;
+    let langGraphTools = [...this.additionalTools];
+    if (!this.graph || this.graphFactory) {
+      sdk = await loadLangGraphSdk();
+      langGraphTools = [
+        ...(await buildLangGraphTools({
+          sdk,
+          tools,
+          includeMemoryTools: this.includeMemoryTools,
+        })),
+        ...this.additionalTools,
+      ];
+    }
+
+    const graph = await this.resolveGraph(sdk, langGraphTools);
+
+    const messages = this.buildMessages(
+      history,
+      message,
+      participantsMessage,
+      contactsMessage,
+      context.isSessionBootstrap,
+      context.roomId,
+    );
+    const input = { messages };
+    const graphConfig = {
+      configurable: {
+        thread_id: context.roomId,
+      },
+      recursion_limit: this.recursionLimit,
+    };
+
+    if (this.emitExecutionEvents) {
+      await this.forwardStreamEvents(graph, input, graphConfig, tools);
+    }
+
+    if (!graph.invoke) {
+      return;
+    }
+
+    const result = await graph.invoke(input, graphConfig);
+    const text = extractAssistantText(result);
+    if (text) {
+      await tools.sendMessage(text);
+    }
+  }
+
+  public async onCleanup(roomId: string): Promise<void> {
+    this.bootstrappedRooms.delete(roomId);
+  }
+
+  private async resolveGraph(
+    sdk: LangGraphSdk | undefined,
+    langGraphTools: unknown[],
+  ): Promise<LangGraphGraph> {
+    if (this.graphFactory) {
+      return this.graphFactory(langGraphTools);
+    }
+
+    if (this.graph) {
+      return this.graph;
+    }
+
+    if (this.llm === undefined) {
+      throw new Error("LangGraphAdapter is missing an `llm` instance.");
+    }
+    if (!sdk) {
+      throw new Error("LangGraphAdapter SDK failed to initialize.");
+    }
+
+    return sdk.createReactAgent({
+      llm: this.llm,
+      tools: langGraphTools,
+      checkpointer: this.checkpointer,
+      prompt: this.renderedSystemPrompt,
+    });
+  }
+
+  private buildMessages(
+    history: HistoryProvider,
+    message: PlatformMessage,
+    participantsMessage: string | null,
+    contactsMessage: string | null,
+    isSessionBootstrap: boolean,
+    roomId: string,
+  ): LangGraphTupleMessage[] {
+    const messages: LangGraphTupleMessage[] = [];
+
+    if (isSessionBootstrap && !this.bootstrappedRooms.has(roomId)) {
+      messages.push(["system", this.renderedSystemPrompt]);
+      this.bootstrappedRooms.add(roomId);
+    }
+
+    if (isSessionBootstrap && history.length > 0) {
+      const historical = history.raw.slice(-this.maxHistoryMessages);
+      for (const item of historical) {
+        const role = String(item.sender_type ?? "") === "Agent" ? "assistant" : "user";
+        const content = String(item.content ?? "");
+        if (content) {
+          messages.push([role, content]);
+        }
+      }
+    }
+
+    if (participantsMessage) {
+      messages.push(["user", `[System]: ${participantsMessage}`]);
+    }
+
+    if (contactsMessage) {
+      messages.push(["user", `[System]: ${contactsMessage}`]);
+    }
+
+    messages.push(["user", message.content]);
+    return messages;
+  }
+
+  private async forwardStreamEvents(
+    graph: LangGraphGraph,
+    input: Record<string, unknown>,
+    config: Record<string, unknown>,
+    tools: AdapterToolsProtocol,
+  ): Promise<void> {
+    const stream = graph.streamEvents?.(input, config, { version: "v2" });
+    if (!stream) {
+      return;
+    }
+
+    for await (const event of stream) {
+      const data = asRecord(event);
+      const eventType = String(data.event ?? "");
+      if (eventType === "on_tool_start") {
+        await tools.sendEvent(JSON.stringify(data), "tool_call");
+      }
+      if (eventType === "on_tool_end") {
+        await tools.sendEvent(JSON.stringify(data), "tool_result");
+      }
+    }
+  }
+}
+
+async function buildLangGraphTools(input: {
+  sdk: LangGraphSdk;
+  tools: AdapterToolsProtocol;
+  includeMemoryTools: boolean;
+}): Promise<unknown[]> {
+  const schemas = input.tools.getToolSchemas("openai", {
+    includeMemory: input.includeMemoryTools,
+  });
+  const wrappers: unknown[] = [];
+
+  for (const schema of schemas) {
+    const spec = toLangGraphToolSpec(schema);
+    if (!spec) {
+      continue;
+    }
+
+    wrappers.push(
+      input.sdk.tool(
+        async (args: Record<string, unknown>) => {
+          const result = await input.tools.executeToolCall(spec.name, args);
+          return stringifyToolResult(result);
+        },
+        {
+          name: spec.name,
+          description: spec.description,
+          schema: spec.schema,
+        },
+      ),
+    );
+  }
+
+  return wrappers;
+}
+
+function toLangGraphToolSpec(schema: Record<string, unknown>): LangGraphToolLike | null {
+  const functionBlock = asRecord(schema.function);
+  const name = functionBlock.name;
+  if (typeof name !== "string" || name.length === 0) {
+    return null;
+  }
+
+  const description = typeof functionBlock.description === "string" ? functionBlock.description : "";
+  const parameters = asRecord(functionBlock.parameters);
+
+  return {
+    name,
+    description,
+    schema: parameters,
+  };
+}
+
+function stringifyToolResult(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function extractAssistantText(result: unknown): string | null {
+  if (typeof result === "string" && result.trim().length > 0) {
+    return result.trim();
+  }
+
+  const record = asRecord(result);
+  const directContent = asMessageContent(record.content);
+  if (directContent) {
+    return directContent;
+  }
+
+  const messages = Array.isArray(record.messages) ? record.messages : [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const text = asMessageText(messages[index]);
+    if (text) {
+      return text;
+    }
+  }
+
+  return null;
+}
+
+function asMessageText(value: unknown): string | null {
+  if (Array.isArray(value) && value.length >= 2 && value[0] === "assistant") {
+    const content = value[1];
+    if (typeof content === "string" && content.trim().length > 0) {
+      return content.trim();
+    }
+    return null;
+  }
+
+  const record = asRecord(value);
+  const role = String(record.role ?? "");
+  if (role !== "assistant") {
+    return null;
+  }
+
+  return asMessageContent(record.content);
+}
+
+function asMessageContent(value: unknown): string | null {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.trim();
+  }
+
+  if (Array.isArray(value)) {
+    const chunks: string[] = [];
+    for (const item of value) {
+      const record = asRecord(item);
+      if (typeof record.text === "string" && record.text.trim().length > 0) {
+        chunks.push(record.text.trim());
+      }
+    }
+
+    if (chunks.length > 0) {
+      return chunks.join("\n");
+    }
+  }
+
+  return null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object") {
+    return value as Record<string, unknown>;
+  }
+
+  return {};
+}
+
+let langGraphSdkPromise: Promise<LangGraphSdk> | null = null;
+
+async function loadLangGraphSdk(): Promise<LangGraphSdk> {
+  if (langGraphSdkPromise) {
+    return langGraphSdkPromise;
+  }
+
+  langGraphSdkPromise = (async () => {
+    try {
+      const [{ createReactAgent }, { tool }] = await Promise.all([
+        import("@langchain/langgraph/prebuilt"),
+        import("@langchain/core/tools"),
+      ]);
+
+      if (typeof createReactAgent !== "function" || typeof tool !== "function") {
+        throw new Error("LangGraph SDK exports are unavailable.");
+      }
+
+      return { createReactAgent, tool };
+    } catch (error) {
+      throw new Error(
+        `LangGraphAdapter requires @langchain/langgraph and @langchain/core. Install them with "pnpm add @langchain/langgraph @langchain/core". (${asErrorMessage(error)})`,
+      );
+    }
+  })();
+
+  return langGraphSdkPromise;
+}

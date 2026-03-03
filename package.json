@@ -1,0 +1,50 @@
+{
+  "name": "@thenvoi/thenvoi-sdk-typescript",
+  "version": "0.1.0",
+  "description": "Thenvoi TypeScript SDK core runtime",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --external @langchain/langgraph/prebuilt --external @langchain/core/tools --external @a2a-js/sdk --external @a2a-js/sdk/client --external @a2a-js/sdk/server --external @a2a-js/sdk/server/express --external @anthropic-ai/sdk --external @google/genai --external openai --external parlant-client",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "clean": "rm -rf dist"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.63",
+    "@linear/sdk": "^76.0.0",
+    "@openai/codex-sdk": "^0.107.0",
+    "express": "^5.2.1",
+    "phoenix": "^1.8.4",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.13.14",
+    "@typescript-eslint/eslint-plugin": "^8.26.0",
+    "@typescript-eslint/parser": "^8.26.0",
+    "eslint": "^9.22.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.2",
+    "vitest": "^3.2.4"
+  }
+}

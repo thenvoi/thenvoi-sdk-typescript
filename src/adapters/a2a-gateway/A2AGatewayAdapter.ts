@@ -1,0 +1,551 @@
+import { randomUUID } from "node:crypto";
+
+import { SimpleAdapter } from "../../core/simpleAdapter";
+import { UnsupportedFeatureError } from "../../core/errors";
+import type { MessagingTools } from "../../contracts/protocols";
+import type { ChatMessageMention } from "../../client/rest/types";
+import type { PlatformMessage } from "../../runtime/types";
+import { GatewayHistoryConverter } from "./history";
+import { createGatewayServer } from "./server";
+import { buildStatusEvent } from "./statusEvent";
+import type {
+  A2AGatewayAdapterOptions,
+  GatewayA2AMessage,
+  GatewayA2AStatusUpdateEvent,
+  GatewayPeer,
+  GatewayServerFactory,
+  GatewaySessionState,
+  GatewayTaskState,
+  PendingA2ATask,
+} from "./types";
+
+const DEFAULT_HOST = "0.0.0.0";
+const DEFAULT_PORT = 10_000;
+const DEFAULT_GATEWAY_URL = `http://localhost:${DEFAULT_PORT}`;
+const DEFAULT_RESPONSE_TIMEOUT_MS = 120_000;
+const DEFAULT_PEER_PAGE_SIZE = 100;
+const DEFAULT_MAX_PEER_PAGES = 25;
+
+interface PendingTaskRecord extends PendingA2ATask {
+  readonly queue: AsyncEventQueue<GatewayA2AStatusUpdateEvent>;
+}
+
+export class A2AGatewayAdapter
+  extends SimpleAdapter<GatewaySessionState, MessagingTools>
+{
+  private readonly thenvoiRest: A2AGatewayAdapterOptions["thenvoiRest"];
+  private readonly gatewayUrl: string;
+  private readonly host: string;
+  private readonly port: number;
+  private readonly responseTimeoutMs: number;
+  private readonly peerPageSize: number;
+  private readonly maxPeerPages: number;
+  private readonly serverFactory: GatewayServerFactory;
+
+  private readonly peersBySlug = new Map<string, GatewayPeer>();
+  private readonly peersById = new Map<string, GatewayPeer>();
+  private readonly contextToRoom = new Map<string, string>();
+  private readonly roomParticipants = new Map<string, Set<string>>();
+  private readonly pendingByRoom = new Map<string, PendingTaskRecord>();
+  private readonly pendingByTask = new Map<string, PendingTaskRecord>();
+
+  private server: ReturnType<GatewayServerFactory> | null = null;
+
+  public constructor(options: A2AGatewayAdapterOptions) {
+    super({
+      historyConverter: new GatewayHistoryConverter(),
+    });
+
+    this.thenvoiRest = options.thenvoiRest;
+    this.gatewayUrl = options.gatewayUrl ?? DEFAULT_GATEWAY_URL;
+    this.host = options.host ?? DEFAULT_HOST;
+    this.port = options.port ?? DEFAULT_PORT;
+    this.responseTimeoutMs = options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS;
+    this.peerPageSize = options.peerPageSize ?? DEFAULT_PEER_PAGE_SIZE;
+    this.maxPeerPages = options.maxPeerPages ?? DEFAULT_MAX_PEER_PAGES;
+    this.serverFactory = options.serverFactory ?? createGatewayServer;
+  }
+
+  public async onStarted(
+    agentName: string,
+    agentDescription: string,
+  ): Promise<void> {
+    await super.onStarted(agentName, agentDescription);
+    await this.refreshPeers();
+
+    this.server = this.serverFactory({
+      peersBySlug: this.peersBySlug,
+      peersById: this.peersById,
+      gatewayUrl: this.gatewayUrl,
+      host: this.host,
+      port: this.port,
+      onRequest: (request) => this.handleGatewayRequest(request),
+      onCancel: async (request) => {
+        this.cancelPendingTask(request.taskId, request.peerId);
+      },
+    });
+
+    await this.server.start();
+  }
+
+  public async onMessage(
+    message: PlatformMessage,
+    _tools: MessagingTools,
+    history: GatewaySessionState,
+    _participantsMessage: string | null,
+    _contactsMessage: string | null,
+    context: { isSessionBootstrap: boolean; roomId: string },
+  ): Promise<void> {
+    if (context.isSessionBootstrap) {
+      this.rehydrate(history);
+    }
+
+    const pending = this.pendingByRoom.get(context.roomId);
+    if (!pending) {
+      return;
+    }
+
+    const event = toStatusUpdateEvent(message, pending.taskId, pending.contextId);
+    pending.enqueue(event);
+
+    if (event.final) {
+      this.removePending(pending);
+    }
+  }
+
+  public async onCleanup(roomId: string): Promise<void> {
+    const pending = this.pendingByRoom.get(roomId);
+    if (pending) {
+      pending.enqueue(
+        buildStatusEvent({
+          taskId: pending.taskId,
+          contextId: pending.contextId,
+          state: "canceled",
+          final: true,
+          text: "Session cleaned up before completion.",
+        }),
+      );
+      this.removePending(pending);
+    }
+  }
+
+  public async stopGatewayServer(): Promise<void> {
+    if (!this.server) {
+      return;
+    }
+
+    const server = this.server;
+    this.server = null;
+    await server.stop();
+  }
+
+  public async onRuntimeStop(): Promise<void> {
+    await this.stopGatewayServer();
+  }
+
+  private async refreshPeers(): Promise<void> {
+    this.peersBySlug.clear();
+    this.peersById.clear();
+    if (!this.thenvoiRest.listPeers) {
+      throw new UnsupportedFeatureError(
+        "Peer listing is not available in current REST adapter",
+      );
+    }
+
+    for (let page = 1; page <= this.maxPeerPages; page += 1) {
+      const response = await this.thenvoiRest.listPeers({
+        page,
+        pageSize: this.peerPageSize,
+        notInChat: "",
+      });
+
+      const peers = Array.isArray(response.data)
+        ? response.data
+        : [];
+
+      for (const item of peers) {
+        const peer = toGatewayPeer(item);
+        if (!peer) {
+          continue;
+        }
+
+        const slug = uniqueSlug(peer.slug, this.peersBySlug);
+        const normalized: GatewayPeer = {
+          ...peer,
+          slug,
+        };
+
+        this.peersBySlug.set(slug, normalized);
+        this.peersById.set(normalized.id, normalized);
+      }
+
+      if (peers.length < this.peerPageSize) {
+        break;
+      }
+    }
+  }
+
+  private async *handleGatewayRequest(request: {
+    peerId: string;
+    taskId: string;
+    contextId: string;
+    message: GatewayA2AMessage;
+  }): AsyncGenerator<GatewayA2AStatusUpdateEvent, void, undefined> {
+    const peer = this.resolvePeer(request.peerId);
+    if (!peer) {
+      yield buildStatusEvent({
+        taskId: request.taskId,
+        contextId: request.contextId,
+        state: "failed",
+        final: true,
+        text: `Peer not found: ${request.peerId}`,
+      });
+      return;
+    }
+
+    const [roomId, contextId] = await this.getOrCreateRoom(
+      request.contextId,
+      peer.id,
+    );
+
+    const queue = new AsyncEventQueue<GatewayA2AStatusUpdateEvent>();
+    const pending: PendingTaskRecord = {
+      taskId: request.taskId,
+      contextId,
+      peerId: peer.id,
+      roomId,
+      queue,
+      enqueue: (event) => {
+        queue.enqueue(event);
+      },
+    };
+
+    this.pendingByRoom.set(roomId, pending);
+    this.pendingByTask.set(pending.taskId, pending);
+
+    yield buildStatusEvent({
+      taskId: pending.taskId,
+      contextId: pending.contextId,
+      state: "working",
+      final: false,
+      text: `Routed request to ${peer.name}.`,
+    });
+
+    try {
+      await this.emitContextEvent(roomId, contextId);
+
+      const content = extractMessageText(request.message) ?? "";
+      await this.thenvoiRest.createChatMessage(roomId, {
+        content: buildMentionedContent(peer.name, content),
+        mentions: buildMentions(peer),
+        metadata: {
+          gateway_context_id: contextId,
+          gateway_room_id: roomId,
+          gateway_task_id: request.taskId,
+        },
+      });
+    } catch (error) {
+      this.removePending(pending);
+      yield buildStatusEvent({
+        taskId: pending.taskId,
+        contextId: pending.contextId,
+        state: "failed",
+        final: true,
+        text: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+
+    while (true) {
+      const next = await pending.queue.dequeue(this.responseTimeoutMs);
+      if (!next) {
+        this.removePending(pending);
+        yield buildStatusEvent({
+          taskId: pending.taskId,
+          contextId: pending.contextId,
+          state: "failed",
+          final: true,
+          text: "Timed out waiting for a Thenvoi peer response.",
+        });
+        return;
+      }
+
+      yield next;
+
+      if (next.final) {
+        this.removePending(pending);
+        return;
+      }
+    }
+  }
+
+  private cancelPendingTask(taskId: string, peerId: string): void {
+    const pending = this.pendingByTask.get(taskId);
+    if (!pending) {
+      return;
+    }
+
+    pending.enqueue(
+      buildStatusEvent({
+        taskId,
+        contextId: pending.contextId,
+        state: "canceled",
+        final: true,
+        text: `Task canceled by A2A client (${peerId}).`,
+      }),
+    );
+    this.removePending(pending);
+  }
+
+  private resolvePeer(peerId: string): GatewayPeer | null {
+    return this.peersBySlug.get(peerId) ?? this.peersById.get(peerId) ?? null;
+  }
+
+  private async getOrCreateRoom(
+    contextId: string,
+    targetPeerId: string,
+  ): Promise<[string, string]> {
+    const existingRoom = this.contextToRoom.get(contextId);
+    if (existingRoom) {
+      const participants = this.roomParticipants.get(existingRoom) ?? new Set<string>();
+      if (!participants.has(targetPeerId)) {
+        await this.thenvoiRest.addChatParticipant(existingRoom, {
+          participantId: targetPeerId,
+          role: "member",
+        });
+        participants.add(targetPeerId);
+        this.roomParticipants.set(existingRoom, participants);
+      }
+
+      return [existingRoom, contextId];
+    }
+
+    const normalizedContextId = contextId || randomUUID();
+    const created = await this.thenvoiRest.createChat(
+      `a2a:gateway:${normalizedContextId}`,
+    );
+    const roomId = created.id;
+
+    await this.thenvoiRest.addChatParticipant(roomId, {
+      participantId: targetPeerId,
+      role: "member",
+    });
+
+    this.contextToRoom.set(normalizedContextId, roomId);
+    this.roomParticipants.set(roomId, new Set<string>([targetPeerId]));
+
+    return [roomId, normalizedContextId];
+  }
+
+  private async emitContextEvent(roomId: string, contextId: string): Promise<void> {
+    await this.thenvoiRest.createChatEvent(roomId, {
+      content: "A2A gateway context",
+      messageType: "task",
+      metadata: {
+        gateway_context_id: contextId,
+        gateway_room_id: roomId,
+      },
+    });
+  }
+
+  private rehydrate(history: GatewaySessionState): void {
+    for (const [contextId, roomId] of Object.entries(history.contextToRoom)) {
+      if (!this.contextToRoom.has(contextId)) {
+        this.contextToRoom.set(contextId, roomId);
+      }
+    }
+
+    for (const [roomId, peers] of Object.entries(history.roomParticipants)) {
+      const existing = this.roomParticipants.get(roomId) ?? new Set<string>();
+      for (const peer of peers) {
+        existing.add(peer);
+      }
+      this.roomParticipants.set(roomId, existing);
+    }
+  }
+
+  private removePending(pending: PendingTaskRecord): void {
+    const byRoom = this.pendingByRoom.get(pending.roomId);
+    if (byRoom === pending) {
+      this.pendingByRoom.delete(pending.roomId);
+    }
+
+    const byTask = this.pendingByTask.get(pending.taskId);
+    if (byTask === pending) {
+      this.pendingByTask.delete(pending.taskId);
+    }
+  }
+}
+
+class AsyncEventQueue<T> {
+  private readonly items: T[] = [];
+  private readonly waiters: Array<(value: T | null) => void> = [];
+
+  public enqueue(item: T): void {
+    const waiter = this.waiters.shift();
+    if (waiter) {
+      waiter(item);
+      return;
+    }
+
+    this.items.push(item);
+  }
+
+  public async dequeue(timeoutMs: number): Promise<T | null> {
+    if (this.items.length > 0) {
+      return this.items.shift() ?? null;
+    }
+
+    return new Promise<T | null>((resolve) => {
+      const timeout = setTimeout(() => {
+        const index = this.waiters.indexOf(waiter);
+        if (index >= 0) {
+          this.waiters.splice(index, 1);
+        }
+        resolve(null);
+      }, timeoutMs);
+
+      const waiter = (value: T | null): void => {
+        clearTimeout(timeout);
+        resolve(value);
+      };
+
+      this.waiters.push(waiter);
+    });
+  }
+}
+
+function toGatewayPeer(value: Record<string, unknown>): GatewayPeer | null {
+  const id = asString(value.id);
+  if (!id) {
+    return null;
+  }
+
+  const name = asString(value.name) ?? asString(value.handle) ?? id;
+  const description = asString(value.description) ?? "";
+  const handle = asString(value.handle);
+
+  return {
+    id,
+    name,
+    description,
+    handle,
+    slug: slugify(handle ?? name),
+  };
+}
+
+function uniqueSlug(
+  baseSlug: string,
+  existing: Map<string, GatewayPeer>,
+): string {
+  if (!existing.has(baseSlug)) {
+    return baseSlug;
+  }
+
+  let index = 2;
+  while (existing.has(`${baseSlug}-${index}`)) {
+    index += 1;
+  }
+
+  return `${baseSlug}-${index}`;
+}
+
+function slugify(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "peer";
+}
+
+function buildMentionedContent(peerName: string, content: string): string {
+  const trimmed = content.trim();
+  if (!trimmed) {
+    return `@${peerName}`;
+  }
+
+  return `@${peerName} ${trimmed}`;
+}
+
+function buildMentions(peer: GatewayPeer): ChatMessageMention[] {
+  if (peer.handle) {
+    return [{ id: peer.id, handle: peer.handle }];
+  }
+
+  return [{ id: peer.id }];
+}
+
+function toStatusUpdateEvent(
+  message: PlatformMessage,
+  taskId: string,
+  contextId: string,
+): GatewayA2AStatusUpdateEvent {
+  const normalizedType = message.messageType.trim().toLowerCase();
+
+  let state: GatewayTaskState;
+  let final = false;
+
+  if (normalizedType === "error") {
+    state = "failed";
+    final = true;
+  } else if (normalizedType === "text") {
+    state = "completed";
+    final = true;
+  } else if (
+    normalizedType === "thought" ||
+    normalizedType === "tool_call" ||
+    normalizedType === "tool_result" ||
+    normalizedType === "task"
+  ) {
+    state = "working";
+  } else {
+    state = "working";
+  }
+
+  return buildStatusEvent({
+    taskId,
+    contextId,
+    state,
+    final,
+    text: message.content,
+    metadata: {
+      thenvoi_message_id: message.id,
+      thenvoi_message_type: message.messageType,
+      thenvoi_sender_id: message.senderId,
+      thenvoi_room_id: message.roomId,
+    },
+  });
+}
+
+function extractMessageText(message: GatewayA2AMessage): string | null {
+  const chunks: string[] = [];
+
+  for (const part of message.parts) {
+    if (typeof part.text === "string" && part.text.trim().length > 0) {
+      chunks.push(part.text.trim());
+      continue;
+    }
+
+    if (
+      part.root &&
+      typeof part.root.text === "string" &&
+      part.root.text.trim().length > 0
+    ) {
+      chunks.push(part.root.text.trim());
+    }
+  }
+
+  if (chunks.length === 0) {
+    return null;
+  }
+
+  return chunks.join("\n");
+}
+
+function asString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}

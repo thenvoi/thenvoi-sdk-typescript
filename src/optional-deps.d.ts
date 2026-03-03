@@ -1,0 +1,10 @@
+declare module "@a2a-js/sdk";
+declare module "@a2a-js/sdk/client";
+declare module "@a2a-js/sdk/server";
+declare module "@a2a-js/sdk/server/express";
+declare module "@anthropic-ai/sdk";
+declare module "@google/genai";
+declare module "@langchain/langgraph/prebuilt";
+declare module "@langchain/core/tools";
+declare module "openai";
+declare module "parlant-client";
