@@ -151,7 +151,7 @@ export class AgentTools implements AgentToolsProtocol {
     }
 
     await this.rest.removeChatParticipant(this.roomId, String(participant.id), DEFAULT_REQUEST_OPTIONS);
-    this.participants = this.participants.filter((entry) => entry.id !== participant.id);
+    this.replaceParticipants(this.participants.filter((entry) => entry.id !== participant.id));
 
     return {
       id: participant.id,
@@ -186,7 +186,7 @@ export class AgentTools implements AgentToolsProtocol {
       type: participant.type,
       handle: participant.handle ?? null,
     }));
-    this.participants = normalized;
+    this.replaceParticipants(normalized);
     return normalized;
   }
 
@@ -419,6 +419,10 @@ export class AgentTools implements AgentToolsProtocol {
 
   private normalizeMentionHandle(handle: string): string {
     return handle.trim().replace(/^@+/, "").toLowerCase();
+  }
+
+  private replaceParticipants(participants: ParticipantRecord[]): void {
+    this.participants.splice(0, this.participants.length, ...participants);
   }
 
   private throwUnsupportedContacts(): never {

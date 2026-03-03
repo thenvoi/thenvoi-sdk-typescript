@@ -67,11 +67,14 @@ export class ExecutionContext {
   }
 
   public setParticipants(participants: ParticipantRecord[]): void {
-    this.participants = participants;
+    this.replaceParticipants(participants);
   }
 
   public addParticipant(participant: ParticipantRecord): void {
-    this.participants = this.participants.filter((entry) => entry.id !== participant.id);
+    const existingIndex = this.participants.findIndex((entry) => entry.id === participant.id);
+    if (existingIndex >= 0) {
+      this.participants.splice(existingIndex, 1);
+    }
     this.participants.push(participant);
     const name = String(participant.name ?? "unknown");
     this.participantsMessage = `${name} joined the room.`;
@@ -79,7 +82,8 @@ export class ExecutionContext {
 
   public removeParticipant(participantId: string): void {
     const removed = this.participants.find((entry) => String(entry.id) === participantId);
-    this.participants = this.participants.filter((entry) => String(entry.id) !== participantId);
+    const next = this.participants.filter((entry) => String(entry.id) !== participantId);
+    this.replaceParticipants(next);
     if (removed) {
       this.participantsMessage = `${String(removed.name ?? participantId)} left the room.`;
     }
@@ -105,5 +109,9 @@ export class ExecutionContext {
     const value = this.bootstrap;
     this.bootstrap = false;
     return value;
+  }
+
+  private replaceParticipants(participants: ParticipantRecord[]): void {
+    this.participants.splice(0, this.participants.length, ...participants);
   }
 }

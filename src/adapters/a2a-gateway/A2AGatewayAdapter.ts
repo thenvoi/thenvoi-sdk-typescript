@@ -104,6 +104,9 @@ export class A2AGatewayAdapter
     if (!pending) {
       return;
     }
+    if (!shouldRouteToPendingTask(message, pending)) {
+      return;
+    }
 
     const event = toStatusUpdateEvent(message, pending.taskId, pending.contextId);
     pending.enqueue(event);
@@ -514,6 +517,29 @@ function toStatusUpdateEvent(
       thenvoi_room_id: message.roomId,
     },
   });
+}
+
+function shouldRouteToPendingTask(
+  message: PlatformMessage,
+  pending: PendingTaskRecord,
+): boolean {
+  const metadata = message.metadata;
+  const gatewayTaskId = asString(metadata.gateway_task_id);
+  if (gatewayTaskId) {
+    return gatewayTaskId === pending.taskId;
+  }
+
+  const gatewayContextId = asString(metadata.gateway_context_id);
+  if (gatewayContextId && gatewayContextId !== pending.contextId) {
+    return false;
+  }
+
+  const gatewayPeerId = asString(metadata.gateway_peer_id);
+  if (gatewayPeerId) {
+    return gatewayPeerId === pending.peerId;
+  }
+
+  return message.senderId === pending.peerId;
 }
 
 function extractMessageText(message: GatewayA2AMessage): string | null {

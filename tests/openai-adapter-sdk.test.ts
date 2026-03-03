@@ -97,6 +97,7 @@ describe("OpenAIAdapter", () => {
     const adapter = new OpenAIAdapter({
       openAIModel: "gpt-4o-mini",
       clientFactory: async () => client,
+      systemPrompt: "You are a strict test agent.",
     });
     const tools = new OpenAITestTools();
 
@@ -125,8 +126,17 @@ describe("OpenAIAdapter", () => {
       model: "gpt-4o-mini",
       tool_choice: "auto",
     });
+    const firstMessages = requests[0]?.messages as Array<Record<string, unknown>>;
+    expect(firstMessages[0]).toMatchObject({
+      role: "system",
+      content: "You are a strict test agent.",
+    });
 
     const secondMessages = requests[1]?.messages as Array<Record<string, unknown>>;
+    expect(secondMessages[0]).toMatchObject({
+      role: "system",
+      content: "You are a strict test agent.",
+    });
     expect(
       secondMessages.some(
         (entry) =>

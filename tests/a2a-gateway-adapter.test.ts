@@ -128,6 +128,21 @@ class FakeRestApi implements RestApi {
   }
 }
 
+function makePeerMessage(options: {
+  content: string;
+  roomId?: string;
+  senderId?: string;
+  metadata?: Record<string, unknown>;
+}) {
+  return {
+    ...makeMessage(options.content, options.roomId),
+    senderId: options.senderId ?? "peer-weather",
+    senderType: "Agent",
+    senderName: "Peer Agent",
+    metadata: options.metadata ?? {},
+  };
+}
+
 describe("A2AGatewayAdapter", () => {
   it("routes A2A requests into Thenvoi rooms and streams completion", async () => {
     const rest = new FakeRestApi();
@@ -177,7 +192,10 @@ describe("A2AGatewayAdapter", () => {
     });
 
     await adapter.onMessage(
-      makeMessage("Sunny and 72F", "room-1"),
+      makePeerMessage({
+        content: "Sunny and 72F",
+        roomId: "room-1",
+      }),
       new FakeTools(),
       {
         contextToRoom: {},
@@ -242,7 +260,10 @@ describe("A2AGatewayAdapter", () => {
     const iterator1 = stream1[Symbol.asyncIterator]();
     await iterator1.next();
     await adapter.onMessage(
-      makeMessage("done", "room-1"),
+      makePeerMessage({
+        content: "done",
+        roomId: "room-1",
+      }),
       new FakeTools(),
       { contextToRoom: {}, roomParticipants: {} },
       null,
@@ -265,7 +286,10 @@ describe("A2AGatewayAdapter", () => {
     const iterator2 = stream2[Symbol.asyncIterator]();
     await iterator2.next();
     await adapter.onMessage(
-      makeMessage("done again", "room-1"),
+      makePeerMessage({
+        content: "done again",
+        roomId: "room-1",
+      }),
       new FakeTools(),
       { contextToRoom: {}, roomParticipants: {} },
       null,
@@ -314,5 +338,123 @@ describe("A2AGatewayAdapter", () => {
       status: { state: "failed" },
     });
     expect(rest.createMessageCalls).toHaveLength(0);
+  });
+
+  it("ignores unrelated participant updates for pending tasks", async () => {
+    const rest = new FakeRestApi();
+
+    let onRequest: ((request: GatewayRequest) => AsyncIterable<unknown>) | null = null;
+    const adapter = new A2AGatewayAdapter({
+      thenvoiRest: rest,
+      serverFactory: (options) => {
+        onRequest = options.onRequest;
+        return {
+          start: async () => undefined,
+          stop: async () => undefined,
+        };
+      },
+      responseTimeoutMs: 2_000,
+    });
+
+    await adapter.onStarted("Gateway", "A2A gateway");
+
+    const stream = onRequest!({
+      peerId: "weather-agent",
+      taskId: "task-1",
+      contextId: "ctx-1",
+      message: {
+        kind: "message",
+        messageId: "m-1",
+        role: "user",
+        parts: [{ kind: "text", text: "Status?" }],
+      },
+    });
+
+    const iterator = stream[Symbol.asyncIterator]();
+    await iterator.next(); // working
+
+    await adapter.onMessage(
+      makePeerMessage({
+        content: "I am an unrelated peer",
+        roomId: "room-1",
+        senderId: "peer-data",
+      }),
+      new FakeTools(),
+      { contextToRoom: {}, roomParticipants: {} },
+      null,
+      null,
+      { isSessionBootstrap: false, roomId: "room-1" },
+    );
+
+    await adapter.onMessage(
+      makePeerMessage({
+        content: "This is the target peer response",
+        roomId: "room-1",
+        senderId: "peer-weather",
+      }),
+      new FakeTools(),
+      { contextToRoom: {}, roomParticipants: {} },
+      null,
+      null,
+      { isSessionBootstrap: false, roomId: "room-1" },
+    );
+
+    const finalEvent = await iterator.next();
+    const text = finalEvent.value?.status?.message?.parts?.[0]?.text;
+    expect(text).toBe("This is the target peer response");
+  });
+
+  it("accepts updates that include matching gateway task metadata", async () => {
+    const rest = new FakeRestApi();
+
+    let onRequest: ((request: GatewayRequest) => AsyncIterable<unknown>) | null = null;
+    const adapter = new A2AGatewayAdapter({
+      thenvoiRest: rest,
+      serverFactory: (options) => {
+        onRequest = options.onRequest;
+        return {
+          start: async () => undefined,
+          stop: async () => undefined,
+        };
+      },
+      responseTimeoutMs: 2_000,
+    });
+
+    await adapter.onStarted("Gateway", "A2A gateway");
+
+    const stream = onRequest!({
+      peerId: "weather-agent",
+      taskId: "task-2",
+      contextId: "ctx-2",
+      message: {
+        kind: "message",
+        messageId: "m-2",
+        role: "user",
+        parts: [{ kind: "text", text: "Metadata route" }],
+      },
+    });
+
+    const iterator = stream[Symbol.asyncIterator]();
+    await iterator.next(); // working
+
+    await adapter.onMessage(
+      makePeerMessage({
+        content: "matched by task metadata",
+        roomId: "room-1",
+        senderId: "peer-data",
+        metadata: {
+          gateway_task_id: "task-2",
+        },
+      }),
+      new FakeTools(),
+      { contextToRoom: {}, roomParticipants: {} },
+      null,
+      null,
+      { isSessionBootstrap: false, roomId: "room-1" },
+    );
+
+    const finalEvent = await iterator.next();
+    const text = finalEvent.value?.status?.message?.parts?.[0]?.text;
+    expect(text).toBe("matched by task metadata");
   });
 });

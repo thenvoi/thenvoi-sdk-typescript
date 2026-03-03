@@ -78,6 +78,13 @@ export class OpenAIToolCallingModel implements ToolCallingModel {
 
 function toOpenAIMessages(request: ToolCallingModelRequest): Array<Record<string, unknown>> {
   const messages = mapConversationMessages(request, toBaseOpenAIMessage);
+  const systemPrompt = request.systemPrompt?.trim();
+  if (systemPrompt) {
+    messages.unshift({
+      role: "system",
+      content: systemPrompt,
+    });
+  }
 
   if ((request.toolResults?.length ?? 0) === 0) {
     return messages;
