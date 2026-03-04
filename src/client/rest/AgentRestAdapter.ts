@@ -1,13 +1,7 @@
 /**
- * Standalone REST adapter that calls /api/v1/agent/... endpoints directly.
+ * REST adapter that calls `/api/v1/agent/...` endpoints directly via `fetch`.
  *
- * // TEMPORARY UNTIL FERN MERGE
- * The @thenvoi/rest-client Fern JS SDK currently only exposes user-facing
- * endpoints (/api/v1/me/profile, /api/v1/chats, etc.).  Agents authenticate
- * with X-API-Key and must use the /api/v1/agent/* namespace instead.
- *
- * Once the Fern-generated JS client ships agent endpoints, this file should
- * be deleted and FernRestAdapter should be used directly.
+ * Agents authenticate with `X-API-Key` and use the `/api/v1/agent/*` namespace.
  */
 
 import type {
@@ -41,10 +35,7 @@ export interface AgentRestAdapterOptions {
 // ---------------------------------------------------------------------------
 
 /**
- * // TEMPORARY UNTIL FERN MERGE
- *
- * Direct-fetch implementation of every /api/v1/agent/* REST endpoint.
- * Uses `X-API-Key` header for authentication (not Bearer JWT).
+ * Direct-fetch implementation of `/api/v1/agent/*` REST endpoints.
  */
 export class AgentRestAdapter implements RestApi {
   private readonly baseUrl: string;
@@ -186,7 +177,6 @@ export class AgentRestAdapter implements RestApi {
     options?: RestRequestOptions,
   ): Promise<ToolOperationResult> {
     // Agent message endpoint only accepts `content` and `mentions`.
-    // message_type / metadata are not supported on the agent namespace.
     const body: Record<string, unknown> = {
       content: message.content,
       mentions: message.mentions ?? [],

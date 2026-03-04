@@ -14,7 +14,7 @@ import {
   replaceUuidMentions,
 } from "../src/index";
 
-describe("runtime utility parity", () => {
+describe("runtime utilities", () => {
   it("replaces UUID mentions", () => {
     const replaced = replaceUuidMentions("hello @[[u1]]", [
       { id: "u1", handle: "john" },

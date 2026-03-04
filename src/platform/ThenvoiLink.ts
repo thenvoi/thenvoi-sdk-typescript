@@ -67,9 +67,6 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
       ...options.capabilities,
     };
 
-    // TEMPORARY UNTIL FERN MERGE — default to AgentRestAdapter which uses
-    // /api/v1/agent/* endpoints directly, since @thenvoi/rest-client only has
-    // user-facing endpoints.
     const restApi = options.restApi ?? new AgentRestAdapter({
       baseUrl: this.restUrl,
       apiKey: this.apiKey,

@@ -39,14 +39,14 @@ const expectedCoreExports = [
   "FernRestAdapter",
 ];
 
-describe("sdk parity surface", () => {
+describe("sdk public surface", () => {
   it("exports core runtime symbols needed for adapter integrations", () => {
     for (const symbol of expectedCoreExports) {
       expect(sdk).toHaveProperty(symbol);
     }
   });
 
-  it("preserves python tool naming constants", () => {
+  it("preserves tool naming constants", () => {
     expect(sdk.MCP_TOOL_PREFIX).toBe("mcp__thenvoi__");
     expect(sdk.TOOL_MODELS).toHaveProperty("thenvoi_send_message");
     expect(sdk.TOOL_MODELS).toHaveProperty("thenvoi_lookup_peers");

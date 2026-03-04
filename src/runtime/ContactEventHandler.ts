@@ -208,7 +208,6 @@ export class ContactEventHandler {
         if (cached) {
           return `Contact request from ${cached.fromName} (@${cached.fromHandle}) updated to ${event.payload.status}.`;
         }
-        // TODO: API fallback for enrichment when REST endpoint is available
         return `Contact request ${event.payload.id} updated to ${event.payload.status}.`;
       }
       case "contact_added":

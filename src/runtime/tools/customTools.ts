@@ -3,8 +3,6 @@
  *
  * Provides helper functions to convert Zod schemas to tool schemas
  * and execute custom tools with validation.
- *
- * TypeScript equivalent of Python SDK's `custom_tools.py`.
  */
 
 import { z, type ZodIssue } from "zod";
@@ -12,8 +10,6 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 
 /**
  * Custom tool definition: a Zod schema for validation + a handler function.
- *
- * Equivalent to Python's `CustomToolDef = tuple[type[BaseModel], Callable]`.
  */
 export interface CustomToolDef {
   /** Zod object schema defining the tool's input parameters. */

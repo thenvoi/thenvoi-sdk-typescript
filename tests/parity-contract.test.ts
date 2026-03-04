@@ -46,8 +46,8 @@ class ContractRestApi implements RestApi {
   }
 }
 
-describe("parity contract", () => {
-  it("exposes python-parity lifecycle methods", () => {
+describe("sdk contract", () => {
+  it("exposes lifecycle methods", () => {
     expect(typeof Agent.prototype.start).toBe("function");
     expect(typeof Agent.prototype.stop).toBe("function");
     expect(typeof Agent.prototype.run).toBe("function");
@@ -62,7 +62,7 @@ describe("parity contract", () => {
     expect(typeof ThenvoiLink.prototype.markFailed).toBe("function");
   });
 
-  it("fails explicitly only on known fern gaps", async () => {
+  it("throws UnsupportedFeatureError for unavailable endpoints", async () => {
     const tools = new AgentTools({
       roomId: "room-1",
       rest: new RestFacade({ api: new ContractRestApi() }),

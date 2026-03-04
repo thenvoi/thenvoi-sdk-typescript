@@ -135,9 +135,7 @@ export interface FernUserProfile {
 }
 
 // Method syntax (not property-function syntax) is used intentionally so that
-// TypeScript checks parameter types bivariantly, allowing the concrete
-// @thenvoi/rest-client ThenvoiClient to satisfy this interface even when its
-// parameter types use narrower string-literal unions or required fields.
+// TypeScript checks parameter types bivariantly.
 export interface FernThenvoiClientLike {
   myProfile?: {
     getMyProfile(options?: RestRequestOptions): Promise<FernUserProfile>;

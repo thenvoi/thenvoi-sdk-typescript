@@ -34,10 +34,10 @@ const parityMap: Record<string, string> = {
   ParlantAdapter: "ParlantAdapter",
 };
 
-describe("python parity symbol mapping", () => {
-  it("keeps python core symbols represented in typescript exports", () => {
-    for (const [pythonSymbol, tsSymbol] of Object.entries(parityMap)) {
-      expect(sdk, `Missing mapping for ${pythonSymbol} -> ${tsSymbol}`).toHaveProperty(tsSymbol);
+describe("cross-sdk symbol mapping", () => {
+  it("exports all expected symbols", () => {
+    for (const [canonicalName, tsSymbol] of Object.entries(parityMap)) {
+      expect(sdk, `Missing mapping for ${canonicalName} -> ${tsSymbol}`).toHaveProperty(tsSymbol);
     }
   });
 });

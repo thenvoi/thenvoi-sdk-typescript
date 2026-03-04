@@ -229,7 +229,7 @@ export class FernRestAdapter implements RestApi {
 
   public async listPeers(): Promise<{ data: PeerRecord[]; metadata?: MetadataMap }> {
     throw new UnsupportedFeatureError(
-      "Peer listing is not available in current fern-javascript-sdk snapshot",
+      "Peer listing is not yet available in this SDK version",
     );
   }
 

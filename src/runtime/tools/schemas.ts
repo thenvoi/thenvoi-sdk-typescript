@@ -397,7 +397,7 @@ export function getToolDescription(name: string): string {
 export function assertFeatureEnabled(enabled: boolean, feature: string): void {
   if (!enabled) {
     throw new UnsupportedFeatureError(
-      `${feature} is not available with the current fern-javascript-sdk snapshot`,
+      `${feature} is not yet available in this SDK version`,
     );
   }
 }

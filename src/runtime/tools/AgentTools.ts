@@ -422,7 +422,6 @@ export class AgentTools implements AgentToolsProtocol {
         break;
       }
 
-      // No totalPages metadata — stop if we got a partial page.
       if ((typeof totalPages !== "number" || totalPages <= 0) && items.length < pageSize) {
         break;
       }
@@ -442,14 +441,14 @@ export class AgentTools implements AgentToolsProtocol {
   private throwUnsupportedContacts(): never {
     assertCapability(this.capabilities, "contacts");
     throw new UnsupportedFeatureError(
-      "Contact endpoints are not available in current fern-javascript-sdk snapshot",
+      "Contact endpoints are not yet available in this SDK version",
     );
   }
 
   private throwUnsupportedMemory(): never {
     assertCapability(this.capabilities, "memory");
     throw new UnsupportedFeatureError(
-      "Memory endpoints are not available in current fern-javascript-sdk snapshot",
+      "Memory endpoints are not yet available in this SDK version",
     );
   }
 
@@ -495,7 +494,6 @@ export class AgentTools implements AgentToolsProtocol {
 /**
  * Validate tool arguments before execution.
  * Returns an LLM-friendly error string if validation fails, or null if valid.
- * Mirrors Python SDK's Pydantic validation pattern.
  */
 function validateToolArgs(toolName: string, args: Record<string, unknown>): string | null {
   const errors: string[] = [];
@@ -505,14 +503,12 @@ function validateToolArgs(toolName: string, args: Record<string, unknown>): stri
     return null;
   }
 
-  // Check required fields
   for (const field of model.required) {
     if (args[field] === undefined || args[field] === null) {
       errors.push(`${field}: Field required`);
     }
   }
 
-  // Tool-specific validations
   if (toolName === "thenvoi_send_message") {
     const mentions = args.mentions;
     if (Array.isArray(mentions) && mentions.length === 0) {
