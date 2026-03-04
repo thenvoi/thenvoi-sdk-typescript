@@ -254,4 +254,58 @@ describe("CodexAdapter", () => {
     expect(tools.messages[0]).toContain("Codex status");
     expect(tools.messages[1]).toContain("Model override set to");
   });
+
+  it("reuses in-flight thread initialization across concurrent room messages", async () => {
+    let startCount = 0;
+    let releaseRuns: (() => void) | null = null;
+    const runGate = new Promise<void>((resolve) => {
+      releaseRuns = resolve;
+    });
+
+    const thread = {
+      id: "thread-concurrent",
+      async run() {
+        await runGate;
+        return { finalResponse: "ok", items: [] };
+      },
+    };
+
+    const fakeClient = {
+      startThread() {
+        startCount += 1;
+        return thread;
+      },
+      resumeThread() {
+        return thread;
+      },
+    };
+
+    const adapter = new CodexAdapter({
+      factory: async () => fakeClient as never,
+    });
+
+    const tools = new FakeTools();
+    const first = adapter.onMessage(
+      makeMessage("first", "room-race"),
+      tools,
+      new HistoryProvider([]),
+      null,
+      null,
+      { isSessionBootstrap: false, roomId: "room-race" },
+    );
+    const second = adapter.onMessage(
+      makeMessage("second", "room-race"),
+      tools,
+      new HistoryProvider([]),
+      null,
+      null,
+      { isSessionBootstrap: false, roomId: "room-race" },
+    );
+
+    releaseRuns?.();
+    await Promise.all([first, second]);
+
+    expect(startCount).toBe(1);
+    expect(tools.messages).toEqual(["ok", "ok"]);
+  });
 });

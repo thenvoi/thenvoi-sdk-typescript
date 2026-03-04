@@ -7,6 +7,6 @@ export interface StreamingTransport {
   disconnect(): Promise<void>;
   join(topic: string, handlers: TopicHandlers): Promise<void>;
   leave(topic: string): Promise<void>;
-  runForever(signal: AbortSignal): Promise<void>;
+  runForever(signal?: AbortSignal): Promise<void>;
   isConnected(): boolean;
 }

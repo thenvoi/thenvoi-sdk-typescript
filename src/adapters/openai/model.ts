@@ -100,7 +100,9 @@ function toOpenAIMessages(request: ToolCallingModelRequest): Array<Record<string
   const rounds = request.toolRounds ?? [];
   if (rounds.length === 0) {
     // Fall back to deprecated flat fields for backwards compatibility.
-    if ((request.toolResults?.length ?? 0) === 0) {
+    const legacyToolCalls = request.toolCalls ?? [];
+    const legacyToolResults = request.toolResults ?? [];
+    if (legacyToolCalls.length === 0 && legacyToolResults.length === 0) {
       return messages;
     }
 
@@ -118,7 +120,7 @@ function toOpenAIMessages(request: ToolCallingModelRequest): Array<Record<string
       })),
     });
 
-    for (const result of request.toolResults ?? []) {
+    for (const result of legacyToolResults) {
       messages.push({
         role: "tool",
         tool_call_id: result.toolCallId,

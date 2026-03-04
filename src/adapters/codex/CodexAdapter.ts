@@ -49,6 +49,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
   private codexClient: CodexClientLike | null = null;
   private lastInitFailure = 0;
   private readonly roomThreads = new Map<string, CodexThreadLike>();
+  private readonly roomThreadInitPromises = new Map<string, Promise<CodexThreadLike>>();
 
   public constructor(options?: { config?: CodexAdapterConfig; factory?: CodexFactory }) {
     super();
@@ -127,7 +128,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
       }
     }
 
-    const thread = this.getOrCreateThread(
+    const thread = await this.getOrCreateThread(
       context.roomId,
       history,
       context.isSessionBootstrap,
@@ -159,42 +160,61 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
 
   public async onCleanup(roomId: string): Promise<void> {
     this.roomThreads.delete(roomId);
+    this.roomThreadInitPromises.delete(roomId);
     this.roomConfigOverrides.delete(roomId);
   }
 
-  private getOrCreateThread(
+  private async getOrCreateThread(
     roomId: string,
     history: HistoryProvider,
     isSessionBootstrap: boolean,
     config: CodexAdapterConfig,
-  ): CodexThreadLike {
+  ): Promise<CodexThreadLike> {
     const existing = this.roomThreads.get(roomId);
     if (existing) {
       return existing;
     }
 
+    const initializing = this.roomThreadInitPromises.get(roomId);
+    if (initializing) {
+      return initializing;
+    }
+
     if (!this.codexClient) {
       throw new Error("Codex client not initialized");
     }
+    const client = this.codexClient;
 
-    const resumeThreadId = isSessionBootstrap
-      ? extractThreadIdFromHistory(history.raw)
-      : null;
+    const initPromise = (async (): Promise<CodexThreadLike> => {
+      const resumeThreadId = isSessionBootstrap
+        ? extractThreadIdFromHistory(history.raw)
+        : null;
 
-    let thread: CodexThreadLike;
-    if (resumeThreadId) {
-      try {
-        thread = this.codexClient.resumeThread(resumeThreadId, this.threadOptions(config));
-      } catch {
-        // Thread resume failed (e.g. expired session), fall back to new thread.
-        thread = this.codexClient.startThread(this.threadOptions(config));
+      let thread: CodexThreadLike;
+      if (resumeThreadId) {
+        try {
+          thread = client.resumeThread(resumeThreadId, this.threadOptions(config));
+        } catch {
+          // Thread resume failed (e.g. expired session), fall back to new thread.
+          thread = client.startThread(this.threadOptions(config));
+        }
+      } else {
+        thread = client.startThread(this.threadOptions(config));
       }
-    } else {
-      thread = this.codexClient.startThread(this.threadOptions(config));
-    }
 
-    this.roomThreads.set(roomId, thread);
-    return thread;
+      this.roomThreads.set(roomId, thread);
+      return thread;
+    })();
+
+    this.roomThreadInitPromises.set(roomId, initPromise);
+    try {
+      return await initPromise;
+    } finally {
+      const pending = this.roomThreadInitPromises.get(roomId);
+      if (pending === initPromise) {
+        this.roomThreadInitPromises.delete(roomId);
+      }
+    }
   }
 
   private async reportItems(

@@ -26,6 +26,8 @@ interface LinearThenvoiBridgeServerOptions {
   logger?: Logger;
 }
 
+const VALID_ROOM_STRATEGIES: ReadonlySet<RoomStrategy> = new Set(["issue", "session"]);
+
 export function createLinearThenvoiBridgeApp(options: LinearThenvoiBridgeServerOptions): express.Express {
   const logger = options.logger ?? new ConsoleLogger();
   const store = createSqliteSessionRoomStore(options.stateDbPath);
@@ -44,6 +46,7 @@ export function createLinearThenvoiBridgeApp(options: LinearThenvoiBridgeServerO
 
   const app = express();
   app.disable("x-powered-by");
+  app.locals.sessionRoomStore = store;
 
   app.get("/healthz", (_request, response) => {
     response.status(200).json({ ok: true });
@@ -96,6 +99,20 @@ function getRequiredEnv(name: string): string {
   return value;
 }
 
+function parseRoomStrategy(value: string | undefined): RoomStrategy | undefined {
+  if (!value || value.trim().length === 0) {
+    return undefined;
+  }
+
+  if (VALID_ROOM_STRATEGIES.has(value as RoomStrategy)) {
+    return value as RoomStrategy;
+  }
+
+  throw new Error(
+    `Invalid LINEAR_THENVOI_ROOM_STRATEGY: "${value}". Expected one of: issue, session.`,
+  );
+}
+
 if (isDirectExecution(import.meta.url)) {
   const logger = new ConsoleLogger();
   const port = Number(process.env.PORT ?? "8787");
@@ -115,9 +132,10 @@ if (isDirectExecution(import.meta.url)) {
         .split(",")
         .map((value) => value.trim())
         .filter((value) => value.length > 0),
-      roomStrategy: (process.env.LINEAR_THENVOI_ROOM_STRATEGY as RoomStrategy | undefined) ?? "issue",
+      roomStrategy: parseRoomStrategy(process.env.LINEAR_THENVOI_ROOM_STRATEGY) ?? "issue",
       logger,
     });
+    const sessionRoomStore = app.locals.sessionRoomStore as { close?: () => Promise<void> } | undefined;
 
     const server = app.listen(port, () => {
       logger.info("linear_thenvoi_bridge.server_started", {
@@ -126,9 +144,22 @@ if (isDirectExecution(import.meta.url)) {
       });
     });
 
+    let shuttingDown = false;
     const shutdown = () => {
+      if (shuttingDown) {
+        return;
+      }
+      shuttingDown = true;
       logger.info("linear_thenvoi_bridge.shutting_down", {});
-      server.close();
+      server.close(async () => {
+        try {
+          await sessionRoomStore?.close?.();
+        } catch (error) {
+          logger.error("linear_thenvoi_bridge.shutdown_store_close_failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      });
     };
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);

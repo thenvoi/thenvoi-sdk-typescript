@@ -93,7 +93,9 @@ function toAnthropicMessages(
   const rounds = request.toolRounds ?? [];
   if (rounds.length === 0) {
     // Fall back to deprecated flat fields for backwards compatibility.
-    if ((request.toolResults?.length ?? 0) === 0) {
+    const legacyToolCalls = request.toolCalls ?? [];
+    const legacyToolResults = request.toolResults ?? [];
+    if (legacyToolCalls.length === 0 && legacyToolResults.length === 0) {
       return messages;
     }
 
@@ -108,7 +110,7 @@ function toAnthropicMessages(
       })),
     });
 
-    const toolResultBlocks = (request.toolResults ?? []).map((result) => ({
+    const toolResultBlocks = legacyToolResults.map((result) => ({
       type: "tool_result",
       tool_use_id: result.toolCallId,
       content: toWireString(result.output),

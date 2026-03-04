@@ -103,6 +103,8 @@ export class ParlantAdapter
   private readonly roomSessions = new Map<string, string>();
   private readonly roomCustomers = new Map<string, string>();
   private readonly bootstrappedRooms = new Set<string>();
+  private readonly roomSessionInitPromises = new Map<string, Promise<string>>();
+  private readonly roomBootstrapInitPromises = new Map<string, Promise<void>>();
 
   public constructor(options: ParlantAdapterOptions) {
     super({
@@ -159,9 +161,8 @@ export class ParlantAdapter
         senderName,
       );
 
-      if (context.isSessionBootstrap && !this.bootstrappedRooms.has(context.roomId)) {
-        await this.injectHistory(client, sessionId, history);
-        this.bootstrappedRooms.add(context.roomId);
+      if (context.isSessionBootstrap) {
+        await this.ensureBootstrapHistory(client, sessionId, context.roomId, history);
       }
 
       const userMessage = buildUserMessage({
@@ -219,6 +220,8 @@ export class ParlantAdapter
     this.roomSessions.delete(roomId);
     this.roomCustomers.delete(roomId);
     this.bootstrappedRooms.delete(roomId);
+    this.roomSessionInitPromises.delete(roomId);
+    this.roomBootstrapInitPromises.delete(roomId);
   }
 
   private async getOrCreateSession(
@@ -231,36 +234,88 @@ export class ParlantAdapter
       return existingSession;
     }
 
-    const customerId = await this.getOrCreateCustomer(client, roomId, customerName);
-    const session = await client.sessions.create(
-      {
-        agentId: this.agentId,
-        customerId,
-        title: `Thenvoi Room ${roomId.slice(0, 8)}`,
-        metadata: {
-          thenvoi_room_id: roomId,
-        },
-      },
-      this.requestOptions(),
-    );
+    const initializing = this.roomSessionInitPromises.get(roomId);
+    if (initializing) {
+      return initializing;
+    }
 
-    if (this.systemPrompt.trim().length > 0) {
-      await client.sessions.createEvent(
-        session.id,
+    const initPromise = (async (): Promise<string> => {
+      const customerId = await this.getOrCreateCustomer(client, roomId, customerName);
+      const session = await client.sessions.create(
         {
-          kind: "message",
-          source: "system",
-          message: this.systemPrompt,
+          agentId: this.agentId,
+          customerId,
+          title: `Thenvoi Room ${roomId.slice(0, 8)}`,
           metadata: {
-            thenvoi_system_prompt: true,
+            thenvoi_room_id: roomId,
           },
         },
         this.requestOptions(),
       );
+
+      if (this.systemPrompt.trim().length > 0) {
+        await client.sessions.createEvent(
+          session.id,
+          {
+            kind: "message",
+            source: "system",
+            message: this.systemPrompt,
+            metadata: {
+              thenvoi_system_prompt: true,
+            },
+          },
+          this.requestOptions(),
+        );
+      }
+
+      this.roomSessions.set(roomId, session.id);
+      return session.id;
+    })();
+
+    this.roomSessionInitPromises.set(roomId, initPromise);
+    try {
+      return await initPromise;
+    } finally {
+      const pending = this.roomSessionInitPromises.get(roomId);
+      if (pending === initPromise) {
+        this.roomSessionInitPromises.delete(roomId);
+      }
+    }
+  }
+
+  private async ensureBootstrapHistory(
+    client: ParlantClientLike,
+    sessionId: string,
+    roomId: string,
+    history: ParlantMessages,
+  ): Promise<void> {
+    if (this.bootstrappedRooms.has(roomId)) {
+      return;
     }
 
-    this.roomSessions.set(roomId, session.id);
-    return session.id;
+    const initializing = this.roomBootstrapInitPromises.get(roomId);
+    if (initializing) {
+      await initializing;
+      return;
+    }
+
+    const initPromise = (async (): Promise<void> => {
+      if (this.bootstrappedRooms.has(roomId)) {
+        return;
+      }
+      await this.injectHistory(client, sessionId, history);
+      this.bootstrappedRooms.add(roomId);
+    })();
+
+    this.roomBootstrapInitPromises.set(roomId, initPromise);
+    try {
+      await initPromise;
+    } finally {
+      const pending = this.roomBootstrapInitPromises.get(roomId);
+      if (pending === initPromise) {
+        this.roomBootstrapInitPromises.delete(roomId);
+      }
+    }
   }
 
   private async getOrCreateCustomer(

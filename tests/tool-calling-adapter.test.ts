@@ -125,8 +125,30 @@ class FakeTools implements AgentToolsProtocol {
 
 class FakeModel implements ToolCallingModel {
   private turns = 0;
+  public readonly requests: Array<{
+    toolCalls?: Array<{ id: string; name: string; input: Record<string, unknown> }>;
+    toolResults?: Array<{ toolCallId: string; name: string; output: unknown; isError?: boolean }>;
+    toolRounds?: Array<{
+      toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>;
+      toolResults: Array<{ toolCallId: string; name: string; output: unknown; isError?: boolean }>;
+    }>;
+  }> = [];
 
-  public async complete(): Promise<{ text?: string; toolCalls?: Array<{ id: string; name: string; input: Record<string, unknown> }> }> {
+  public async complete(
+    request: {
+      toolCalls?: Array<{ id: string; name: string; input: Record<string, unknown> }>;
+      toolResults?: Array<{ toolCallId: string; name: string; output: unknown; isError?: boolean }>;
+      toolRounds?: Array<{
+        toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>;
+        toolResults: Array<{ toolCallId: string; name: string; output: unknown; isError?: boolean }>;
+      }>;
+    },
+  ): Promise<{ text?: string; toolCalls?: Array<{ id: string; name: string; input: Record<string, unknown> }> }> {
+    this.requests.push({
+      toolCalls: request.toolCalls,
+      toolResults: request.toolResults,
+      toolRounds: request.toolRounds,
+    });
     this.turns += 1;
     if (this.turns === 1) {
       return {
@@ -164,8 +186,9 @@ const fakeMessage: PlatformMessage = {
 
 describe("ToolCallingAdapter", () => {
   it("runs tool rounds then sends final text", async () => {
+    const model = new FakeModel();
     const adapter = new OpenAIAdapter({
-      model: new FakeModel(),
+      model,
     });
 
     const tools = new FakeTools();
@@ -175,6 +198,21 @@ describe("ToolCallingAdapter", () => {
     });
 
     expect(tools.messages).toEqual(["final answer"]);
+    expect(model.requests).toHaveLength(2);
+
+    const secondRequest = model.requests[1];
+    const flatResults = secondRequest?.toolResults ?? [];
+    const roundResults = (secondRequest?.toolRounds ?? []).flatMap((round) => round.toolResults);
+    const allResults = [...flatResults, ...roundResults];
+
+    expect(allResults).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          toolCallId: "tc1",
+          name: "thenvoi_send_message",
+        }),
+      ]),
+    );
   });
 
   it("emits tool_call and tool_result events when execution reporting is enabled", async () => {

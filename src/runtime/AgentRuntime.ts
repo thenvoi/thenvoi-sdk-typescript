@@ -140,7 +140,17 @@ export class AgentRuntime {
           roomId: event.roomId,
           error,
         });
-        this.onError?.(error, event);
+        if (this.onError) {
+          try {
+            this.onError(error, event);
+          } catch (observerError: unknown) {
+            this.logger.error("Error in runtime onError callback", {
+              eventType: event.type,
+              roomId: event.roomId,
+              error: observerError,
+            });
+          }
+        }
       }
     }
   }

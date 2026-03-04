@@ -28,6 +28,7 @@ const DEFAULT_PEER_PAGE_SIZE = 100;
 const DEFAULT_MAX_PEER_PAGES = 25;
 
 interface PendingTaskRecord extends PendingA2ATask {
+  readonly requireTaskMetadata: boolean;
   readonly queue: AsyncEventQueue<GatewayA2AStatusUpdateEvent>;
 }
 
@@ -206,17 +207,20 @@ export class A2AGatewayAdapter
       return;
     }
 
+    const hadContext = request.contextId.length > 0 && this.contextToRoom.has(request.contextId);
     const [roomId, contextId] = await this.getOrCreateRoom(
       request.contextId,
       peer.id,
     );
 
+    const existing = this.pendingByRoom.get(roomId);
     const queue = new AsyncEventQueue<GatewayA2AStatusUpdateEvent>();
     const pending: PendingTaskRecord = {
       taskId: request.taskId,
       contextId,
       peerId: peer.id,
       roomId,
+      requireTaskMetadata: Boolean(existing) || hadContext,
       queue,
       enqueue: (event) => {
         queue.enqueue(event);
@@ -224,9 +228,9 @@ export class A2AGatewayAdapter
     };
 
     // Cancel any existing pending task for this room before registering the new one.
-    const existing = this.pendingByRoom.get(roomId);
     if (existing) {
-      existing.enqueue(
+      this.finalizePending(
+        existing,
         buildStatusEvent({
           taskId: existing.taskId,
           contextId: existing.contextId,
@@ -235,7 +239,6 @@ export class A2AGatewayAdapter
           text: "Superseded by a new request for the same room.",
         }),
       );
-      this.removePending(existing);
     }
 
     this.pendingByRoom.set(roomId, pending);
@@ -304,7 +307,8 @@ export class A2AGatewayAdapter
     }
 
     // Enqueue a terminal event so the generator yields it before closing.
-    pending.enqueue(
+    this.finalizePending(
+      pending,
       buildStatusEvent({
         taskId,
         contextId: pending.contextId,
@@ -313,7 +317,6 @@ export class A2AGatewayAdapter
         text: `Task canceled by A2A client (${peerId}).`,
       }),
     );
-    this.removePending(pending);
   }
 
   private resolvePeer(peerId: string): GatewayPeer | null {
@@ -394,6 +397,15 @@ export class A2AGatewayAdapter
       this.pendingByTask.delete(pending.taskId);
     }
   }
+
+  private finalizePending(
+    pending: PendingTaskRecord,
+    event: GatewayA2AStatusUpdateEvent,
+  ): void {
+    pending.queue.clear();
+    pending.enqueue(event);
+    this.removePending(pending);
+  }
 }
 
 class AsyncEventQueue<T> {
@@ -418,6 +430,10 @@ class AsyncEventQueue<T> {
     for (const waiter of pending) {
       waiter(null);
     }
+  }
+
+  public clear(): void {
+    this.items.length = 0;
   }
 
   public async dequeue(timeoutMs: number): Promise<T | null> {
@@ -546,10 +562,14 @@ function shouldRouteToPendingTask(
   message: PlatformMessage,
   pending: PendingTaskRecord,
 ): boolean {
-  const metadata = message.metadata;
+  const metadata = message.metadata ?? {};
   const gatewayTaskId = asNonEmptyString(metadata.gateway_task_id);
   if (gatewayTaskId) {
     return gatewayTaskId === pending.taskId;
+  }
+
+  if (pending.requireTaskMetadata) {
+    return false;
   }
 
   const gatewayContextId = asNonEmptyString(metadata.gateway_context_id);

@@ -114,9 +114,13 @@ describe("LangGraphAdapter", () => {
     expect(invokeCalls).toHaveLength(1);
     const messages = invokeCalls[0]?.messages ?? [];
     expect(messages[0]?.[0]).toBe("system");
-    expect(messages.some((message) => message[1] === "historic context")).toBe(true);
-    expect(messages.some((message) => message[1] === "[System]: Participants changed")).toBe(true);
-    expect(messages.some((message) => message[1] === "[System]: Contacts changed")).toBe(true);
+    expect(messages.map((entry) => entry[1])).toEqual([
+      messages[0]?.[1],
+      "historic context",
+      "[System]: Participants changed",
+      "[System]: Contacts changed",
+      "hello",
+    ]);
     expect(tools.messages).toEqual(["LangGraph reply"]);
   });
 

@@ -200,4 +200,65 @@ describe("ParlantAdapter", () => {
     expect(tools.messages).toEqual([]);
     expect(tools.events.some((event) => event.messageType === "error")).toBe(true);
   });
+
+  it("serializes bootstrap initialization for concurrent first messages in one room", async () => {
+    const client = new FakeParlantClient();
+    client.eventPollBatches.push(
+      [{ kind: "message", offset: 40, data: { message: "First concurrent response" } }],
+      [{ kind: "message", offset: 50, data: { message: "Second concurrent response" } }],
+    );
+
+    const adapter = new ParlantAdapter({
+      environment: "https://parlant.example",
+      agentId: "agent-1",
+      clientFactory: async () => client,
+      responseTimeoutSeconds: 1,
+    });
+
+    await adapter.onStarted("Parlant Bridge", "Bridge to parlant");
+
+    const history = [
+      {
+        role: "user" as const,
+        content: "[User]: Earlier question",
+        sender: "User",
+        senderType: "User",
+      },
+      {
+        role: "assistant" as const,
+        content: "Earlier answer",
+        sender: "Assistant",
+        senderType: "Agent",
+      },
+    ];
+
+    const tools = new FakeTools();
+    await Promise.all([
+      adapter.onMessage(
+        makeMessage("Current question A", "room-race"),
+        tools,
+        history,
+        null,
+        null,
+        { isSessionBootstrap: true, roomId: "room-race" },
+      ),
+      adapter.onMessage(
+        makeMessage("Current question B", "room-race"),
+        tools,
+        history,
+        null,
+        null,
+        { isSessionBootstrap: true, roomId: "room-race" },
+      ),
+    ]);
+
+    const historicalEvents = client.eventCreateCalls.filter(
+      (call) => call.params.metadata && (call.params.metadata as Record<string, unknown>).historical === true,
+    );
+
+    expect(client.customerCreateCount).toBe(1);
+    expect(client.sessionCreateCount).toBe(1);
+    expect(historicalEvents).toHaveLength(2);
+    expect(tools.messages).toHaveLength(2);
+  });
 });

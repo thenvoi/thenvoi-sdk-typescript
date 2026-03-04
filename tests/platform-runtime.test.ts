@@ -28,7 +28,10 @@ class FakeTransport implements StreamingTransport {
     this.handlers.delete(topic);
   }
 
-  public async runForever(signal: AbortSignal): Promise<void> {
+  public async runForever(signal?: AbortSignal): Promise<void> {
+    if (!signal) {
+      return;
+    }
     await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
   }
 
@@ -36,13 +39,13 @@ class FakeTransport implements StreamingTransport {
     return this.connected;
   }
 
-  public emit(topic: string, event: string, payload: Record<string, unknown>) {
+  public async emit(topic: string, event: string, payload: Record<string, unknown>): Promise<void> {
     const topicHandlers = this.handlers.get(topic);
     if (!topicHandlers?.[event]) {
       throw new Error(`No handler for ${topic}/${event}`);
     }
 
-    void topicHandlers[event](payload);
+    await Promise.resolve(topicHandlers[event](payload));
   }
 
   public hasTopic(topic: string): boolean {
@@ -53,15 +56,38 @@ class FakeTransport implements StreamingTransport {
 describe("PlatformRuntime", () => {
   it("initializes and dispatches message to adapter", async () => {
     const transport = new FakeTransport();
-    const restApi = new FakeRestApi({}, {
-      id: "a1",
-      name: "Agent",
-      description: "Agent description",
-    });
+    const lifecycle: string[] = [];
+    const markAwareRest = new FakeRestApi(
+      {
+        markMessageProcessing: async (_chatId, _messageId) => {
+          lifecycle.push("processing");
+          return {};
+        },
+        markMessageProcessed: async (_chatId, _messageId) => {
+          lifecycle.push("processed");
+          return {};
+        },
+        markMessageFailed: async () => {
+          lifecycle.push("failed");
+          return {};
+        },
+      },
+      {
+        id: "a1",
+        name: "Agent",
+        description: "Agent description",
+      },
+    );
 
     let seenMessage = "";
+    let resolveSeen: (() => void) | null = null;
+    const seenPromise = new Promise<void>((resolve) => {
+      resolveSeen = resolve;
+    });
     const adapter = new GenericAdapter(async ({ message }) => {
+      lifecycle.push("adapter");
       seenMessage = message.content;
+      resolveSeen?.();
     });
 
     const runtime = new PlatformRuntime({
@@ -71,15 +97,14 @@ describe("PlatformRuntime", () => {
         agentId: "a1",
         apiKey: "k",
         transport,
-        restApi,
+        restApi: markAwareRest,
       }),
     });
 
     await runtime.start(adapter);
 
-    transport.emit("agent_rooms:a1", "room_added", { id: "room-1", status: "active", type: "direct", title: "Room", removed_at: "" });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    transport.emit("chat_room:room-1", "message_created", {
+    await transport.emit("agent_rooms:a1", "room_added", { id: "room-1", status: "active", type: "direct", title: "Room", removed_at: "" });
+    await transport.emit("chat_room:room-1", "message_created", {
       id: "m1",
       content: "hello runtime",
       message_type: "text",
@@ -90,10 +115,11 @@ describe("PlatformRuntime", () => {
       updated_at: new Date().toISOString(),
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await seenPromise;
 
     expect(runtime.name).toBe("Agent");
     expect(seenMessage).toBe("hello runtime");
+    expect(lifecycle).toEqual(["processing", "adapter", "processed"]);
 
     await runtime.stop();
   });
@@ -156,7 +182,7 @@ describe("PlatformRuntime", () => {
     expect(transport.hasTopic("chat_room:room-existing")).toBe(true);
     expect(transport.hasTopic("room_participants:room-existing")).toBe(true);
 
-    transport.emit("chat_room:room-existing", "message_created", {
+    await transport.emit("chat_room:room-existing", "message_created", {
       id: "m1",
       content: "hello existing",
       message_type: "text",
@@ -167,14 +193,11 @@ describe("PlatformRuntime", () => {
       updated_at: new Date().toISOString(),
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(seenMessages).toEqual(["hello existing"]);
 
-    transport.emit("room_participants:room-existing", "room_deleted", {
+    await transport.emit("room_participants:room-existing", "room_deleted", {
       id: "room-existing",
     });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
     expect(transport.hasTopic("chat_room:room-existing")).toBe(false);
     expect(transport.hasTopic("room_participants:room-existing")).toBe(false);
 

@@ -157,8 +157,14 @@ export class GeminiToolCallingModel implements ToolCallingModel {
           ),
         });
       }
-    } else if ((request.toolResults?.length ?? 0) > 0) {
+    } else {
       // Fall back to deprecated flat fields for backwards compatibility.
+      const legacyToolCalls = request.toolCalls ?? [];
+      const legacyToolResults = request.toolResults ?? [];
+      if (legacyToolCalls.length === 0 && legacyToolResults.length === 0) {
+        return merged;
+      }
+
       const partFromCall = this.createPartFromFunctionCall;
       const partFromResponse = this.createPartFromFunctionResponse;
       if (!partFromCall || !partFromResponse) {
@@ -173,7 +179,7 @@ export class GeminiToolCallingModel implements ToolCallingModel {
 
       merged.push({
         role: "user",
-        parts: (request.toolResults ?? []).map((result) =>
+        parts: legacyToolResults.map((result) =>
           partFromResponse(
             result.toolCallId,
             result.name,

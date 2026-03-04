@@ -289,6 +289,9 @@ describe("A2AGatewayAdapter", () => {
       makePeerMessage({
         content: "done again",
         roomId: "room-1",
+        metadata: {
+          gateway_task_id: "task-2",
+        },
       }),
       new FakeTools(),
       { contextToRoom: {}, roomParticipants: {} },
@@ -456,5 +459,89 @@ describe("A2AGatewayAdapter", () => {
     const finalEvent = await iterator.next();
     const text = finalEvent.value?.status?.message?.parts?.[0]?.text;
     expect(text).toBe("matched by task metadata");
+  });
+
+  it("does not let superseded legacy sender messages finalize the new pending task", async () => {
+    const rest = new FakeRestApi();
+
+    let onRequest: ((request: GatewayRequest) => AsyncIterable<unknown>) | null = null;
+    const adapter = new A2AGatewayAdapter({
+      thenvoiRest: rest,
+      serverFactory: (options) => {
+        onRequest = options.onRequest;
+        return {
+          start: async () => undefined,
+          stop: async () => undefined,
+        };
+      },
+      responseTimeoutMs: 2_000,
+    });
+
+    await adapter.onStarted("Gateway", "A2A gateway");
+
+    const oldStream = onRequest!({
+      peerId: "weather-agent",
+      taskId: "task-old",
+      contextId: "ctx-race",
+      message: {
+        kind: "message",
+        messageId: "m-old",
+        role: "user",
+        parts: [{ kind: "text", text: "First request" }],
+      },
+    });
+    const oldIterator = oldStream[Symbol.asyncIterator]();
+    await oldIterator.next(); // old working
+
+    const newStream = onRequest!({
+      peerId: "weather-agent",
+      taskId: "task-new",
+      contextId: "ctx-race",
+      message: {
+        kind: "message",
+        messageId: "m-new",
+        role: "user",
+        parts: [{ kind: "text", text: "Second request" }],
+      },
+    });
+    const newIterator = newStream[Symbol.asyncIterator]();
+    await newIterator.next(); // new working
+
+    const superseded = await oldIterator.next();
+    expect(superseded.value?.status?.state).toBe("failed");
+    expect(superseded.value?.final).toBe(true);
+
+    await adapter.onMessage(
+      makePeerMessage({
+        content: "stale sender-only message",
+        roomId: "room-1",
+        senderId: "peer-weather",
+      }),
+      new FakeTools(),
+      { contextToRoom: {}, roomParticipants: {} },
+      null,
+      null,
+      { isSessionBootstrap: false, roomId: "room-1" },
+    );
+
+    await adapter.onMessage(
+      makePeerMessage({
+        content: "fresh task-correlated response",
+        roomId: "room-1",
+        senderId: "peer-weather",
+        metadata: {
+          gateway_task_id: "task-new",
+        },
+      }),
+      new FakeTools(),
+      { contextToRoom: {}, roomParticipants: {} },
+      null,
+      null,
+      { isSessionBootstrap: false, roomId: "room-1" },
+    );
+
+    const newFinal = await newIterator.next();
+    const text = newFinal.value?.status?.message?.parts?.[0]?.text;
+    expect(text).toBe("fresh task-correlated response");
   });
 });
