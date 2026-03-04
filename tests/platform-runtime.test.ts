@@ -28,11 +28,7 @@ class FakeTransport implements StreamingTransport {
     this.handlers.delete(topic);
   }
 
-  public async runForever(signal?: AbortSignal): Promise<void> {
-    if (!signal) {
-      return;
-    }
-
+  public async runForever(signal: AbortSignal): Promise<void> {
     await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
   }
 

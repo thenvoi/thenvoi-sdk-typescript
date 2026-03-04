@@ -47,6 +47,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
   private readonly factoryOverride?: CodexFactory;
   private clientInitPromise: Promise<CodexClientLike> | null = null;
   private codexClient: CodexClientLike | null = null;
+  private lastInitFailure = 0;
   private readonly roomThreads = new Map<string, CodexThreadLike>();
 
   public constructor(options?: { config?: CodexAdapterConfig; factory?: CodexFactory }) {
@@ -76,10 +77,24 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
       return this.codexClient;
     }
     if (!this.clientInitPromise) {
-      this.clientInitPromise = (this.factoryOverride ?? loadCodexFactory())().then((client) => {
-        this.codexClient = client;
-        return client;
-      });
+      const cooldownMs = 2_000;
+      const elapsed = Date.now() - this.lastInitFailure;
+      if (this.lastInitFailure > 0 && elapsed < cooldownMs) {
+        throw new Error(
+          `Codex client init failed recently (${elapsed}ms ago). Retrying after ${cooldownMs}ms cooldown.`,
+        );
+      }
+
+      this.clientInitPromise = (this.factoryOverride ?? loadCodexFactory())()
+        .then((client) => {
+          this.codexClient = client;
+          return client;
+        })
+        .catch((error: unknown) => {
+          this.clientInitPromise = null;
+          this.lastInitFailure = Date.now();
+          throw error;
+        });
     }
     return this.clientInitPromise;
   }

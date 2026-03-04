@@ -246,15 +246,15 @@ describe("ToolCallingAdapter", () => {
 
     class ErrorToolModel implements ToolCallingModel {
       private turns = 0;
-      public async complete(req: { toolResults?: Array<{ output: unknown }> }): Promise<{ text?: string; toolCalls?: Array<{ id: string; name: string; input: Record<string, unknown> }> }> {
+      public async complete(req: { toolRounds?: Array<{ toolResults: Array<{ output: unknown }> }>; toolResults?: Array<{ output: unknown }> }): Promise<{ text?: string; toolCalls?: Array<{ id: string; name: string; input: Record<string, unknown> }> }> {
         this.turns += 1;
         if (this.turns === 1) {
           return {
             toolCalls: [{ id: "tc1", name: "search", input: { query: "test" } }],
           };
         }
-        // Verify the error was caught and passed as tool result
-        const result = req.toolResults?.[0]?.output;
+        // Verify the error was caught and passed as tool result (check toolRounds first, fall back to deprecated flat field)
+        const result = req.toolRounds?.[0]?.toolResults?.[0]?.output ?? req.toolResults?.[0]?.output;
         return { text: typeof result === "string" && result.includes("API down") ? "error_caught" : "no_error" };
       }
     }

@@ -41,7 +41,7 @@ export function loadAgentConfig(
     );
   }
 
-  const parsed = yaml.load(raw);
+  const parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
   if (!parsed || typeof parsed !== "object") {
     throw new ValidationError(`Invalid config file: ${filePath}. Expected a YAML object.`);
   }

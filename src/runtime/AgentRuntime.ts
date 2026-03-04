@@ -13,6 +13,7 @@ interface AgentRuntimeOptions {
   onExecute: (context: ExecutionContext, event: PlatformEvent) => Promise<void>;
   onSessionCleanup?: (roomId: string) => Promise<void>;
   onContactEvent?: (event: ContactEvent) => Promise<void>;
+  onError?: (error: unknown, event: PlatformEvent) => void;
   sessionConfig?: SessionConfig;
   agentConfig?: AgentConfig;
   logger?: Logger;
@@ -24,6 +25,7 @@ export class AgentRuntime {
   private readonly onExecute: (context: ExecutionContext, event: PlatformEvent) => Promise<void>;
   private readonly onSessionCleanup: (roomId: string) => Promise<void>;
   private readonly onContactEvent?: (event: ContactEvent) => Promise<void>;
+  private readonly onError?: (error: unknown, event: PlatformEvent) => void;
   private readonly sessionConfig: Required<SessionConfig>;
   private readonly autoSubscribeExistingRooms: boolean;
   private readonly contexts = new Map<string, ExecutionContext>();
@@ -39,6 +41,7 @@ export class AgentRuntime {
     this.agentId = options.agentId;
     this.onExecute = options.onExecute;
     this.onSessionCleanup = options.onSessionCleanup ?? (async () => undefined);
+    this.onError = options.onError;
     this.logger = options.logger ?? new NoopLogger();
     this.onContactEvent = options.onContactEvent;
     this.sessionConfig = {
@@ -131,12 +134,13 @@ export class AgentRuntime {
       }
       try {
         await this.handleEvent(event);
-      } catch (error) {
+      } catch (error: unknown) {
         this.logger.error("Error handling platform event", {
           eventType: event.type,
           roomId: event.roomId,
           error,
         });
+        this.onError?.(error, event);
       }
     }
   }

@@ -119,12 +119,19 @@ if (isDirectExecution(import.meta.url)) {
       logger,
     });
 
-    app.listen(port, () => {
+    const server = app.listen(port, () => {
       logger.info("linear_thenvoi_bridge.server_started", {
         port,
         mode: "example_rest_stub",
       });
     });
+
+    const shutdown = () => {
+      logger.info("linear_thenvoi_bridge.shutting_down", {});
+      server.close();
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
   } catch (error) {
     logger.error("linear_thenvoi_bridge.startup_failed", {
       error: error instanceof Error ? error.message : String(error),

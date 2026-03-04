@@ -223,6 +223,21 @@ export class A2AGatewayAdapter
       },
     };
 
+    // Cancel any existing pending task for this room before registering the new one.
+    const existing = this.pendingByRoom.get(roomId);
+    if (existing) {
+      existing.enqueue(
+        buildStatusEvent({
+          taskId: existing.taskId,
+          contextId: existing.contextId,
+          state: "failed",
+          final: true,
+          text: "Superseded by a new request for the same room.",
+        }),
+      );
+      this.removePending(existing);
+    }
+
     this.pendingByRoom.set(roomId, pending);
     this.pendingByTask.set(pending.taskId, pending);
 

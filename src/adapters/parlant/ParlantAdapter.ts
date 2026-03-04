@@ -98,6 +98,7 @@ export class ParlantAdapter
 
   private client: ParlantClientLike | null = null;
   private clientInitPromise: Promise<ParlantClientLike> | null = null;
+  private lastInitFailure = 0;
   private systemPrompt = "";
   private readonly roomSessions = new Map<string, string>();
   private readonly roomCustomers = new Map<string, string>();
@@ -418,10 +419,24 @@ export class ParlantAdapter
       return this.client;
     }
     if (!this.clientInitPromise) {
-      this.clientInitPromise = this.createClient().then((client) => {
-        this.client = client;
-        return client;
-      });
+      const cooldownMs = 2_000;
+      const elapsed = Date.now() - this.lastInitFailure;
+      if (this.lastInitFailure > 0 && elapsed < cooldownMs) {
+        throw new Error(
+          `Parlant client init failed recently (${elapsed}ms ago). Retrying after ${cooldownMs}ms cooldown.`,
+        );
+      }
+
+      this.clientInitPromise = this.createClient()
+        .then((client) => {
+          this.client = client;
+          return client;
+        })
+        .catch((error: unknown) => {
+          this.clientInitPromise = null;
+          this.lastInitFailure = Date.now();
+          throw error;
+        });
     }
     return this.clientInitPromise;
   }

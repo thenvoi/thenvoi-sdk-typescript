@@ -120,16 +120,20 @@ describe("LangGraphAdapter", () => {
     expect(tools.messages).toEqual(["LangGraph reply"]);
   });
 
-  it("reports tool stream events when enabled", async () => {
+  it("reports tool stream events when enabled and extracts final text from stream", async () => {
     const graph = {
       streamEvents() {
         return streamFrom([
           { event: "on_tool_start", name: "thenvoi_send_message" },
           { event: "on_tool_end", name: "thenvoi_send_message" },
+          {
+            event: "on_chain_end",
+            data: { output: { messages: [["assistant", "streamed reply"]] } },
+          },
         ]);
       },
       async invoke() {
-        return "done";
+        throw new Error("invoke should not be called when streaming is used");
       },
     };
 
@@ -149,7 +153,7 @@ describe("LangGraphAdapter", () => {
     expect(tools.events).toHaveLength(2);
     expect(tools.events[0]?.messageType).toBe("tool_call");
     expect(tools.events[1]?.messageType).toBe("tool_result");
-    expect(tools.messages).toEqual(["done"]);
+    expect(tools.messages).toEqual(["streamed reply"]);
   });
 
   it("re-injects system prompt after room cleanup", async () => {
