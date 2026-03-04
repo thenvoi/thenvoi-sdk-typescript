@@ -1,10 +1,7 @@
 export class ThenvoiSdkError extends Error {
-  public readonly cause?: unknown;
-
   public constructor(message: string, cause?: unknown) {
-    super(message);
+    super(message, cause !== undefined ? { cause } : undefined);
     this.name = "ThenvoiSdkError";
-    this.cause = cause;
   }
 }
 

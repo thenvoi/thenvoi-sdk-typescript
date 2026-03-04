@@ -8,6 +8,7 @@ import { toDisplayText, toWireString } from "../shared/coercion";
 import {
   ensureToolCalls,
   mapConversationMessages,
+  mergeConsecutiveSameRole,
   normalizeConversationRole,
 } from "../tool-calling/valueUtils";
 
@@ -36,6 +37,7 @@ export class AnthropicToolCallingModel implements ToolCallingModel {
   private readonly maxTokens: number;
   private readonly clientFactory?: AnthropicClientFactory;
   private client: AnthropicClientLike | null = null;
+  private clientInitPromise: Promise<AnthropicClientLike> | null = null;
 
   public constructor(options: AnthropicToolCallingModelOptions) {
     this.model = options.model;
@@ -46,11 +48,12 @@ export class AnthropicToolCallingModel implements ToolCallingModel {
 
   public async complete(request: ToolCallingModelRequest): Promise<ToolCallingResponse> {
     const client = await this.getClient();
+    const systemPrompt = request.systemPrompt?.trim();
 
     const response = await client.messages.create({
       model: this.model,
       max_tokens: this.maxTokens,
-      system: request.systemPrompt,
+      ...(systemPrompt ? { system: systemPrompt } : {}),
       messages: toAnthropicMessages(request),
       tools: request.tools,
     });
@@ -63,43 +66,84 @@ export class AnthropicToolCallingModel implements ToolCallingModel {
       return this.client;
     }
 
-    const factory = this.clientFactory ?? (await loadAnthropicClientFactory());
-    this.client = await factory({ apiKey: this.apiKey });
-    return this.client;
+    if (!this.clientInitPromise) {
+      this.clientInitPromise = (async () => {
+        const factory = this.clientFactory ?? (await loadAnthropicClientFactory());
+        const client = await factory({ apiKey: this.apiKey });
+        this.client = client;
+        return client;
+      })();
+
+      this.clientInitPromise.catch(() => {
+        this.clientInitPromise = null;
+      });
+    }
+
+    return this.clientInitPromise;
   }
 }
 
 function toAnthropicMessages(
   request: ToolCallingModelRequest,
 ): Array<Record<string, unknown>> {
-  const messages = mapConversationMessages(request, toBaseAnthropicMessage);
+  const messages = mergeConsecutiveSameRole(
+    mapConversationMessages(request, toBaseAnthropicMessage),
+  );
 
-  if ((request.toolResults?.length ?? 0) === 0) {
+  const rounds = request.toolRounds ?? [];
+  if (rounds.length === 0) {
+    // Fall back to deprecated flat fields for backwards compatibility.
+    if ((request.toolResults?.length ?? 0) === 0) {
+      return messages;
+    }
+
+    const toolCalls = ensureToolCalls(request);
+    messages.push({
+      role: "assistant",
+      content: toolCalls.map((call) => ({
+        type: "tool_use",
+        id: call.id,
+        name: call.name,
+        input: call.input,
+      })),
+    });
+
+    const toolResultBlocks = (request.toolResults ?? []).map((result) => ({
+      type: "tool_result",
+      tool_use_id: result.toolCallId,
+      content: toWireString(result.output),
+      is_error: result.isError ?? false,
+    }));
+
+    messages.push({
+      role: "user",
+      content: toolResultBlocks,
+    });
+
     return messages;
   }
 
-  const toolCalls = ensureToolCalls(request);
-  messages.push({
-    role: "assistant",
-    content: toolCalls.map((call) => ({
-      type: "tool_use",
-      id: call.id,
-      name: call.name,
-      input: call.input,
-    })),
-  });
+  for (const round of rounds) {
+    messages.push({
+      role: "assistant",
+      content: round.toolCalls.map((call) => ({
+        type: "tool_use",
+        id: call.id,
+        name: call.name,
+        input: call.input,
+      })),
+    });
 
-  const toolResultBlocks = (request.toolResults ?? []).map((result) => ({
-    type: "tool_result",
-    tool_use_id: result.toolCallId,
-    content: serializeToolOutput(result.output),
-    is_error: result.isError ?? false,
-  }));
-
-  messages.push({
-    role: "user",
-    content: toolResultBlocks,
-  });
+    messages.push({
+      role: "user",
+      content: round.toolResults.map((result) => ({
+        type: "tool_result",
+        tool_use_id: result.toolCallId,
+        content: toWireString(result.output),
+        is_error: result.isError ?? false,
+      })),
+    });
+  }
 
   return messages;
 }
@@ -170,10 +214,6 @@ function parseAnthropicResponse(
     text: text || undefined,
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
   };
-}
-
-function serializeToolOutput(output: unknown): string {
-  return toWireString(output);
 }
 
 async function loadAnthropicClientFactory(): Promise<AnthropicClientFactory> {

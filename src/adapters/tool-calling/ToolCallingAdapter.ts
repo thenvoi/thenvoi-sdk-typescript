@@ -11,11 +11,11 @@ import {
   findCustomTool,
 } from "../../runtime/tools/customTools";
 import type {
-  ToolCall,
   ToolCallingModel,
   ToolCallingModelRequest,
   ToolCallingResponse,
   ToolResult,
+  ToolRound,
 } from "./types";
 
 export interface ToolCallingAdapterOptions {
@@ -68,8 +68,7 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
 
     const messages = this.buildMessages(history, message, participantsMessage, contactsMessage);
 
-    const allToolCalls: ToolCall[] = [];
-    const allToolResults: ToolResult[] = [];
+    const toolRounds: ToolRound[] = [];
 
     let response = await this.model.complete({
       systemPrompt: this.systemPrompt,
@@ -77,10 +76,10 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
       tools: schemas,
     });
 
-    let rounds = 0;
+    let roundCount = 0;
     while ((response.toolCalls?.length ?? 0) > 0) {
-      rounds += 1;
-      if (rounds > this.maxToolRounds) {
+      roundCount += 1;
+      if (roundCount > this.maxToolRounds) {
         await tools.sendEvent(
           `Stopped tool loop after ${this.maxToolRounds} rounds to prevent infinite recursion.`,
           "error",
@@ -89,7 +88,6 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
       }
 
       const roundToolCalls = response.toolCalls ?? [];
-      allToolCalls.push(...roundToolCalls);
 
       const roundToolResults: ToolResult[] = [];
       for (const call of roundToolCalls) {
@@ -144,14 +142,13 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
         }
       }
 
-      allToolResults.push(...roundToolResults);
+      toolRounds.push({ toolCalls: roundToolCalls, toolResults: roundToolResults });
 
       response = await this.model.complete({
         systemPrompt: this.systemPrompt,
         messages,
         tools: schemas,
-        toolCalls: allToolCalls,
-        toolResults: allToolResults,
+        toolRounds,
       });
     }
 
@@ -191,7 +188,8 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
 
 function isToolOutputError(output: unknown): boolean {
   if (typeof output === "string") {
-    return output.toLowerCase().startsWith("error");
+    const lower = output.toLowerCase();
+    return lower.startsWith("error:") || lower.startsWith("error executing ");
   }
 
   if (output && typeof output === "object" && "ok" in output) {

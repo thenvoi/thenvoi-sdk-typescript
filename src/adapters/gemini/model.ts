@@ -11,6 +11,30 @@ import {
   normalizeConversationRole,
 } from "../tool-calling/valueUtils";
 
+/**
+ * Merge consecutive Gemini contents with the same role by combining their parts arrays.
+ * Required because the Gemini API rejects consecutive same-role messages.
+ */
+function mergeConsecutiveGeminiContents(
+  contents: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  if (contents.length <= 1) {
+    return contents;
+  }
+
+  const merged: Array<Record<string, unknown>> = [];
+  for (const msg of contents) {
+    const prev = merged[merged.length - 1];
+    if (prev && prev.role === msg.role && Array.isArray(prev.parts) && Array.isArray(msg.parts)) {
+      prev.parts = [...(prev.parts as unknown[]), ...(msg.parts as unknown[])];
+    } else {
+      merged.push({ ...msg });
+    }
+  }
+
+  return merged;
+}
+
 interface GeminiGenerateResponseLike {
   text?: string;
   functionCalls?: Array<{
@@ -47,6 +71,8 @@ export class GeminiToolCallingModel implements ToolCallingModel {
   private readonly apiKey?: string;
   private readonly clientFactory?: GeminiClientFactory;
   private client: GeminiClientLike | null = null;
+  private clientInitPromise: Promise<GeminiClientLike> | null = null;
+  private partFactoriesPromise: Promise<void> | null = null;
   private createPartFromFunctionCall: ((name: string, args: Record<string, unknown>) => unknown) | null = null;
   private createPartFromFunctionResponse:
     | ((id: string, name: string, response: Record<string, unknown>) => unknown)
@@ -103,7 +129,36 @@ export class GeminiToolCallingModel implements ToolCallingModel {
       contents.push(converted);
     }
 
-    if ((request.toolResults?.length ?? 0) > 0) {
+    // Merge consecutive same-role entries before appending tool call/result blocks.
+    const merged = mergeConsecutiveGeminiContents(contents);
+
+    const rounds = request.toolRounds ?? [];
+    if (rounds.length > 0) {
+      const partFromCall = this.createPartFromFunctionCall;
+      const partFromResponse = this.createPartFromFunctionResponse;
+      if (!partFromCall || !partFromResponse) {
+        throw new Error("Part factories not initialized. Call ensurePartFactories() first.");
+      }
+
+      for (const round of rounds) {
+        merged.push({
+          role: "model",
+          parts: round.toolCalls.map((call) => partFromCall(call.name, call.input)),
+        });
+
+        merged.push({
+          role: "user",
+          parts: round.toolResults.map((result) =>
+            partFromResponse(
+              result.toolCallId,
+              result.name,
+              asFunctionResponsePayload(result),
+            ),
+          ),
+        });
+      }
+    } else if ((request.toolResults?.length ?? 0) > 0) {
+      // Fall back to deprecated flat fields for backwards compatibility.
       const partFromCall = this.createPartFromFunctionCall;
       const partFromResponse = this.createPartFromFunctionResponse;
       if (!partFromCall || !partFromResponse) {
@@ -111,28 +166,24 @@ export class GeminiToolCallingModel implements ToolCallingModel {
       }
 
       const toolCalls = ensureToolCalls(request);
-      const modelParts = toolCalls.map((call) =>
-        partFromCall(call.name, call.input),
-      );
-      contents.push({
+      merged.push({
         role: "model",
-        parts: modelParts,
+        parts: toolCalls.map((call) => partFromCall(call.name, call.input)),
       });
 
-      const resultParts = (request.toolResults ?? []).map((result) =>
-        partFromResponse(
-          result.toolCallId,
-          result.name,
-          asFunctionResponsePayload(result),
-        ),
-      );
-      contents.push({
+      merged.push({
         role: "user",
-        parts: resultParts,
+        parts: (request.toolResults ?? []).map((result) =>
+          partFromResponse(
+            result.toolCallId,
+            result.name,
+            asFunctionResponsePayload(result),
+          ),
+        ),
       });
     }
 
-    return contents;
+    return merged;
   }
 
   private toBaseContent(entry: Record<string, unknown>): Record<string, unknown> | null {
@@ -193,9 +244,20 @@ export class GeminiToolCallingModel implements ToolCallingModel {
       return this.client;
     }
 
-    const factory = this.clientFactory ?? (await loadGeminiClientFactory());
-    this.client = await factory({ apiKey: this.apiKey });
-    return this.client;
+    if (!this.clientInitPromise) {
+      this.clientInitPromise = (async () => {
+        const factory = this.clientFactory ?? (await loadGeminiClientFactory());
+        const client = await factory({ apiKey: this.apiKey });
+        this.client = client;
+        return client;
+      })();
+
+      this.clientInitPromise.catch(() => {
+        this.clientInitPromise = null;
+      });
+    }
+
+    return this.clientInitPromise;
   }
 
   private async ensurePartFactories(): Promise<void> {
@@ -203,26 +265,36 @@ export class GeminiToolCallingModel implements ToolCallingModel {
       return;
     }
 
-    const module = (await import("@google/genai")) as {
-      createPartFromFunctionCall?: (
-        name: string,
-        args: Record<string, unknown>,
-      ) => unknown;
-      createPartFromFunctionResponse?: (
-        id: string,
-        name: string,
-        response: Record<string, unknown>,
-      ) => unknown;
-    };
+    if (!this.partFactoriesPromise) {
+      this.partFactoriesPromise = (async () => {
+        const module = (await import("@google/genai")) as {
+          createPartFromFunctionCall?: (
+            name: string,
+            args: Record<string, unknown>,
+          ) => unknown;
+          createPartFromFunctionResponse?: (
+            id: string,
+            name: string,
+            response: Record<string, unknown>,
+          ) => unknown;
+        };
 
-    if (!module.createPartFromFunctionCall || !module.createPartFromFunctionResponse) {
-      throw new Error(
-        'GeminiAdapter requires createPartFromFunctionCall/createPartFromFunctionResponse from "@google/genai".',
-      );
+        if (!module.createPartFromFunctionCall || !module.createPartFromFunctionResponse) {
+          throw new Error(
+            'GeminiAdapter requires createPartFromFunctionCall/createPartFromFunctionResponse from "@google/genai".',
+          );
+        }
+
+        this.createPartFromFunctionCall = module.createPartFromFunctionCall;
+        this.createPartFromFunctionResponse = module.createPartFromFunctionResponse;
+      })();
+
+      this.partFactoriesPromise.catch(() => {
+        this.partFactoriesPromise = null;
+      });
     }
 
-    this.createPartFromFunctionCall = module.createPartFromFunctionCall;
-    this.createPartFromFunctionResponse = module.createPartFromFunctionResponse;
+    return this.partFactoriesPromise;
   }
 }
 

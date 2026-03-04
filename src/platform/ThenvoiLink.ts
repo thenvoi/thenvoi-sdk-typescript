@@ -108,15 +108,15 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
       return;
     }
 
-    for (const roomId of this.subscribedRooms) {
-      await this.unsubscribeRoom(roomId);
-    }
+    await Promise.allSettled(
+      [...this.subscribedRooms].map((roomId) => this.unsubscribeRoom(roomId)),
+    );
 
     await this.transport.disconnect();
     this.connected = false;
   }
 
-  public async runForever(signal?: AbortSignal): Promise<void> {
+  public async runForever(signal: AbortSignal): Promise<void> {
     await this.transport.runForever(signal);
   }
 
@@ -132,8 +132,8 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
 
   public async subscribeAgentRooms(): Promise<void> {
     await this.transport.join(`agent_rooms:${this.agentId}`, {
-      room_added: (payload) => this.emit("room_added", payload, payload.id as string),
-      room_removed: (payload) => this.emit("room_removed", payload, payload.id as string),
+      room_added: (payload) => this.emit("room_added", payload, typeof payload.id === "string" ? payload.id : String(payload.id ?? "")),
+      room_removed: (payload) => this.emit("room_removed", payload, typeof payload.id === "string" ? payload.id : String(payload.id ?? "")),
     });
   }
 
@@ -234,24 +234,24 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
   public async markProcessing(roomId: string, messageId: string): Promise<void> {
     try {
       await this.rest.markMessageProcessing(roomId, messageId);
-    } catch {
-      // best-effort lifecycle signaling
+    } catch (error: unknown) {
+      this.logger.debug("markProcessing failed (best-effort)", { roomId, messageId, error });
     }
   }
 
   public async markProcessed(roomId: string, messageId: string): Promise<void> {
     try {
       await this.rest.markMessageProcessed(roomId, messageId);
-    } catch {
-      // best-effort lifecycle signaling
+    } catch (error: unknown) {
+      this.logger.debug("markProcessed failed (best-effort)", { roomId, messageId, error });
     }
   }
 
   public async markFailed(roomId: string, messageId: string, error: string): Promise<void> {
     try {
       await this.rest.markMessageFailed(roomId, messageId, error.trim() || "Unknown error");
-    } catch {
-      // best-effort lifecycle signaling
+    } catch (err: unknown) {
+      this.logger.debug("markFailed failed (best-effort)", { roomId, messageId, error: err });
     }
   }
 

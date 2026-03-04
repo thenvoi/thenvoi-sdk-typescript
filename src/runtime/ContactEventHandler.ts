@@ -43,10 +43,12 @@ export class ContactEventHandler {
   private readonly onHubEvent?: (roomId: string, event: MessageEvent) => Promise<void>;
   private readonly onHubInit?: (roomId: string, systemPrompt: string) => Promise<void>;
 
-  private readonly dedup = new Map<string, true>();
+  private readonly dedup = new Set<string>();
   private readonly dedupOrder: string[] = [];
+  private syntheticIdCounter = 0;
   private readonly requestCache = new Map<string, RequestInfo>();
   private hubRoomId: string | null = null;
+  private hubRoomInitPromise: Promise<string> | null = null;
 
   public constructor(options: ContactEventHandlerOptions) {
     this.config = options.config;
@@ -97,7 +99,7 @@ export class ContactEventHandler {
   }
 
   private async handleCallback(event: ContactEvent, tools?: AdapterToolsProtocol): Promise<void> {
-    const callback = (this.config as { onEvent?: ContactEventCallback }).onEvent;
+    const callback = this.config.onEvent;
     if (!callback) {
       this.logger.warn("Contact event callback strategy configured but no onEvent callback provided");
       return;
@@ -125,17 +127,15 @@ export class ContactEventHandler {
       return;
     }
 
-    // Initialize hub room if needed
+    // Initialize hub room if needed — use promise lock to prevent concurrent creation.
     if (!this.hubRoomId) {
+      if (!this.hubRoomInitPromise) {
+        this.hubRoomInitPromise = this.initHubRoom(hubTaskId);
+      }
       try {
-        const result = await this.rest.createChat(hubTaskId);
-        this.hubRoomId = result.id;
-        this.logger.info("Hub room created for contact events", { roomId: this.hubRoomId });
-
-        if (this.onHubInit) {
-          await this.onHubInit(this.hubRoomId, HUB_ROOM_SYSTEM_PROMPT);
-        }
+        this.hubRoomId = await this.hubRoomInitPromise;
       } catch (error) {
+        this.hubRoomInitPromise = null;
         this.logger.error("Failed to create hub room", {
           error: error instanceof Error ? error.message : String(error),
         });
@@ -160,18 +160,19 @@ export class ContactEventHandler {
 
     // Push synthetic message to hub for LLM processing
     if (this.onHubEvent) {
+      const now = new Date().toISOString();
       const syntheticEvent: MessageEvent = {
         type: "message_created",
         roomId: this.hubRoomId,
         payload: {
-          id: `contact-evt-${Date.now()}`,
+          id: `contact-evt-${Date.now()}-${this.syntheticIdCounter++}`,
           content: formattedMessage,
           message_type: "contact_event",
           sender_id: SYNTHETIC_CONTACT_EVENTS_SENDER_ID,
           sender_type: SYNTHETIC_SENDER_TYPE,
           sender_name: SYNTHETIC_CONTACT_EVENTS_SENDER_NAME,
-          inserted_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          inserted_at: now,
+          updated_at: now,
         },
       };
 
@@ -183,6 +184,17 @@ export class ContactEventHandler {
         });
       }
     }
+  }
+
+  private async initHubRoom(hubTaskId: string): Promise<string> {
+    const result = await this.rest.createChat(hubTaskId);
+    this.logger.info("Hub room created for contact events", { roomId: result.id });
+
+    if (this.onHubInit) {
+      await this.onHubInit(result.id, HUB_ROOM_SYSTEM_PROMPT);
+    }
+
+    return result.id;
   }
 
   public formatEventMessage(event: ContactEvent): string {
@@ -238,7 +250,7 @@ export class ContactEventHandler {
   }
 
   private recordDedup(key: string): void {
-    this.dedup.set(key, true);
+    this.dedup.add(key);
     this.dedupOrder.push(key);
 
     while (this.dedupOrder.length > LRU_MAX_SIZE) {

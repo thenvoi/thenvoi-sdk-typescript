@@ -66,7 +66,7 @@ describe("runtime utility parity", () => {
     tracker.markSent();
     expect(tracker.changed()).toBe(false);
 
-    const retry = new MessageRetryTracker(1, "room-1");
+    const retry = new MessageRetryTracker(1);
     expect(retry.recordAttempt("m1")).toEqual([1, false]);
     expect(retry.recordAttempt("m1")).toEqual([2, true]);
     expect(retry.isPermanentlyFailed("m1")).toBe(true);

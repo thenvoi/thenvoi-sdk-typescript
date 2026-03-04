@@ -41,6 +41,7 @@ export class OpenAIToolCallingModel implements ToolCallingModel {
   private readonly apiKey?: string;
   private readonly clientFactory?: OpenAIClientFactory;
   private client: OpenAIClientLike | null = null;
+  private clientInitPromise: Promise<OpenAIClientLike> | null = null;
 
   public constructor(options: OpenAIToolCallingModelOptions) {
     this.model = options.model;
@@ -69,9 +70,20 @@ export class OpenAIToolCallingModel implements ToolCallingModel {
       return this.client;
     }
 
-    const factory = this.clientFactory ?? (await loadOpenAIClientFactory());
-    this.client = await factory({ apiKey: this.apiKey });
-    return this.client;
+    if (!this.clientInitPromise) {
+      this.clientInitPromise = (async () => {
+        const factory = this.clientFactory ?? (await loadOpenAIClientFactory());
+        const client = await factory({ apiKey: this.apiKey });
+        this.client = client;
+        return client;
+      })();
+
+      this.clientInitPromise.catch(() => {
+        this.clientInitPromise = null;
+      });
+    }
+
+    return this.clientInitPromise;
   }
 }
 
@@ -85,31 +97,61 @@ function toOpenAIMessages(request: ToolCallingModelRequest): Array<Record<string
     });
   }
 
-  if ((request.toolResults?.length ?? 0) === 0) {
+  const rounds = request.toolRounds ?? [];
+  if (rounds.length === 0) {
+    // Fall back to deprecated flat fields for backwards compatibility.
+    if ((request.toolResults?.length ?? 0) === 0) {
+      return messages;
+    }
+
+    const toolCalls = ensureToolCalls(request);
+    messages.push({
+      role: "assistant",
+      content: "",
+      tool_calls: toolCalls.map((call) => ({
+        id: call.id,
+        type: "function",
+        function: {
+          name: call.name,
+          arguments: serializeArguments(call.input),
+        },
+      })),
+    });
+
+    for (const result of request.toolResults ?? []) {
+      messages.push({
+        role: "tool",
+        tool_call_id: result.toolCallId,
+        name: result.name,
+        content: toWireString(result.output),
+      });
+    }
+
     return messages;
   }
 
-  const toolCalls = ensureToolCalls(request);
-  messages.push({
-    role: "assistant",
-    content: "",
-    tool_calls: toolCalls.map((call) => ({
-      id: call.id,
-      type: "function",
-      function: {
-        name: call.name,
-        arguments: serializeArguments(call.input),
-      },
-    })),
-  });
-
-  for (const result of request.toolResults ?? []) {
+  for (const round of rounds) {
     messages.push({
-      role: "tool",
-      tool_call_id: result.toolCallId,
-      name: result.name,
-      content: serializeToolOutput(result.output),
+      role: "assistant",
+      content: "",
+      tool_calls: round.toolCalls.map((call) => ({
+        id: call.id,
+        type: "function",
+        function: {
+          name: call.name,
+          arguments: serializeArguments(call.input),
+        },
+      })),
     });
+
+    for (const result of round.toolResults) {
+      messages.push({
+        role: "tool",
+        tool_call_id: result.toolCallId,
+        name: result.name,
+        content: toWireString(result.output),
+      });
+    }
   }
 
   return messages;
@@ -227,10 +269,6 @@ function serializeArguments(input: Record<string, unknown>): string {
   } catch {
     return "{}";
   }
-}
-
-function serializeToolOutput(output: unknown): string {
-  return toWireString(output);
 }
 
 async function loadOpenAIClientFactory(): Promise<OpenAIClientFactory> {

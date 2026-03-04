@@ -1,5 +1,5 @@
 export function asRecord(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object") {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
   }
 
@@ -38,8 +38,14 @@ export function toWireString(value: unknown): string {
     return value;
   }
 
+  if (value === undefined || value === null) {
+    return "";
+  }
+
   try {
-    return JSON.stringify(value);
+    const json = JSON.stringify(value);
+    // JSON.stringify returns undefined for functions/symbols; guard against it.
+    return typeof json === "string" ? json : String(value);
   } catch {
     return String(value);
   }

@@ -140,8 +140,12 @@ export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
       recursion_limit: this.recursionLimit,
     };
 
-    if (this.emitExecutionEvents) {
-      await this.forwardStreamEvents(graph, input, graphConfig, tools);
+    if (this.emitExecutionEvents && graph.streamEvents) {
+      const text = await this.forwardStreamEvents(graph, input, graphConfig, tools);
+      if (text) {
+        await tools.sendMessage(text, [{ id: message.senderId, handle: message.senderName ?? message.senderType }]);
+      }
+      return;
     }
 
     if (!graph.invoke) {
@@ -229,11 +233,13 @@ export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
     input: Record<string, unknown>,
     config: Record<string, unknown>,
     tools: AdapterToolsProtocol,
-  ): Promise<void> {
+  ): Promise<string | null> {
     const stream = graph.streamEvents?.(input, config, { version: "v2" });
     if (!stream) {
-      return;
+      return null;
     }
+
+    let lastAssistantText: string | null = null;
 
     for await (const event of stream) {
       const data = asRecord(event);
@@ -244,7 +250,16 @@ export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
       if (eventType === "on_tool_end") {
         await tools.sendEvent(JSON.stringify(data), "tool_result");
       }
+      if (eventType === "on_chain_end") {
+        const output = asRecord(data.data);
+        const text = extractAssistantText(output.output);
+        if (text) {
+          lastAssistantText = text;
+        }
+      }
     }
+
+    return lastAssistantText;
   }
 }
 
@@ -398,6 +413,10 @@ async function loadLangGraphSdk(): Promise<LangGraphSdk> {
       );
     }
   })();
+
+  langGraphSdkPromise.catch(() => {
+    langGraphSdkPromise = null;
+  });
 
   return langGraphSdkPromise;
 }

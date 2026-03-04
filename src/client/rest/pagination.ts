@@ -48,20 +48,24 @@ export function normalizePaginationMetadata(
     return {};
   }
 
-  const {
-    page: _page,
-    pageSize: _pageSize,
-    totalPages: _totalPages,
-    totalCount: _totalCount,
-    ...passthrough
-  } = metadata;
-
   const mode = options?.mode ?? "strict";
   const snakeCaseMetadata = metadata as Record<string, unknown>;
   const pageRaw = metadata.page ?? snakeCaseMetadata.page;
   const pageSizeRaw = metadata.pageSize ?? snakeCaseMetadata.page_size;
   const totalPagesRaw = metadata.totalPages ?? snakeCaseMetadata.total_pages;
   const totalCountRaw = metadata.totalCount ?? snakeCaseMetadata.total_count;
+
+  // Build passthrough excluding both camelCase and snake_case pagination keys.
+  const PAGINATION_KEYS = new Set([
+    "page", "pageSize", "totalPages", "totalCount",
+    "page_size", "total_pages", "total_count",
+  ]);
+  const passthrough: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(metadata)) {
+    if (!PAGINATION_KEYS.has(key)) {
+      passthrough[key] = value;
+    }
+  }
 
   const page = toPositiveInteger(pageRaw);
   const pageSize = toPositiveInteger(pageSizeRaw);
@@ -103,7 +107,7 @@ function assertValidMetadataField(
 export async function fetchPaginated<T extends MetadataMap>(options: FetchPaginatedOptions<T>): Promise<T[]> {
   const pageSize = resolvePositiveInteger("pageSize", options.pageSize, DEFAULT_PAGE_SIZE);
   const maxPages = resolvePositiveInteger("maxPages", options.maxPages, DEFAULT_MAX_PAGES);
-  const strategy = resolvePaginationStrategy(options.strategy as string | undefined);
+  const strategy = resolvePaginationStrategy(options.strategy);
   const metadataValidation = options.metadataValidation ?? "strategy_aware";
   const allItems: T[] = [];
   let completed = false;

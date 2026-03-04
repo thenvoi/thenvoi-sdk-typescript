@@ -110,15 +110,13 @@ export class PhoenixChannelsTransport implements StreamingTransport {
 
     for (const [event, handler] of Object.entries(handlers)) {
       channel.on(event, (payload: Record<string, unknown>) => {
-        try {
-          void handler(payload);
-        } catch (error) {
+        Promise.resolve(handler(payload)).catch((error: unknown) => {
           this.logger.error("Unhandled topic handler error", {
             topic,
             event,
             error,
           });
-        }
+        });
       });
     }
 
@@ -156,13 +154,13 @@ export class PhoenixChannelsTransport implements StreamingTransport {
     this.logger.debug("Left topic", { topic });
   }
 
-  public async runForever(signal?: AbortSignal): Promise<void> {
-    if (signal?.aborted) {
+  public async runForever(signal: AbortSignal): Promise<void> {
+    if (signal.aborted) {
       return;
     }
 
     await new Promise<void>((resolve) => {
-      signal?.addEventListener("abort", () => resolve(), { once: true });
+      signal.addEventListener("abort", () => resolve(), { once: true });
     });
   }
 

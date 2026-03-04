@@ -1,5 +1,7 @@
 import type { Agent } from "../agent/Agent";
 
+const DEFAULT_SHUTDOWN_TIMEOUT_MS = 30_000;
+
 interface GracefulShutdownOptions {
   timeoutMs?: number;
   onSignal?: (signal: NodeJS.Signals) => void;
@@ -14,7 +16,7 @@ export class GracefulShutdown {
 
   public constructor(agent: Agent, options?: GracefulShutdownOptions) {
     this.agent = agent;
-    this.timeoutMs = options?.timeoutMs ?? 30_000;
+    this.timeoutMs = options?.timeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
     this.onSignal = options?.onSignal;
   }
 
@@ -53,7 +55,12 @@ export class GracefulShutdown {
     }
 
     this.shuttingDown = true;
-    await this.agent.stop(this.timeoutMs);
+    try {
+      await this.agent.stop(this.timeoutMs);
+    } catch {
+      // Best-effort graceful shutdown — force exit if stop() itself fails.
+      process.exit(1);
+    }
   }
 }
 
@@ -64,7 +71,7 @@ export async function runWithGracefulShutdown(
   const shutdown = new GracefulShutdown(agent, options);
   await shutdown.withSignals(async () => {
     await agent.run({
-      shutdownTimeoutMs: options?.timeoutMs ?? 30_000,
+      shutdownTimeoutMs: options?.timeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
       signals: false,
     });
   });
