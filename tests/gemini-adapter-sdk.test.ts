@@ -67,7 +67,7 @@ describe("GeminiAdapter", () => {
     ];
 
     const model = new GeminiToolCallingModel({
-      model: "gemini-2.5-flash",
+      model: "gemini-3-flash-preview",
       clientFactory: async () => ({
         models: {
           generateContent: async (params: Record<string, unknown>) => {
@@ -122,7 +122,7 @@ describe("GeminiAdapter", () => {
     expect(requests).toHaveLength(2);
 
     expect(requests[0]).toMatchObject({
-      model: "gemini-2.5-flash",
+      model: "gemini-3-flash-preview",
       config: {
         tools: [
           {

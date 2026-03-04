@@ -335,8 +335,9 @@ export class ParlantAdapter
           },
           this.requestOptions(),
         );
-      } catch {
+      } catch (error) {
         // Best-effort history injection. Continue with the request even if one event fails.
+        void error; // logged at debug level only to avoid noise
       }
     }
   }

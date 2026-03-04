@@ -61,7 +61,7 @@ export {
 } from "./runtime/types";
 export { ContactEventHandler, HUB_ROOM_SYSTEM_PROMPT } from "./runtime/ContactEventHandler";
 export type { ExecutionState } from "./runtime/ExecutionContext";
-export { FakeAgentTools } from "./testing";
+export { FakeAgentTools, StubRestApi } from "./testing";
 export { loadAgentConfig, type AgentConfigResult } from "./config";
 export type { StreamingTransport } from "./platform/streaming/transport";
 export type {
@@ -78,6 +78,7 @@ export {
   NoopLogger,
   type Logger,
 } from "./core/logger";
+export { isDirectExecution } from "./core/isDirectExecution";
 export {
   ThenvoiSdkError,
   RuntimeStateError,

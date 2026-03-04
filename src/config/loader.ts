@@ -5,6 +5,8 @@ import { ValidationError } from "../core/errors";
 export interface AgentConfigResult {
   agentId: string;
   apiKey: string;
+  wsUrl?: string;
+  restUrl?: string;
   [key: string]: unknown;
 }
 
@@ -35,7 +37,7 @@ export function loadAgentConfig(
     raw = readFileSync(filePath, "utf-8");
   } catch {
     throw new ValidationError(
-      `Config file not found: ${filePath}. Create an agent_config.yaml or pass a custom path.`,
+      `Config file not found: ${filePath}. Copy agent_config.yaml.example to agent_config.yaml and configure your agents.`,
     );
   }
 
@@ -69,7 +71,7 @@ export function loadAgentConfig(
     );
   }
 
-  const { agent_id, api_key, ...rest } = section;
+  const { agent_id, api_key, ws_url, rest_url, ...rest } = section;
 
   const invalid = REQUIRED_FIELDS.filter(
     (field) => typeof section[field] !== "string" || (section[field] as string).trim() === "",
@@ -84,6 +86,8 @@ export function loadAgentConfig(
   return {
     agentId: agent_id as string,
     apiKey: api_key as string,
+    ...(ws_url !== undefined ? { wsUrl: ws_url as string } : {}),
+    ...(rest_url !== undefined ? { restUrl: rest_url as string } : {}),
     ...rest,
   };
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { createBasicAgent, StubRestApi } from "../examples/basic/basic-agent";
+import { createBasicAgent } from "../examples/basic/basic-agent";
+import { StubRestApi } from "../src/testing";
 
 describe("basic-agent example", () => {
   it("builds an agent instance without side effects on import", () => {
@@ -10,11 +11,11 @@ describe("basic-agent example", () => {
     expect(typeof agent.stop).toBe("function");
   });
 
-  it("provides a rest stub for local example execution", async () => {
+  it("StubRestApi returns sensible defaults", async () => {
     const rest = new StubRestApi();
     await expect(rest.getAgentMe()).resolves.toMatchObject({
-      id: "agent-1",
-      name: "Example Agent",
+      id: "stub-agent",
+      name: "Stub Agent",
     });
   });
 });

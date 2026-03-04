@@ -13,6 +13,7 @@ import {
 } from "./types";
 
 const TERMINAL_STATES = new Set(["completed", "failed", "canceled", "rejected", "auth-required"]);
+const MAX_STREAM_EVENTS = 10_000;
 
 type A2ATaskState =
   | "submitted"
@@ -147,7 +148,12 @@ export class A2AAdapter extends SimpleAdapter<A2ASessionState, MessagingTools> {
     const request = this.toSendParams(message, context.roomId);
     try {
       if (this.streaming) {
+        let streamEventCount = 0;
         for await (const event of client.sendMessageStream(request)) {
+          streamEventCount += 1;
+          if (streamEventCount > MAX_STREAM_EVENTS) {
+            throw new Error(`A2A stream exceeded maximum event limit (${MAX_STREAM_EVENTS})`);
+          }
           await this.handleEvent(event, tools, context.roomId, message.senderId);
         }
         return;
@@ -355,7 +361,12 @@ export class A2AAdapter extends SimpleAdapter<A2ASessionState, MessagingTools> {
     }
 
     try {
+      let resubEventCount = 0;
       for await (const raw of client.resubscribeTask({ id: state.taskId })) {
+        resubEventCount += 1;
+        if (resubEventCount > MAX_STREAM_EVENTS) {
+          break;
+        }
         const event = unwrapResult(raw);
         if (!event) {
           continue;
@@ -384,7 +395,7 @@ export class A2AAdapter extends SimpleAdapter<A2ASessionState, MessagingTools> {
         }
       }
     } catch {
-      // Swallow resubscribe failures and continue as a fresh task.
+      // Resubscribe failed (e.g. task expired or peer unreachable). Continue as fresh task.
     }
   }
 
@@ -578,6 +589,9 @@ async function loadDefaultA2AClientFactory(): Promise<A2AClientFactory> {
   };
 }
 
+// RFC 7230 token characters for HTTP header field names.
+const VALID_HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9a-zA-Z]+$/;
+
 function createAuthFetch(
   authHeaders: Record<string, string>,
 ): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {
@@ -586,14 +600,21 @@ function createAuthFetch(
   }
 
   const baseFetch = globalThis.fetch.bind(globalThis);
-  const hasAuth = Object.keys(authHeaders).length > 0;
-  if (!hasAuth) {
+
+  const validatedHeaders = Object.entries(authHeaders).filter(([key]) => {
+    if (!VALID_HEADER_NAME.test(key)) {
+      return false;
+    }
+    return true;
+  });
+
+  if (validatedHeaders.length === 0) {
     return baseFetch;
   }
 
   return async (input, init) => {
     const headers = new Headers(init?.headers ?? {});
-    for (const [key, value] of Object.entries(authHeaders)) {
+    for (const [key, value] of validatedHeaders) {
       headers.set(key, value);
     }
 

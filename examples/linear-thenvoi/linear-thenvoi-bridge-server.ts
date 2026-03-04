@@ -1,81 +1,19 @@
-import { pathToFileURL } from "node:url";
-
 import express, { type NextFunction, type Request, type Response } from "express";
 import { LinearClient } from "@linear/sdk";
 import { LinearWebhookClient } from "@linear/sdk/webhooks";
 
 import {
   ConsoleLogger,
+  FernRestAdapter,
   type Logger,
-  type PaginatedResponse,
   type RestApi,
   createSqliteSessionRoomStore,
   handleAgentSessionEvent,
   type LinearThenvoiBridgeConfig,
   type RoomStrategy,
+  isDirectExecution,
 } from "../../src/index";
-
-class LinearThenvoiBridgeRestApi implements RestApi {
-  public async getAgentMe() {
-    return {
-      id: "agent-linear-thenvoi-bridge",
-      name: "Linear Thenvoi Bridge",
-      description: "Receives Linear webhooks and routes to Thenvoi",
-    };
-  }
-
-  public async createChatMessage() {
-    return { ok: true };
-  }
-
-  public async createChatEvent() {
-    return { ok: true };
-  }
-
-  public async createChat() {
-    return { id: "room-1" };
-  }
-
-  public async listChatParticipants() {
-    return [];
-  }
-
-  public async addChatParticipant() {
-    return { ok: true };
-  }
-
-  public async removeChatParticipant() {
-    return { ok: true };
-  }
-
-  public async markMessageProcessing() {
-    return { ok: true };
-  }
-
-  public async markMessageProcessed() {
-    return { ok: true };
-  }
-
-  public async markMessageFailed() {
-    return { ok: true };
-  }
-
-  public async listPeers(_request: {
-    page: number;
-    pageSize: number;
-    notInChat: string;
-  }): Promise<PaginatedResponse<Record<string, unknown>>> {
-    return {
-      data: [],
-      metadata: {
-        page: 1,
-        pageSize: 50,
-        totalCount: 0,
-        totalPages: 1,
-      },
-    };
-  }
-}
+import { ThenvoiClient } from "@thenvoi/rest-client";
 
 interface LinearThenvoiBridgeServerOptions {
   restApi: RestApi;
@@ -149,15 +87,6 @@ export function createLinearThenvoiBridgeApp(options: LinearThenvoiBridgeServerO
   return app;
 }
 
-function isDirectExecution(): boolean {
-  const entry = process.argv[1];
-  if (!entry) {
-    return false;
-  }
-
-  return import.meta.url === pathToFileURL(entry).href;
-}
-
 function getRequiredEnv(name: string): string {
   const value = process.env[name];
   if (!value || value.trim().length === 0) {
@@ -167,13 +96,17 @@ function getRequiredEnv(name: string): string {
   return value;
 }
 
-if (isDirectExecution()) {
+if (isDirectExecution(import.meta.url)) {
   const logger = new ConsoleLogger();
   const port = Number(process.env.PORT ?? "8787");
 
   try {
     const app = createLinearThenvoiBridgeApp({
-      restApi: new LinearThenvoiBridgeRestApi(),
+      restApi: new FernRestAdapter(
+        new ThenvoiClient({
+          apiKey: process.env.THENVOI_API_KEY,
+        }),
+      ),
       linearAccessToken: getRequiredEnv("LINEAR_ACCESS_TOKEN"),
       linearWebhookSecret: getRequiredEnv("LINEAR_WEBHOOK_SECRET"),
       stateDbPath: process.env.LINEAR_THENVOI_STATE_DB ?? ".linear-thenvoi-example.sqlite",

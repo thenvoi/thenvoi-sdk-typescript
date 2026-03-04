@@ -61,7 +61,7 @@ describe("ClaudeSDKAdapter", () => {
 
     const adapter = new ClaudeSDKAdapter({
       queryFn,
-      model: "claude-sonnet-4-5-20250929",
+      model: "claude-sonnet-4-6",
       permissionMode: "acceptEdits",
     });
     await adapter.onStarted("Parity Agent", "Parity test agent");
@@ -94,7 +94,7 @@ describe("ClaudeSDKAdapter", () => {
 
     expect(tools.messages).toEqual(["first response", "second response"]);
     expect(calls).toHaveLength(2);
-    expect(calls[0]?.options?.model).toBe("claude-sonnet-4-5-20250929");
+    expect(calls[0]?.options?.model).toBe("claude-sonnet-4-6");
     expect(calls[0]?.options?.permissionMode).toBe("acceptEdits");
     expect(calls[0]?.options?.systemPrompt).toBeTypeOf("string");
     expect(calls[0]?.options?.mcpServers).toBeTruthy();

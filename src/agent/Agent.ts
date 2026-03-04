@@ -1,6 +1,7 @@
 import type { FrameworkAdapter, Preprocessor } from "../contracts/protocols";
 import type { PlatformEvent } from "../platform/events";
 import { PlatformRuntime, type PlatformRuntimeOptions } from "../runtime/PlatformRuntime";
+import { GracefulShutdown } from "../runtime/shutdown";
 
 interface AgentCreateOptions extends PlatformRuntimeOptions {
   adapter: FrameworkAdapter;
@@ -77,16 +78,35 @@ export class Agent {
     await this.platformRuntime.runForever();
   }
 
-  public async run(options?: { shutdownTimeoutMs?: number | null }): Promise<void> {
-    await this.start();
+  public async run(options?: {
+    shutdownTimeoutMs?: number | null;
+    signals?: boolean;
+  }): Promise<void> {
     if (options?.shutdownTimeoutMs !== undefined) {
       this.shutdownTimeoutMs = options.shutdownTimeoutMs;
     }
 
-    try {
-      await this.runForever();
-    } finally {
-      await this.stop(this.shutdownTimeoutMs);
+    const useSignals = options?.signals ?? true;
+
+    if (useSignals) {
+      const shutdown = new GracefulShutdown(this, {
+        timeoutMs: this.shutdownTimeoutMs ?? 30_000,
+      });
+      await shutdown.withSignals(async () => {
+        await this.start();
+        try {
+          await this.runForever();
+        } finally {
+          await this.stop(this.shutdownTimeoutMs);
+        }
+      });
+    } else {
+      await this.start();
+      try {
+        await this.runForever();
+      } finally {
+        await this.stop(this.shutdownTimeoutMs);
+      }
     }
   }
 

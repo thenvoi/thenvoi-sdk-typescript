@@ -26,7 +26,7 @@ export class AnthropicAdapter extends ToolCallingAdapter {
     } = options;
 
     const resolvedModel = model ?? new AnthropicToolCallingModel({
-      model: anthropicModel ?? "claude-sonnet-4-5",
+      model: anthropicModel ?? "claude-sonnet-4-6",
       apiKey,
       maxTokens,
       clientFactory,

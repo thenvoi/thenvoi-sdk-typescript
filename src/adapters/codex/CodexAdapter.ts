@@ -144,6 +144,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
       try {
         thread = this.codexClient.resumeThread(resumeThreadId, this.threadOptions());
       } catch {
+        // Thread resume failed (e.g. expired session), fall back to new thread.
         thread = this.codexClient.startThread(this.threadOptions());
       }
     } else {

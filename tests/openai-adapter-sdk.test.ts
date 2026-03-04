@@ -95,7 +95,7 @@ describe("OpenAIAdapter", () => {
     };
 
     const adapter = new OpenAIAdapter({
-      openAIModel: "gpt-4o-mini",
+      openAIModel: "gpt-5.2",
       clientFactory: async () => client,
       systemPrompt: "You are a strict test agent.",
     });
@@ -123,7 +123,7 @@ describe("OpenAIAdapter", () => {
     expect(requests).toHaveLength(2);
 
     expect(requests[0]).toMatchObject({
-      model: "gpt-4o-mini",
+      model: "gpt-5.2",
       tool_choice: "auto",
     });
     const firstMessages = requests[0]?.messages as Array<Record<string, unknown>>;

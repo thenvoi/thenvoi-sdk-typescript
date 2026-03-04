@@ -12,6 +12,14 @@ interface SessionRoomRow {
   updated_at: string;
 }
 
+/**
+ * SQLite-backed session room store.
+ *
+ * Methods are async because `node:sqlite` is lazily imported on first access.
+ * After initialization, DB operations are synchronous but wrapped in the async
+ * boundary established by the lazy import. This keeps the interface consistent
+ * with the `SessionRoomStore` contract.
+ */
 class SqliteSessionRoomStore implements SessionRoomStore {
   private readonly dbPath: string;
   private dbPromise: Promise<DatabaseSync> | null = null;

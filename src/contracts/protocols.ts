@@ -103,7 +103,10 @@ export interface AdapterToolsProtocol
     ToolExecutor,
     Partial<PeerLookupTools>,
     Partial<ContactTools>,
-    Partial<MemoryTools> {}
+    Partial<MemoryTools> {
+  /** Check capability flags to determine which optional tools are available. */
+  readonly capabilities?: Readonly<AgentToolsCapabilities>;
+}
 
 export type AgentToolsProtocol = AdapterToolsProtocol;
 

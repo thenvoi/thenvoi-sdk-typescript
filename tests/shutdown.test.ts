@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 
+import { Agent } from "../src/agent/Agent";
 import { GracefulShutdown } from "../src/runtime/shutdown";
 
 function makeAgent(stopMs = 0) {
@@ -126,5 +127,62 @@ describe("GracefulShutdown", () => {
     ).rejects.toThrow("boom");
 
     expect(offSpy).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("Agent.run signal handling", () => {
+  it("registers signal handlers by default", async () => {
+    const mockRuntime = {
+      start: vi.fn(),
+      stop: vi.fn(async () => true),
+      runForever: vi.fn(async () => {}),
+      name: "test",
+      description: "test",
+      contactConfiguration: undefined,
+      isContactsSubscribed: false,
+    };
+    const mockAdapter = {
+      onEvent: vi.fn(),
+      onStarted: vi.fn(),
+      onCleanup: vi.fn(),
+    };
+    const agent = new Agent(mockRuntime as never, mockAdapter as never);
+
+    const onSpy = vi.spyOn(process, "on");
+
+    await agent.run();
+
+    // Signal handlers should have been registered (3 signals) and then unregistered
+    expect(onSpy).toHaveBeenCalledWith("SIGINT", expect.any(Function));
+    expect(onSpy).toHaveBeenCalledWith("SIGTERM", expect.any(Function));
+    expect(onSpy).toHaveBeenCalledWith("SIGHUP", expect.any(Function));
+  });
+
+  it("does not register signal handlers when signals: false", async () => {
+    const mockRuntime = {
+      start: vi.fn(),
+      stop: vi.fn(async () => true),
+      runForever: vi.fn(async () => {}),
+      name: "test",
+      description: "test",
+      contactConfiguration: undefined,
+      isContactsSubscribed: false,
+    };
+    const mockAdapter = {
+      onEvent: vi.fn(),
+      onStarted: vi.fn(),
+      onCleanup: vi.fn(),
+    };
+    const agent = new Agent(mockRuntime as never, mockAdapter as never);
+
+    const onSpy = vi.spyOn(process, "on");
+
+    await agent.run({ signals: false });
+
+    // No signal handlers should have been registered
+    const signalCalls = onSpy.mock.calls.filter(
+      ([event]) => event === "SIGINT" || event === "SIGTERM" || event === "SIGHUP",
+    );
+    expect(signalCalls).toHaveLength(0);
   });
 });

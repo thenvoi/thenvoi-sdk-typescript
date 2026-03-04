@@ -56,14 +56,12 @@ export class PhoenixChannelsTransport implements StreamingTransport {
 
     if (!this.connectPromise) {
       this.socket.connect();
-      this.connectPromise = this.waitForConnection();
+      this.connectPromise = this.waitForConnection().finally(() => {
+        this.connectPromise = null;
+      });
     }
 
-    try {
-      await this.connectPromise;
-    } finally {
-      this.connectPromise = null;
-    }
+    await this.connectPromise;
   }
 
   public async disconnect(): Promise<void> {

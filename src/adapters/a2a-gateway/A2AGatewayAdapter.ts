@@ -120,15 +120,7 @@ export class A2AGatewayAdapter
   public async onCleanup(roomId: string): Promise<void> {
     const pending = this.pendingByRoom.get(roomId);
     if (pending) {
-      pending.enqueue(
-        buildStatusEvent({
-          taskId: pending.taskId,
-          contextId: pending.contextId,
-          state: "canceled",
-          final: true,
-          text: "Session cleaned up before completion.",
-        }),
-      );
+      pending.queue.cancel();
       this.removePending(pending);
     }
   }
@@ -144,6 +136,13 @@ export class A2AGatewayAdapter
   }
 
   public async onRuntimeStop(): Promise<void> {
+    // Cancel all pending queues so dequeue() calls resolve immediately.
+    for (const pending of this.pendingByRoom.values()) {
+      pending.queue.cancel();
+    }
+    this.pendingByRoom.clear();
+    this.pendingByTask.clear();
+
     await this.stopGatewayServer();
   }
 
@@ -289,6 +288,7 @@ export class A2AGatewayAdapter
       return;
     }
 
+    // Enqueue a terminal event so the generator yields it before closing.
     pending.enqueue(
       buildStatusEvent({
         taskId,
@@ -384,6 +384,7 @@ export class A2AGatewayAdapter
 class AsyncEventQueue<T> {
   private readonly items: T[] = [];
   private readonly waiters: Array<(value: T | null) => void> = [];
+  private cancelled = false;
 
   public enqueue(item: T): void {
     const waiter = this.waiters.shift();
@@ -395,12 +396,29 @@ class AsyncEventQueue<T> {
     this.items.push(item);
   }
 
+  public cancel(): void {
+    this.cancelled = true;
+    const pending = this.waiters.splice(0);
+    for (const waiter of pending) {
+      waiter(null);
+    }
+  }
+
   public async dequeue(timeoutMs: number): Promise<T | null> {
+    if (this.cancelled) {
+      return null;
+    }
+
     if (this.items.length > 0) {
       return this.items.shift() ?? null;
     }
 
     return new Promise<T | null>((resolve) => {
+      const waiter = (value: T | null): void => {
+        clearTimeout(timeout);
+        resolve(value);
+      };
+
       const timeout = setTimeout(() => {
         const index = this.waiters.indexOf(waiter);
         if (index >= 0) {
@@ -408,11 +426,6 @@ class AsyncEventQueue<T> {
         }
         resolve(null);
       }, timeoutMs);
-
-      const waiter = (value: T | null): void => {
-        clearTimeout(timeout);
-        resolve(value);
-      };
 
       this.waiters.push(waiter);
     });

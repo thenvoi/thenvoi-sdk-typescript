@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createA2ABridgeAgent, A2AExampleRestApi } from "../examples/a2a-bridge/a2a-bridge-agent";
+import { createA2ABridgeAgent } from "../examples/a2a-bridge/a2a-bridge-agent";
 import { createA2ABridgeAgentWithAuth } from "../examples/a2a-bridge/a2a-bridge-auth";
 
 describe("a2a bridge examples", () => {
@@ -18,13 +18,5 @@ describe("a2a bridge examples", () => {
     });
     expect(agent).toBeDefined();
     expect(typeof agent.run).toBe("function");
-  });
-
-  it("provides a reusable REST stub for local A2A example runs", async () => {
-    const rest = new A2AExampleRestApi();
-    await expect(rest.getAgentMe()).resolves.toMatchObject({
-      id: "agent-a2a",
-      name: "A2A Bridge Agent",
-    });
   });
 });

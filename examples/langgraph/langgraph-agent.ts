@@ -1,51 +1,4 @@
-import { pathToFileURL } from "node:url";
-
-import { Agent, LangGraphAdapter, type LangGraphGraph, type RestApi } from "../../src/index";
-
-class LangGraphExampleRestApi implements RestApi {
-  public async getAgentMe() {
-    return { id: "agent-langgraph", name: "LangGraph Agent", description: "LangGraph integration example" };
-  }
-  public async createChatMessage() {
-    return { ok: true };
-  }
-  public async createChatEvent() {
-    return { ok: true };
-  }
-  public async createChat() {
-    return { id: "room-1" };
-  }
-  public async listChatParticipants() {
-    return [];
-  }
-  public async addChatParticipant() {
-    return { ok: true };
-  }
-  public async removeChatParticipant() {
-    return { ok: true };
-  }
-  public async markMessageProcessing() {
-    return { ok: true };
-  }
-  public async markMessageProcessed() {
-    return { ok: true };
-  }
-  public async markMessageFailed() {
-    return { ok: true };
-  }
-  public async listPeers() {
-    return { data: [] };
-  }
-}
-
-function isDirectExecution(importMetaUrl: string): boolean {
-  const entry = process.argv[1];
-  if (!entry) {
-    return false;
-  }
-
-  return importMetaUrl === pathToFileURL(entry).href;
-}
+import { Agent, LangGraphAdapter, type LangGraphGraph, loadAgentConfig, isDirectExecution } from "../../src/index";
 
 export class EchoLangGraph implements LangGraphGraph {
   public async invoke(input: Record<string, unknown>): Promise<unknown> {
@@ -63,7 +16,10 @@ export class EchoLangGraph implements LangGraphGraph {
   }
 }
 
-export function createLangGraphAgent(options?: { graph?: LangGraphGraph }): Agent {
+export function createLangGraphAgent(
+  options?: { graph?: LangGraphGraph },
+  overrides?: { agentId?: string; apiKey?: string },
+): Agent {
   const adapter = new LangGraphAdapter({
     graph: options?.graph ?? new EchoLangGraph(),
     customSection: "Use Thenvoi tools for side effects and final replies.",
@@ -72,14 +28,12 @@ export function createLangGraphAgent(options?: { graph?: LangGraphGraph }): Agen
 
   return Agent.create({
     adapter,
-    agentId: "agent-langgraph",
-    apiKey: "api-key",
-    linkOptions: {
-      restApi: new LangGraphExampleRestApi(),
-    },
+    agentId: overrides?.agentId ?? "agent-langgraph",
+    apiKey: overrides?.apiKey ?? "api-key",
   });
 }
 
 if (isDirectExecution(import.meta.url)) {
-  void createLangGraphAgent().run();
+  const config = loadAgentConfig("langgraph_agent");
+  void createLangGraphAgent(undefined, config).run();
 }

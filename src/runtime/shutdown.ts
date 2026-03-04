@@ -62,6 +62,9 @@ export async function runWithGracefulShutdown(
 ): Promise<void> {
   const shutdown = new GracefulShutdown(agent, options);
   await shutdown.withSignals(async () => {
-    await agent.run({ shutdownTimeoutMs: options?.timeoutMs ?? 30_000 });
+    await agent.run({
+      shutdownTimeoutMs: options?.timeoutMs ?? 30_000,
+      signals: false,
+    });
   });
 }

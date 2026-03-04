@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { GenericAdapter } from "../src/adapters/GenericAdapter";
 import { FernRestAdapter, RestFacade } from "../src/client/rest/RestFacade";
+import { ValidationError } from "../src/core/errors";
 import { PlatformRuntime } from "../src/runtime/PlatformRuntime";
 import type { StreamingTransport, TopicHandlers } from "../src/platform/streaming/transport";
 import { ThenvoiLink } from "../src/platform/ThenvoiLink";
@@ -182,5 +183,41 @@ describe("PlatformRuntime", () => {
     expect(transport.hasTopic("room_participants:room-existing")).toBe(false);
 
     await runtime.stop();
+  });
+
+  it("throws ValidationError when agentId is empty", () => {
+    expect(
+      () => new PlatformRuntime({ agentId: "", apiKey: "valid-key" }),
+    ).toThrow(ValidationError);
+    expect(
+      () => new PlatformRuntime({ agentId: "", apiKey: "valid-key" }),
+    ).toThrow("agentId is required");
+  });
+
+  it("throws ValidationError when agentId is whitespace-only", () => {
+    expect(
+      () => new PlatformRuntime({ agentId: "  ", apiKey: "valid-key" }),
+    ).toThrow(ValidationError);
+  });
+
+  it("throws ValidationError when apiKey is empty", () => {
+    expect(
+      () => new PlatformRuntime({ agentId: "valid-id", apiKey: "" }),
+    ).toThrow(ValidationError);
+    expect(
+      () => new PlatformRuntime({ agentId: "valid-id", apiKey: "" }),
+    ).toThrow("apiKey is required");
+  });
+
+  it("throws ValidationError when apiKey is whitespace-only", () => {
+    expect(
+      () => new PlatformRuntime({ agentId: "valid-id", apiKey: "   " }),
+    ).toThrow(ValidationError);
+  });
+
+  it("validation error message mentions loadAgentConfig", () => {
+    expect(
+      () => new PlatformRuntime({ agentId: "", apiKey: "valid-key" }),
+    ).toThrow("loadAgentConfig()");
   });
 });

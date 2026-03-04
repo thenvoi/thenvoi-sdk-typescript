@@ -83,7 +83,7 @@ describe("AnthropicAdapter", () => {
     };
 
     const adapter = new AnthropicAdapter({
-      anthropicModel: "claude-sonnet-4-5",
+      anthropicModel: "claude-sonnet-4-6",
       clientFactory: async () => client,
     });
     const tools = new AnthropicTestTools();
@@ -110,7 +110,7 @@ describe("AnthropicAdapter", () => {
     expect(requests).toHaveLength(2);
 
     expect(requests[0]).toMatchObject({
-      model: "claude-sonnet-4-5",
+      model: "claude-sonnet-4-6",
       max_tokens: 4096,
     });
 

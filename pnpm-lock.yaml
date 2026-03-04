@@ -17,6 +17,9 @@ importers:
       '@openai/codex-sdk':
         specifier: ^0.107.0
         version: 0.107.0
+      '@thenvoi/rest-client':
+        specifier: link:../fern-javascript-sdk
+        version: link:../fern-javascript-sdk
       express:
         specifier: ^5.2.1
         version: 5.2.1

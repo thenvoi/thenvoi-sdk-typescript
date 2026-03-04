@@ -24,7 +24,7 @@ export class OpenAIAdapter extends ToolCallingAdapter {
     } = options;
 
     const resolvedModel = model ?? new OpenAIToolCallingModel({
-      model: openAIModel ?? "gpt-4o-mini",
+      model: openAIModel ?? "gpt-5.2",
       apiKey,
       clientFactory,
     });

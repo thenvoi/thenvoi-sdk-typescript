@@ -1,65 +1,4 @@
-import { pathToFileURL } from "node:url";
-
-import { Agent, CodexAdapter, type CodexAdapterConfig, type RestApi } from "../../src/index";
-
-class CodexExampleRestApi implements RestApi {
-  public async getAgentMe() {
-    return {
-      id: "codex-agent",
-      name: "Codex Agent",
-      description: "Codex adapter example",
-    };
-  }
-
-  public async createChatMessage() {
-    return { ok: true };
-  }
-
-  public async createChatEvent() {
-    return { ok: true };
-  }
-
-  public async createChat() {
-    return { id: "room-1" };
-  }
-
-  public async listChatParticipants() {
-    return [];
-  }
-
-  public async addChatParticipant() {
-    return { ok: true };
-  }
-
-  public async removeChatParticipant() {
-    return { ok: true };
-  }
-
-  public async markMessageProcessing() {
-    return { ok: true };
-  }
-
-  public async markMessageProcessed() {
-    return { ok: true };
-  }
-
-  public async markMessageFailed() {
-    return { ok: true };
-  }
-
-  public async listPeers() {
-    return { data: [] };
-  }
-}
-
-function isDirectExecution(importMetaUrl: string): boolean {
-  const entry = process.argv[1];
-  if (!entry) {
-    return false;
-  }
-
-  return importMetaUrl === pathToFileURL(entry).href;
-}
+import { Agent, CodexAdapter, type CodexAdapterConfig, loadAgentConfig, isDirectExecution } from "../../src/index";
 
 interface CodexExampleOptions {
   model?: string;
@@ -69,7 +8,10 @@ interface CodexExampleOptions {
   reasoningEffort?: CodexAdapterConfig["reasoningEffort"];
 }
 
-export function createCodexAgent(options: CodexExampleOptions = {}): Agent {
+export function createCodexAgent(
+  options: CodexExampleOptions = {},
+  overrides?: { agentId?: string; apiKey?: string },
+): Agent {
   const adapter = new CodexAdapter({
     config: {
       model: options.model ?? "gpt-5.3-codex",
@@ -85,14 +27,12 @@ export function createCodexAgent(options: CodexExampleOptions = {}): Agent {
 
   return Agent.create({
     adapter,
-    agentId: "codex-agent",
-    apiKey: "api-key",
-    linkOptions: {
-      restApi: new CodexExampleRestApi(),
-    },
+    agentId: overrides?.agentId ?? "codex-agent",
+    apiKey: overrides?.apiKey ?? "api-key",
   });
 }
 
 if (isDirectExecution(import.meta.url)) {
-  void createCodexAgent().run();
+  const config = loadAgentConfig("codex_agent");
+  void createCodexAgent({}, config).run();
 }

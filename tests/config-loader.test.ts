@@ -39,7 +39,7 @@ my_agent:
     const result = loadAgentConfig("my_agent", path);
     expect(result.agentId).toBe("agent-123");
     expect(result.apiKey).toBe("key-456");
-    expect(result.ws_url).toBe("wss://example.com");
+    expect(result.wsUrl).toBe("wss://example.com");
   });
 
   it("loads flat format", () => {
@@ -72,6 +72,12 @@ api_key: "key-fallback"
     );
   });
 
+  it("error message mentions agent_config.yaml.example", () => {
+    expect(() => loadAgentConfig(undefined, "/nonexistent/path.yaml")).toThrow(
+      "agent_config.yaml.example",
+    );
+  });
+
   it("throws for missing required fields", () => {
     const path = tmpFile(`
 agent_id: "agent-123"
@@ -82,18 +88,61 @@ agent_id: "agent-123"
     expect(() => loadAgentConfig(undefined, path)).toThrow("api_key");
   });
 
-  it("normalizes camelCase keys to snake_case", () => {
+  it("normalizes camelCase keys to snake_case and maps wsUrl/restUrl", () => {
     const path = tmpFile(`
 agentId: "agent-camel"
 apiKey: "key-camel"
 wsUrl: "wss://example.com"
+restUrl: "https://example.com"
 `);
     cleanup.push(path);
 
     const result = loadAgentConfig(undefined, path);
     expect(result.agentId).toBe("agent-camel");
     expect(result.apiKey).toBe("key-camel");
-    expect(result.ws_url).toBe("wss://example.com");
+    expect(result.wsUrl).toBe("wss://example.com");
+    expect(result.restUrl).toBe("https://example.com");
+  });
+
+  it("maps ws_url and rest_url to camelCase wsUrl and restUrl", () => {
+    const path = tmpFile(`
+agent_id: "agent-snake"
+api_key: "key-snake"
+ws_url: "wss://ws.example.com"
+rest_url: "https://rest.example.com"
+`);
+    cleanup.push(path);
+
+    const result = loadAgentConfig(undefined, path);
+    expect(result.wsUrl).toBe("wss://ws.example.com");
+    expect(result.restUrl).toBe("https://rest.example.com");
+  });
+
+  it("omits wsUrl/restUrl when not present in config", () => {
+    const path = tmpFile(`
+agent_id: "agent-minimal"
+api_key: "key-minimal"
+`);
+    cleanup.push(path);
+
+    const result = loadAgentConfig(undefined, path);
+    expect(result.wsUrl).toBeUndefined();
+    expect(result.restUrl).toBeUndefined();
+  });
+
+  it("result can be spread into Agent.create options", () => {
+    const path = tmpFile(`
+agent_id: "agent-spread"
+api_key: "key-spread"
+ws_url: "wss://example.com"
+`);
+    cleanup.push(path);
+
+    const result = loadAgentConfig(undefined, path);
+    const options = { adapter: {} as never, ...result };
+    expect(options.agentId).toBe("agent-spread");
+    expect(options.apiKey).toBe("key-spread");
+    expect(options.wsUrl).toBe("wss://example.com");
   });
 
   it("throws for non-string agent_id", () => {

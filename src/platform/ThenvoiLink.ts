@@ -1,8 +1,9 @@
 import { ValidationError } from "../core/errors";
 import type { Logger } from "../core/logger";
 import { NoopLogger } from "../core/logger";
-import { RestFacade, type RestFacadeOptions } from "../client/rest/RestFacade";
+import { FernRestAdapter, RestFacade, type RestFacadeOptions } from "../client/rest/RestFacade";
 import type { ThenvoiLinkRestApi } from "../client/rest/types";
+import { ThenvoiClient } from "@thenvoi/rest-client";
 import type { PlatformEvent } from "./events";
 import { assertCapability } from "../runtime/capabilities";
 import {
@@ -21,7 +22,7 @@ export interface ThenvoiLinkOptions {
   apiKey: string;
   wsUrl?: string;
   restUrl?: string;
-  restApi: ThenvoiLinkRestApi;
+  restApi?: ThenvoiLinkRestApi;
   transport?: StreamingTransport;
   logger?: Logger;
   capabilities?: Partial<AgentToolsCapabilities>;
@@ -66,8 +67,15 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
       ...options.capabilities,
     };
 
+    const restApi = options.restApi ?? new FernRestAdapter(
+      new ThenvoiClient({
+        apiKey: this.apiKey,
+        baseUrl: this.restUrl,
+      }),
+    );
+
     this.rest = new RestFacade({
-      api: options.restApi,
+      api: restApi,
       logger: this.logger,
     } satisfies RestFacadeOptions);
 

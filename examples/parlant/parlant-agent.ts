@@ -1,71 +1,13 @@
-import { pathToFileURL } from "node:url";
+import { Agent, ParlantAdapter, loadAgentConfig, isDirectExecution } from "../../src/index";
 
-import { Agent, ParlantAdapter, type RestApi } from "../../src/index";
-
-export class ParlantExampleRestApi implements RestApi {
-  public async getAgentMe() {
-    return {
-      id: "agent-parlant",
-      name: "Parlant Agent",
-      description: "Thenvoi adapter backed by parlant-client",
-    };
-  }
-
-  public async createChatMessage() {
-    return { ok: true };
-  }
-
-  public async createChatEvent() {
-    return { ok: true };
-  }
-
-  public async createChat() {
-    return { id: "room-1" };
-  }
-
-  public async listChatParticipants() {
-    return [];
-  }
-
-  public async addChatParticipant() {
-    return { ok: true };
-  }
-
-  public async removeChatParticipant() {
-    return { ok: true };
-  }
-
-  public async markMessageProcessing() {
-    return { ok: true };
-  }
-
-  public async markMessageProcessed() {
-    return { ok: true };
-  }
-
-  public async markMessageFailed() {
-    return { ok: true };
-  }
-
-  public async listPeers() {
-    return { data: [] };
-  }
-}
-
-function isDirectExecution(importMetaUrl: string): boolean {
-  const entry = process.argv[1];
-  if (!entry) {
-    return false;
-  }
-
-  return importMetaUrl === pathToFileURL(entry).href;
-}
-
-export function createParlantAgent(options: {
-  environment: string;
-  agentId: string;
-  apiKey?: string;
-}): Agent {
+export function createParlantAgent(
+  options: {
+    environment: string;
+    agentId: string;
+    apiKey?: string;
+  },
+  overrides?: { agentId?: string; apiKey?: string },
+): Agent {
   const adapter = new ParlantAdapter({
     environment: options.environment,
     agentId: options.agentId,
@@ -74,11 +16,8 @@ export function createParlantAgent(options: {
 
   return Agent.create({
     adapter,
-    agentId: "agent-parlant",
-    apiKey: "api-key",
-    linkOptions: {
-      restApi: new ParlantExampleRestApi(),
-    },
+    agentId: overrides?.agentId ?? "agent-parlant",
+    apiKey: overrides?.apiKey ?? "api-key",
   });
 }
 
@@ -92,9 +31,13 @@ if (isDirectExecution(import.meta.url)) {
     );
   }
 
-  void createParlantAgent({
-    environment,
-    agentId: parlantAgentId,
-    apiKey: process.env.PARLANT_API_KEY,
-  }).run();
+  const config = loadAgentConfig("parlant_agent");
+  void createParlantAgent(
+    {
+      environment,
+      agentId: parlantAgentId,
+      apiKey: process.env.PARLANT_API_KEY,
+    },
+    config,
+  ).run();
 }

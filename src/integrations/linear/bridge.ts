@@ -21,6 +21,9 @@ const SUPPORTED_ACTIONS = new Set(["created", "updated", "canceled"]);
 const MAX_PEER_LOOKUP_PAGES = 25;
 const PEER_PAGE_SIZE = 100;
 
+// Guards against concurrent room creation for the same session.
+const roomResolutionLocks = new Map<string, Promise<SessionRoomRecord>>();
+
 export async function handleAgentSessionEvent(input: HandleAgentSessionEventInput): Promise<void> {
   const logger = input.deps.logger ?? new NoopLogger();
   const config = normalizeConfig(input.config);
@@ -198,6 +201,30 @@ async function handleCanceledAction(input: {
 }
 
 async function resolveRoomRecord(input: {
+  thenvoiRest: RestApi;
+  store: HandleAgentSessionEventInput["deps"]["store"];
+  roomStrategy: "issue" | "session";
+  sessionId: string;
+  issueId: string | null;
+  logger: Logger;
+}): Promise<SessionRoomRecord> {
+  // Prevent concurrent room creation for the same session.
+  const lockKey = `${input.roomStrategy}:${input.sessionId}:${input.issueId ?? ""}`;
+  const existing = roomResolutionLocks.get(lockKey);
+  if (existing) {
+    return existing;
+  }
+
+  const promise = resolveRoomRecordImpl(input);
+  roomResolutionLocks.set(lockKey, promise);
+  try {
+    return await promise;
+  } finally {
+    roomResolutionLocks.delete(lockKey);
+  }
+}
+
+async function resolveRoomRecordImpl(input: {
   thenvoiRest: RestApi;
   store: HandleAgentSessionEventInput["deps"]["store"];
   roomStrategy: "issue" | "session";

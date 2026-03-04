@@ -8,3 +8,4 @@ coverage
 .desloppify
 .claude
 scorecard.png
+agent_config.yaml

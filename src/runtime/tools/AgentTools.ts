@@ -39,8 +39,8 @@ interface AgentToolsOptions {
 
 export class AgentTools implements AgentToolsProtocol {
   public readonly roomId: string;
+  public readonly capabilities: Readonly<AgentToolsCapabilities>;
   private readonly rest: AgentToolsRestApi;
-  private readonly capabilities: AgentToolsCapabilities;
   private participants: ParticipantRecord[];
   private readonly adapterTools: AdapterToolsProtocol;
 
@@ -395,8 +395,9 @@ export class AgentTools implements AgentToolsProtocol {
   private async lookupPeerByName(name: string): Promise<PeerRecord | null> {
     const target = name.trim().toLowerCase();
     const pageSize = 100;
+    const maxPages = 25;
 
-    for (let page = 1; page <= 100; page += 1) {
+    for (let page = 1; page <= maxPages; page += 1) {
       const peers = await this.lookupPeers(page, pageSize);
       const items = peers.data ?? [];
       const match = items.find((peer) => String(peer.name ?? "").toLowerCase() === target);
@@ -409,6 +410,7 @@ export class AgentTools implements AgentToolsProtocol {
         break;
       }
 
+      // No totalPages metadata — stop if we got a partial page.
       if ((typeof totalPages !== "number" || totalPages <= 0) && items.length < pageSize) {
         break;
       }
@@ -441,6 +443,7 @@ export class AgentTools implements AgentToolsProtocol {
 
   private buildAdapterTools(): AdapterToolsProtocol {
     const tools: AdapterToolsProtocol = {
+      capabilities: this.capabilities,
       sendMessage: this.sendMessage.bind(this),
       sendEvent: this.sendEvent.bind(this),
       addParticipant: this.addParticipant.bind(this),

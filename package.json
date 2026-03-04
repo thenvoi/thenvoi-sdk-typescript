@@ -31,6 +31,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.63",
+    "@thenvoi/rest-client": "link:../fern-javascript-sdk",
     "@linear/sdk": "^76.0.0",
     "@openai/codex-sdk": "^0.107.0",
     "express": "^5.2.1",

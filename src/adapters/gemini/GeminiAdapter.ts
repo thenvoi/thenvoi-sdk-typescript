@@ -24,7 +24,7 @@ export class GeminiAdapter extends ToolCallingAdapter {
     } = options;
 
     const resolvedModel = model ?? new GeminiToolCallingModel({
-      model: geminiModel ?? "gemini-2.5-flash",
+      model: geminiModel ?? "gemini-3-flash-preview",
       apiKey,
       clientFactory,
     });

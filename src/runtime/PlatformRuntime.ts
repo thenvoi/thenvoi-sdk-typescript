@@ -3,7 +3,7 @@ import type { ContactEvent, PlatformEvent } from "../platform/events";
 import { ThenvoiLink, type ThenvoiLinkOptions } from "../platform/ThenvoiLink";
 import { AgentRuntime } from "./AgentRuntime";
 import type { AgentConfig, ContactEventConfig, SessionConfig } from "./types";
-import { RuntimeStateError } from "../core/errors";
+import { RuntimeStateError, ValidationError } from "../core/errors";
 import { DefaultPreprocessor } from "./preprocessing/DefaultPreprocessor";
 import { ContactEventHandler } from "./ContactEventHandler";
 import type { ExecutionContext } from "./ExecutionContext";
@@ -40,6 +40,18 @@ export class PlatformRuntime {
   private contactsSubscribed = false;
 
   public constructor(options: PlatformRuntimeOptions) {
+    if (!options.agentId || options.agentId.trim() === "") {
+      throw new ValidationError(
+        "agentId is required and must be a non-empty string. Use loadAgentConfig() to load credentials from agent_config.yaml.",
+      );
+    }
+
+    if (!options.apiKey || options.apiKey.trim() === "") {
+      throw new ValidationError(
+        "apiKey is required and must be a non-empty string. Use loadAgentConfig() to load credentials from agent_config.yaml.",
+      );
+    }
+
     this._agentId = options.agentId;
     this._apiKey = options.apiKey;
     this._wsUrl = options.wsUrl;

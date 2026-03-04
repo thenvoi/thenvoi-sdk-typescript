@@ -26,6 +26,7 @@ export class AgentRuntime {
   private readonly contexts = new Map<string, ExecutionContext>();
   private readonly executions = new Map<string, Execution>();
   private running = false;
+  private stopping = false;
   private stopController = new AbortController();
   private consumeTask: Promise<void> | null = null;
 
@@ -59,15 +60,20 @@ export class AgentRuntime {
     }
 
     this.running = true;
+    this.stopping = false;
+    if (!this.stopController.signal.aborted) {
+      this.stopController.abort();
+    }
     this.stopController = new AbortController();
     this.consumeTask = this.consumeLoop(this.stopController.signal);
   }
 
   public async stop(timeoutMs?: number): Promise<boolean> {
-    if (!this.running) {
+    if (!this.running || this.stopping) {
       return true;
     }
 
+    this.stopping = true;
     this.running = false;
     this.stopController.abort();
     await this.consumeTask;

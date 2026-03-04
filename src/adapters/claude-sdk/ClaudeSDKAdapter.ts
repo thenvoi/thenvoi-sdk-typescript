@@ -37,7 +37,7 @@ export interface ClaudeSDKAdapterOptions {
   queryFn?: ClaudeSdkQuery;
 }
 
-const DEFAULT_MODEL = "claude-sonnet-4-5-20250929";
+const DEFAULT_MODEL = "claude-sonnet-4-6";
 
 export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterToolsProtocol> {
   private readonly model: string;
@@ -153,8 +153,9 @@ export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
             await tools.sendEvent("Claude SDK session", "task", {
               claude_session_id: sessionId,
             });
-          } catch {
-            // Best effort persistence marker only.
+          } catch (error) {
+            // Best-effort persistence marker — session continues regardless.
+            void error;
           }
         }
       }

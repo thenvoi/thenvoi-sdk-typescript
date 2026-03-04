@@ -22,7 +22,6 @@ describe("linear thenvoi examples", () => {
   it("builds a Thenvoi-hosted orchestrator agent", () => {
     const agent = createLinearThenvoiOrchestratorAgent({
       linearAccessToken: "lin_api_test",
-      restApi: new LinearThenvoiExampleRestApi(),
     });
 
     expect(agent).toBeDefined();
