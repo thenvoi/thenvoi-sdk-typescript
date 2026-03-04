@@ -14,7 +14,7 @@ export function createCodexAgent(
 ): Agent {
   const adapter = new CodexAdapter({
     config: {
-      model: options.model ?? "gpt-5.3-codex",
+      model: options.model,
       cwd: options.cwd,
       approvalPolicy: options.approvalPolicy ?? "never",
       sandboxMode: options.sandboxMode ?? "workspace-write",

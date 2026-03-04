@@ -122,6 +122,71 @@ describe("AgentTools", () => {
     await expect(tools.sendEvent("hello", "message_created")).rejects.toBeInstanceOf(ValidationError);
   });
 
+  it("validates send_message requires mentions", async () => {
+    const tools = new AgentTools({
+      roomId: "room-1",
+      rest: new RestFacade({ api: new FakeRestApi() }),
+    });
+
+    const result = await tools.executeToolCall("thenvoi_send_message", {
+      content: "hello",
+      mentions: [],
+    });
+    expect(result).toContain("Invalid arguments for thenvoi_send_message");
+    expect(result).toContain("mentions: At least one mention is required");
+  });
+
+  it("validates send_message requires content field", async () => {
+    const tools = new AgentTools({
+      roomId: "room-1",
+      rest: new RestFacade({ api: new FakeRestApi() }),
+    });
+
+    const result = await tools.executeToolCall("thenvoi_send_message", {
+      mentions: ["@jane"],
+    });
+    expect(result).toContain("Invalid arguments for thenvoi_send_message");
+    expect(result).toContain("content: Field required");
+  });
+
+  it("validates send_event rejects invalid message_type", async () => {
+    const tools = new AgentTools({
+      roomId: "room-1",
+      rest: new RestFacade({ api: new FakeRestApi() }),
+    });
+
+    const result = await tools.executeToolCall("thenvoi_send_event", {
+      content: "hello",
+      message_type: "invalid_type",
+    });
+    expect(result).toContain("Invalid arguments for thenvoi_send_event");
+    expect(result).toContain("message_type: Invalid value");
+  });
+
+  it("wraps execution errors as LLM-friendly strings", async () => {
+    const tools = new AgentTools({
+      roomId: "room-1",
+      rest: new RestFacade({ api: new FakeRestApi() }),
+      participants: [],
+    });
+
+    const result = await tools.executeToolCall("thenvoi_send_message", {
+      content: "hello",
+      mentions: ["@nonexistent"],
+    });
+    expect(result).toContain("Error executing thenvoi_send_message");
+  });
+
+  it("returns error string for unknown tools", async () => {
+    const tools = new AgentTools({
+      roomId: "room-1",
+      rest: new RestFacade({ api: new FakeRestApi() }),
+    });
+
+    const result = await tools.executeToolCall("unknown_tool", {});
+    expect(result).toBe("Unknown tool: unknown_tool");
+  });
+
   it("looks up peers across paginated pages when adding participant", async () => {
     const api = new FakeRestApi();
     const tools = new AgentTools({

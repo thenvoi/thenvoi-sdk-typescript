@@ -54,18 +54,23 @@ describe("GracefulShutdown", () => {
     shutdown.unregisterSignals();
   });
 
-  it("only shuts down once even with multiple signals", async () => {
-    const agent = makeAgent();
+  it("force exits on second signal during shutdown", async () => {
+    const agent = makeAgent(100); // slow stop to keep shuttingDown=true
     const shutdown = new GracefulShutdown(agent as never);
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
 
     shutdown.registerSignals();
 
     process.emit("SIGINT");
+    // Give the first signal handler a tick to set shuttingDown=true
+    await new Promise((r) => setTimeout(r, 10));
     process.emit("SIGTERM");
 
     await new Promise((r) => setTimeout(r, 10));
 
-    expect(agent.stop).toHaveBeenCalledTimes(1);
+    // agent.stop may be called more than once since the mocked process.exit doesn't halt execution
+    expect(agent.stop).toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(1);
 
     shutdown.unregisterSignals();
   });
@@ -133,7 +138,7 @@ describe("GracefulShutdown", () => {
 describe("Agent.run signal handling", () => {
   it("registers signal handlers by default", async () => {
     const mockRuntime = {
-      start: vi.fn(),
+      start: vi.fn(async () => {}),
       stop: vi.fn(async () => true),
       runForever: vi.fn(async () => {}),
       name: "test",
@@ -160,7 +165,7 @@ describe("Agent.run signal handling", () => {
 
   it("does not register signal handlers when signals: false", async () => {
     const mockRuntime = {
-      start: vi.fn(),
+      start: vi.fn(async () => {}),
       stop: vi.fn(async () => true),
       runForever: vi.fn(async () => {}),
       name: "test",

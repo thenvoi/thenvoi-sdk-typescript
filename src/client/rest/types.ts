@@ -125,12 +125,25 @@ export type ThenvoiLinkRestApi =
 
 export interface RestApi extends ThenvoiLinkRestApi {}
 
+export interface FernUserProfile {
+  id: string;
+  name?: string;
+  description?: string | null;
+  first_name?: string;
+  last_name?: string;
+  username?: string;
+}
+
+// Method syntax (not property-function syntax) is used intentionally so that
+// TypeScript checks parameter types bivariantly, allowing the concrete
+// @thenvoi/rest-client ThenvoiClient to satisfy this interface even when its
+// parameter types use narrower string-literal unions or required fields.
 export interface FernThenvoiClientLike {
   myProfile?: {
-    getMyProfile: (options?: RestRequestOptions) => Promise<{ id: string; name: string; description?: string | null }>;
+    getMyProfile(options?: RestRequestOptions): Promise<FernUserProfile>;
   };
   chatMessages?: {
-    createChatMessage: (
+    createChatMessage(
       chatId: string,
       request: {
         message: {
@@ -141,26 +154,26 @@ export interface FernThenvoiClientLike {
         };
       },
       options?: RestRequestOptions,
-    ) => Promise<ToolOperationResult>;
-    markMessageProcessing?: (
+    ): Promise<unknown>;
+    markMessageProcessing?(
       chatId: string,
       id: string,
       options?: RestRequestOptions,
-    ) => Promise<ToolOperationResult>;
-    markMessageProcessed?: (
+    ): Promise<unknown>;
+    markMessageProcessed?(
       chatId: string,
       id: string,
       options?: RestRequestOptions,
-    ) => Promise<ToolOperationResult>;
-    markMessageFailed?: (
+    ): Promise<unknown>;
+    markMessageFailed?(
       chatId: string,
       id: string,
       request: { error: string },
       options?: RestRequestOptions,
-    ) => Promise<ToolOperationResult>;
+    ): Promise<unknown>;
   };
   myChatMessages?: {
-    createMyChatMessage: (
+    createMyChatMessage(
       chatId: string,
       request: {
         message: {
@@ -171,37 +184,33 @@ export interface FernThenvoiClientLike {
         };
       },
       options?: RestRequestOptions,
-    ) => Promise<ToolOperationResult>;
+    ): Promise<unknown>;
   };
   chatRooms?: {
-    createChat: (
+    createChat(
       request: { chat: { task_id?: string } },
       options?: RestRequestOptions,
-    ) => Promise<{ id: string } | { data?: { id?: string } }>;
-    listChats?: (
+    ): Promise<unknown>;
+    listChats?(
       request?: { page?: number; page_size?: number },
       options?: RestRequestOptions,
-    ) => Promise<
-      | MetadataMap[]
-      | { data?: MetadataMap[]; metadata?: PaginationMetadata }
-      | { data?: { data?: MetadataMap[]; metadata?: PaginationMetadata } }
-    >;
+    ): Promise<unknown>;
   };
   chatParticipants?: {
-    listChatParticipants: (
+    listChatParticipants(
       chatId: string,
       request?: { participant_type?: "User" | "Agent" },
       options?: RestRequestOptions,
-    ) => Promise<ChatParticipant[] | { data?: ChatParticipant[] }>;
-    addChatParticipant: (
+    ): Promise<unknown>;
+    addChatParticipant(
       chatId: string,
       request: { participant: { participant_id: string; role: string } },
       options?: RestRequestOptions,
-    ) => Promise<ToolOperationResult>;
-    removeChatParticipant: (
+    ): Promise<unknown>;
+    removeChatParticipant(
       chatId: string,
       participantId: string,
       options?: RestRequestOptions,
-    ) => Promise<ToolOperationResult>;
+    ): Promise<unknown>;
   };
 }

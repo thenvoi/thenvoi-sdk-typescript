@@ -48,9 +48,13 @@ export class FernRestAdapter implements RestApi {
     }
 
     const profile = await this.client.myProfile.getMyProfile(mergeOptions(options));
+    const name = profile.name
+      ?? ([profile.first_name, profile.last_name].filter(Boolean).join(" ") || undefined)
+      ?? profile.username
+      ?? profile.id;
     return {
       id: profile.id,
-      name: profile.name,
+      name,
       description: profile.description ?? null,
     };
   }
@@ -81,7 +85,7 @@ export class FernRestAdapter implements RestApi {
         },
       },
       mergeOptions(options),
-    );
+    ) as Promise<ToolOperationResult>;
   }
 
   public async createChatEvent(
@@ -118,7 +122,7 @@ export class FernRestAdapter implements RestApi {
       mergeOptions(options),
     );
 
-    const room = unwrapData(response);
+    const room = unwrapData(response) as { id?: string };
     if (!room.id) {
       throw new UnsupportedFeatureError("Chat create response did not include id");
     }
@@ -139,7 +143,7 @@ export class FernRestAdapter implements RestApi {
       {},
       mergeOptions(options),
     );
-    return unwrapData(response);
+    return unwrapData(response) as ChatParticipant[];
   }
 
   public async addChatParticipant(
@@ -160,7 +164,7 @@ export class FernRestAdapter implements RestApi {
         },
       },
       mergeOptions(options),
-    );
+    ) as Promise<ToolOperationResult>;
   }
 
   public async removeChatParticipant(
@@ -172,7 +176,9 @@ export class FernRestAdapter implements RestApi {
       throw new UnsupportedFeatureError("Fern client missing chatParticipants.removeChatParticipant");
     }
 
-    return this.client.chatParticipants.removeChatParticipant(chatId, participantId, mergeOptions(options));
+    return this.client.chatParticipants.removeChatParticipant(
+      chatId, participantId, mergeOptions(options),
+    ) as Promise<ToolOperationResult>;
   }
 
   public async markMessageProcessing(
@@ -184,7 +190,9 @@ export class FernRestAdapter implements RestApi {
       throw new UnsupportedFeatureError("Fern client missing chatMessages.markMessageProcessing");
     }
 
-    return this.client.chatMessages.markMessageProcessing(chatId, messageId, mergeOptions(options));
+    return this.client.chatMessages.markMessageProcessing(
+      chatId, messageId, mergeOptions(options),
+    ) as Promise<ToolOperationResult>;
   }
 
   public async markMessageProcessed(
@@ -196,7 +204,9 @@ export class FernRestAdapter implements RestApi {
       throw new UnsupportedFeatureError("Fern client missing chatMessages.markMessageProcessed");
     }
 
-    return this.client.chatMessages.markMessageProcessed(chatId, messageId, mergeOptions(options));
+    return this.client.chatMessages.markMessageProcessed(
+      chatId, messageId, mergeOptions(options),
+    ) as Promise<ToolOperationResult>;
   }
 
   public async markMessageFailed(
@@ -214,7 +224,7 @@ export class FernRestAdapter implements RestApi {
       messageId,
       { error },
       mergeOptions(options),
-    );
+    ) as Promise<ToolOperationResult>;
   }
 
   public async listPeers(): Promise<{ data: PeerRecord[]; metadata?: MetadataMap }> {

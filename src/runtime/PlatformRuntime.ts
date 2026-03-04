@@ -33,6 +33,7 @@ export class PlatformRuntime {
   private readonly linkOptions?: Omit<ThenvoiLinkOptions, "agentId" | "apiKey">;
 
   private linkInstance?: ThenvoiLink;
+  private initPromise: Promise<void> | null = null;
   private runtime?: AgentRuntime;
   private contactHandler?: ContactEventHandler;
   private _agentName = "";
@@ -76,20 +77,12 @@ export class PlatformRuntime {
     return this._agentName;
   }
 
-  public get agentName(): string {
-    return this.name;
-  }
-
   public get agentId(): string {
     return this._agentId;
   }
 
   public get description(): string {
     return this._agentDescription;
-  }
-
-  public get agentDescription(): string {
-    return this.description;
   }
 
   public get contactConfiguration(): ContactEventConfig | undefined {
@@ -101,18 +94,27 @@ export class PlatformRuntime {
   }
 
   public async initialize(): Promise<void> {
-    if (!this.linkInstance) {
-      if (!this.linkOptions?.restApi) {
-        throw new RuntimeStateError("linkOptions.restApi is required to initialize PlatformRuntime");
-      }
+    if (this.initPromise) {
+      return this.initPromise;
+    }
 
+    this.initPromise = this.doInitialize();
+    try {
+      await this.initPromise;
+    } catch (error) {
+      this.initPromise = null;
+      throw error;
+    }
+  }
+
+  private async doInitialize(): Promise<void> {
+    if (!this.linkInstance) {
       this.linkInstance = new ThenvoiLink({
         ...this.linkOptions,
         agentId: this._agentId,
         apiKey: this._apiKey,
         wsUrl: this._wsUrl,
         restUrl: this._restUrl,
-        restApi: this.linkOptions.restApi,
       });
     }
 
@@ -197,7 +199,25 @@ export class PlatformRuntime {
       return;
     }
 
-    await adapter.onEvent(input);
+    const messageId = String(input.message.id ?? "");
+    const roomId = input.roomId;
+
+    if (messageId) {
+      await this.link.markProcessing(roomId, messageId);
+    }
+
+    try {
+      await adapter.onEvent(input);
+      if (messageId) {
+        await this.link.markProcessed(roomId, messageId);
+      }
+    } catch (error) {
+      const label = error instanceof Error ? error.message : String(error);
+      if (messageId) {
+        await this.link.markFailed(roomId, messageId, label);
+      }
+      throw error;
+    }
   }
 
   private async handleContactEvent(event: ContactEvent): Promise<void> {

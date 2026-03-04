@@ -3,126 +3,355 @@ import { CHAT_EVENT_TYPES } from "../messages";
 
 export const TOOL_MODELS = {
   thenvoi_send_message: {
-    description: "Send a message to the chat room",
+    description:
+      "Send a message to the chat room. " +
+      "Use this to respond to users or other agents. Messages require at least one @mention " +
+      "in the mentions array. You MUST use this tool to communicate — plain text responses " +
+      "won't reach users.",
     properties: {
-      content: { type: "string" },
-      mentions: { type: "array", items: { type: "string" } },
+      content: {
+        type: "string",
+        description: "The message content to send.",
+      },
+      mentions: {
+        type: "array",
+        items: { type: "string" },
+        minItems: 1,
+        description:
+          "List of participant handles to @mention. At least one required. " +
+          "For users: @<username> (e.g., '@john'). " +
+          "For agents: @<username>/<agent-name> (e.g., '@john/weather-agent').",
+      },
     },
     required: ["content", "mentions"],
   },
   thenvoi_send_event: {
-    description: "Send an event message",
+    description:
+      "Send an event to the chat room. No mentions required. " +
+      "'thought': Share your reasoning or plan BEFORE taking actions. Explain what you're about to do and why. " +
+      "'error': Report an error or problem that occurred. " +
+      "'task': Report task progress or completion status. " +
+      "Always send a thought before complex actions to keep users informed.",
     properties: {
-      content: { type: "string" },
-      message_type: { type: "string", enum: [...CHAT_EVENT_TYPES] },
-      metadata: { type: "object" },
+      content: {
+        type: "string",
+        description: "Human-readable event content.",
+      },
+      message_type: {
+        type: "string",
+        enum: [...CHAT_EVENT_TYPES],
+        description: "Type of event.",
+      },
+      metadata: {
+        type: "object",
+        description: "Optional structured data for the event.",
+      },
     },
     required: ["content", "message_type"],
   },
   thenvoi_add_participant: {
-    description: "Add participant by name",
+    description:
+      "Add a participant (agent or user) to the chat room by name. " +
+      "IMPORTANT: Use thenvoi_lookup_peers() first to find available agents.",
     properties: {
-      name: { type: "string" },
-      role: { type: "string" },
+      name: {
+        type: "string",
+        description:
+          "Name of participant to add (must match a name from thenvoi_lookup_peers).",
+      },
+      role: {
+        type: "string",
+        enum: ["owner", "admin", "member"],
+        description: "Role for the participant in this room.",
+      },
     },
     required: ["name"],
   },
   thenvoi_remove_participant: {
-    description: "Remove participant by name",
+    description: "Remove a participant from the chat room by name.",
     properties: {
-      name: { type: "string" },
+      name: {
+        type: "string",
+        description: "Name of the participant to remove.",
+      },
     },
     required: ["name"],
   },
   thenvoi_get_participants: {
-    description: "List participants in room",
+    description: "Get a list of all participants in the current chat room.",
     properties: {},
     required: [],
   },
   thenvoi_lookup_peers: {
-    description: "List available peers not in room",
+    description:
+      "List available peers (agents and users) that can be added to this room. " +
+      "Automatically excludes peers already in the room. " +
+      "Returns dict with 'peers' list and 'metadata' (page, page_size, total_count, total_pages). " +
+      "Use this to find specialized agents (e.g., Weather Agent) when you cannot answer a question directly.",
     properties: {
-      page: { type: "integer" },
-      page_size: { type: "integer" },
+      page: {
+        type: "integer",
+        description: "Page number.",
+      },
+      page_size: {
+        type: "integer",
+        description: "Items per page (max 100).",
+        maximum: 100,
+      },
     },
     required: [],
   },
   thenvoi_create_chatroom: {
-    description: "Create new chat room",
+    description:
+      "Create a new chat room for a specific task or conversation.",
     properties: {
-      task_id: { type: "string" },
+      task_id: {
+        type: "string",
+        description: "Associated task ID (optional).",
+      },
     },
     required: [],
   },
   thenvoi_list_contacts: {
-    description: "List contacts",
-    properties: {},
+    description: "List agent's contacts with pagination.",
+    properties: {
+      page: {
+        type: "integer",
+        description: "Page number.",
+        minimum: 1,
+      },
+      page_size: {
+        type: "integer",
+        description: "Items per page.",
+        minimum: 1,
+        maximum: 100,
+      },
+    },
     required: [],
   },
   thenvoi_add_contact: {
-    description: "Add contact",
+    description:
+      "Send a contact request to add someone as a contact. " +
+      "Returns 'pending' when request is created. " +
+      "Returns 'approved' when inverse request existed and was auto-accepted.",
     properties: {
-      handle: { type: "string" },
-      message: { type: "string" },
+      handle: {
+        type: "string",
+        description:
+          "Handle of user/agent to add (e.g., '@john' or '@john/agent-name').",
+      },
+      message: {
+        type: "string",
+        description: "Optional message with the request.",
+      },
     },
     required: ["handle"],
   },
   thenvoi_remove_contact: {
-    description: "Remove contact",
+    description: "Remove an existing contact by handle or ID.",
     properties: {
-      handle: { type: "string" },
-      contact_id: { type: "string" },
+      handle: {
+        type: "string",
+        description: "Contact's handle.",
+      },
+      contact_id: {
+        type: "string",
+        description: "Or contact record ID (UUID).",
+      },
     },
     required: [],
   },
   thenvoi_list_contact_requests: {
-    description: "List contact requests",
-    properties: {},
+    description:
+      "List both received and sent contact requests. " +
+      "Received requests are always filtered to pending status. " +
+      "Sent requests can be filtered by status.",
+    properties: {
+      page: {
+        type: "integer",
+        description: "Page number.",
+        minimum: 1,
+      },
+      page_size: {
+        type: "integer",
+        description: "Items per page per direction (max 100).",
+        minimum: 1,
+        maximum: 100,
+      },
+      sent_status: {
+        type: "string",
+        enum: ["pending", "approved", "rejected", "cancelled", "all"],
+        description: "Filter sent requests by status.",
+      },
+    },
     required: [],
   },
   thenvoi_respond_contact_request: {
-    description: "Respond to contact request",
+    description:
+      "Respond to a contact request. " +
+      "'approve'/'reject': For requests you RECEIVED (handle = requester's handle). " +
+      "'cancel': For requests you SENT (handle = recipient's handle).",
     properties: {
-      action: { type: "string" },
-      handle: { type: "string" },
-      request_id: { type: "string" },
+      action: {
+        type: "string",
+        enum: ["approve", "reject", "cancel"],
+        description: "Action to take.",
+      },
+      handle: {
+        type: "string",
+        description: "Other party's handle.",
+      },
+      request_id: {
+        type: "string",
+        description: "Or request ID (UUID).",
+      },
     },
     required: ["action"],
   },
   thenvoi_list_memories: {
-    description: "List memories",
-    properties: {},
+    description:
+      "List memories accessible to the agent. " +
+      "Returns memories about the specified subject (cross-agent sharing) " +
+      "and organization-wide shared memories.",
+    properties: {
+      subject_id: {
+        type: "string",
+        description:
+          "Filter by subject UUID (required for subject-scoped queries).",
+      },
+      scope: {
+        type: "string",
+        enum: ["subject", "organization", "all"],
+        description: "Filter by scope.",
+      },
+      system: {
+        type: "string",
+        enum: ["sensory", "working", "long_term"],
+        description: "Filter by memory system.",
+      },
+      type: {
+        type: "string",
+        enum: [
+          "iconic",
+          "echoic",
+          "haptic",
+          "episodic",
+          "semantic",
+          "procedural",
+        ],
+        description: "Filter by memory type.",
+      },
+      segment: {
+        type: "string",
+        enum: ["user", "agent", "tool", "guideline"],
+        description: "Filter by segment.",
+      },
+      content_query: {
+        type: "string",
+        description: "Full-text search query.",
+      },
+      page_size: {
+        type: "integer",
+        description: "Number of results per page.",
+        minimum: 1,
+        maximum: 50,
+      },
+      status: {
+        type: "string",
+        enum: ["active", "superseded", "archived", "all"],
+        description: "Filter by status.",
+      },
+    },
     required: [],
   },
   thenvoi_store_memory: {
-    description: "Store memory",
+    description:
+      "Store a new memory entry. The memory will be associated with the authenticated agent " +
+      "as the source. For subject-scoped memories, provide a subject_id. " +
+      "For organization-scoped memories, omit subject_id.",
     properties: {
-      content: { type: "string" },
-      system: { type: "string" },
-      type: { type: "string" },
-      segment: { type: "string" },
-      thought: { type: "string" },
+      content: {
+        type: "string",
+        description: "The memory content.",
+      },
+      system: {
+        type: "string",
+        enum: ["sensory", "working", "long_term"],
+        description: "Memory system tier.",
+      },
+      type: {
+        type: "string",
+        enum: [
+          "iconic",
+          "echoic",
+          "haptic",
+          "episodic",
+          "semantic",
+          "procedural",
+        ],
+        description: "Memory type (must be valid for selected system).",
+      },
+      segment: {
+        type: "string",
+        enum: ["user", "agent", "tool", "guideline"],
+        description: "Logical segment.",
+      },
+      thought: {
+        type: "string",
+        description: "Agent's reasoning for storing this memory.",
+      },
+      scope: {
+        type: "string",
+        enum: ["subject", "organization"],
+        description: "Visibility scope.",
+      },
+      subject_id: {
+        type: "string",
+        description:
+          "UUID of the subject this memory is about (required for subject scope).",
+      },
+      metadata: {
+        type: "object",
+        description: "Additional metadata (tags, references).",
+      },
     },
     required: ["content", "system", "type", "segment", "thought"],
   },
   thenvoi_get_memory: {
-    description: "Get memory",
+    description: "Retrieve a specific memory by ID.",
     properties: {
-      memory_id: { type: "string" },
+      memory_id: {
+        type: "string",
+        description: "Memory ID (UUID).",
+      },
     },
     required: ["memory_id"],
   },
   thenvoi_supersede_memory: {
-    description: "Supersede memory",
+    description:
+      "Mark a memory as superseded (soft delete). " +
+      "Use when information is outdated or incorrect. " +
+      "The memory remains for audit trail but won't appear in normal queries. " +
+      "Only the source agent can supersede.",
     properties: {
-      memory_id: { type: "string" },
+      memory_id: {
+        type: "string",
+        description: "Memory ID (UUID).",
+      },
     },
     required: ["memory_id"],
   },
   thenvoi_archive_memory: {
-    description: "Archive memory",
+    description:
+      "Archive a memory (hide but preserve). " +
+      "Use when memory is valid but not currently needed. " +
+      "Archived memories can be restored later by humans. " +
+      "Only the source agent can archive.",
     properties: {
-      memory_id: { type: "string" },
+      memory_id: {
+        type: "string",
+        description: "Memory ID (UUID).",
+      },
     },
     required: ["memory_id"],
   },

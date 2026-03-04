@@ -3,6 +3,13 @@ import type { MessagingTools, ToolExecutor, ToolSchemaProvider } from "../../con
 import type { ToolModelMessage } from "../../contracts/dtos";
 import type { HistoryProvider, PlatformMessage } from "../../runtime/types";
 import { formatHistoryForLlm } from "../../runtime/formatters";
+import {
+  type CustomToolDef,
+  buildCustomToolIndex,
+  customToolsToSchemas,
+  executeCustomTool,
+  findCustomTool,
+} from "../../runtime/tools/customTools";
 import type {
   ToolCall,
   ToolCallingModel,
@@ -18,6 +25,7 @@ export interface ToolCallingAdapterOptions {
   includeMemoryTools?: boolean;
   maxToolRounds?: number;
   enableExecutionReporting?: boolean;
+  customTools?: CustomToolDef[];
 }
 
 type ToolCallingTools = MessagingTools & ToolExecutor & ToolSchemaProvider;
@@ -29,6 +37,8 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
   private readonly includeMemoryTools: boolean;
   private readonly maxToolRounds: number;
   private readonly enableExecutionReporting: boolean;
+  private readonly customTools: CustomToolDef[];
+  private readonly customToolIndex: Map<string, CustomToolDef>;
 
   public constructor(options: ToolCallingAdapterOptions) {
     super();
@@ -38,6 +48,8 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
     this.includeMemoryTools = options.includeMemoryTools ?? false;
     this.maxToolRounds = options.maxToolRounds ?? 8;
     this.enableExecutionReporting = options.enableExecutionReporting ?? false;
+    this.customTools = options.customTools ?? [];
+    this.customToolIndex = buildCustomToolIndex(this.customTools);
   }
 
   public async onMessage(
@@ -48,9 +60,11 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
     contactsMessage: string | null,
     _context: { isSessionBootstrap: boolean; roomId: string },
   ): Promise<void> {
-    const schemas = tools.getToolSchemas(this.toolFormat, {
+    const platformSchemas = tools.getToolSchemas(this.toolFormat, {
       includeMemory: this.includeMemoryTools,
     });
+    const customSchemas = customToolsToSchemas(this.customTools, this.toolFormat);
+    const schemas = [...platformSchemas, ...customSchemas];
 
     const messages = this.buildMessages(history, message, participantsMessage, contactsMessage);
 
@@ -94,7 +108,18 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
           }
         }
 
-        const output = await tools.executeToolCall(call.name, call.input);
+        const customTool = findCustomTool(this.customToolIndex, call.name);
+        let output: unknown;
+        if (customTool) {
+          try {
+            output = await executeCustomTool(customTool, call.input);
+          } catch (error) {
+            const label = error instanceof Error ? error.message : String(error);
+            output = `Error executing ${call.name}: ${label}`;
+          }
+        } else {
+          output = await tools.executeToolCall(call.name, call.input);
+        }
         const isError = isToolOutputError(output);
         roundToolResults.push({
           toolCallId: call.id,
@@ -132,7 +157,7 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
 
     const text = response.text?.trim();
     if (text) {
-      await tools.sendMessage(text);
+      await tools.sendMessage(text, [{ id: message.senderId, handle: message.senderName ?? message.senderType }]);
     }
   }
 

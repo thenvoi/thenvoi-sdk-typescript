@@ -324,7 +324,7 @@ export class A2AGatewayAdapter
       return [existingRoom, contextId];
     }
 
-    const normalizedContextId = contextId || randomUUID();
+    const normalizedContextId = contextId && contextId.length > 0 ? contextId : randomUUID();
     const created = await this.thenvoiRest.createChat(
       `a2a:gateway:${normalizedContextId}`,
     );
@@ -398,6 +398,7 @@ class AsyncEventQueue<T> {
 
   public cancel(): void {
     this.cancelled = true;
+    this.items.length = 0;
     const pending = this.waiters.splice(0);
     for (const waiter of pending) {
       waiter(null);
@@ -507,13 +508,6 @@ function toStatusUpdateEvent(
   } else if (normalizedType === "text") {
     state = "completed";
     final = true;
-  } else if (
-    normalizedType === "thought" ||
-    normalizedType === "tool_call" ||
-    normalizedType === "tool_result" ||
-    normalizedType === "task"
-  ) {
-    state = "working";
   } else {
     state = "working";
   }

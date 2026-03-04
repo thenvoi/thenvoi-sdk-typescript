@@ -68,7 +68,7 @@ export interface ToolSchemaProvider {
 export interface ContactTools {
   listContacts(page?: number, pageSize?: number): Promise<PaginatedList<ContactRecord>>;
   addContact(handle: string, message?: string): Promise<ToolOperationResult>;
-  removeContact(handle?: string, contactId?: string): Promise<ToolOperationResult>;
+  removeContact(handle: string | undefined, contactId: string | undefined): Promise<ToolOperationResult>;
   listContactRequests(
     page?: number,
     pageSize?: number,
@@ -105,7 +105,7 @@ export interface AdapterToolsProtocol
     Partial<ContactTools>,
     Partial<MemoryTools> {
   /** Check capability flags to determine which optional tools are available. */
-  readonly capabilities?: Readonly<AgentToolsCapabilities>;
+  readonly capabilities: Readonly<AgentToolsCapabilities>;
 }
 
 export type AgentToolsProtocol = AdapterToolsProtocol;

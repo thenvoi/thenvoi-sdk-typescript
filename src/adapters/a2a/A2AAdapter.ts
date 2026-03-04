@@ -522,14 +522,14 @@ function extractTextFromPart(part: A2AMessagePart | undefined): string | null {
   return null;
 }
 
-function unwrapResult(value: unknown): A2AEventLike | null {
-  if (!value || typeof value !== "object") {
+function unwrapResult(value: unknown, depth = 0): A2AEventLike | null {
+  if (!value || typeof value !== "object" || depth > 10) {
     return null;
   }
 
   const event = value as Record<string, unknown>;
   if (event.result && typeof event.result === "object") {
-    return unwrapResult(event.result);
+    return unwrapResult(event.result, depth + 1);
   }
 
   return event as A2AEventLike;

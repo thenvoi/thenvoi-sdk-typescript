@@ -42,14 +42,16 @@ export interface CodexFactory {
 }
 
 export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools> {
-  private config: CodexAdapterConfig;
+  private readonly baseConfig: CodexAdapterConfig;
+  private readonly roomConfigOverrides = new Map<string, Partial<CodexAdapterConfig>>();
   private readonly factoryOverride?: CodexFactory;
+  private clientInitPromise: Promise<CodexClientLike> | null = null;
   private codexClient: CodexClientLike | null = null;
   private readonly roomThreads = new Map<string, CodexThreadLike>();
 
   public constructor(options?: { config?: CodexAdapterConfig; factory?: CodexFactory }) {
     super();
-    this.config = {
+    this.baseConfig = {
       approvalPolicy: "never",
       sandboxMode: "workspace-write",
       networkAccessEnabled: false,
@@ -61,6 +63,27 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
     this.factoryOverride = options?.factory;
   }
 
+  private getConfig(roomId: string): CodexAdapterConfig {
+    const overrides = this.roomConfigOverrides.get(roomId);
+    if (!overrides) {
+      return this.baseConfig;
+    }
+    return { ...this.baseConfig, ...overrides };
+  }
+
+  private async ensureClient(): Promise<CodexClientLike> {
+    if (this.codexClient) {
+      return this.codexClient;
+    }
+    if (!this.clientInitPromise) {
+      this.clientInitPromise = (this.factoryOverride ?? loadCodexFactory())().then((client) => {
+        this.codexClient = client;
+        return client;
+      });
+    }
+    return this.clientInitPromise;
+  }
+
   public async onMessage(
     message: PlatformMessage,
     tools: MessagingTools,
@@ -69,11 +92,10 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
     contactsMessage: string | null,
     context: { isSessionBootstrap: boolean; roomId: string },
   ): Promise<void> {
-    if (!this.codexClient) {
-      this.codexClient = await (this.factoryOverride ?? loadCodexFactory())();
-    }
+    await this.ensureClient();
 
-    if (this.config.enableLocalCommands) {
+    const config = this.getConfig(context.roomId);
+    if (config.enableLocalCommands) {
       const command = extractLocalCommand(message.content);
       if (command) {
         const handled = await this.handleLocalCommand({
@@ -94,6 +116,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
       context.roomId,
       history,
       context.isSessionBootstrap,
+      config,
     );
     const prompt = buildConversationPrompt({
       history,
@@ -102,29 +125,33 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
       contactsMessage,
       historyHeader: "[Conversation History]",
       currentMessage: `[${message.senderName ?? message.senderType}]: ${message.content}`,
-      maxHistoryMessages: this.config.maxHistoryMessages ?? 50,
+      maxHistoryMessages: config.maxHistoryMessages ?? 50,
     });
 
     const result = await thread.run(prompt);
 
-    if (this.config.enableExecutionReporting) {
-      await this.reportItems(tools, result.items, context.roomId, this.threadId(thread));
+    if (config.enableExecutionReporting) {
+      await this.reportItems(tools, result.items, context.roomId, this.threadId(thread), config);
     }
+
+    const mention = [{ id: message.senderId, handle: message.senderName ?? message.senderType }];
 
     const final = result.finalResponse?.trim();
     if (final) {
-      await tools.sendMessage(final);
+      await tools.sendMessage(final, mention);
     }
   }
 
   public async onCleanup(roomId: string): Promise<void> {
     this.roomThreads.delete(roomId);
+    this.roomConfigOverrides.delete(roomId);
   }
 
   private getOrCreateThread(
     roomId: string,
     history: HistoryProvider,
     isSessionBootstrap: boolean,
+    config: CodexAdapterConfig,
   ): CodexThreadLike {
     const existing = this.roomThreads.get(roomId);
     if (existing) {
@@ -142,13 +169,13 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
     let thread: CodexThreadLike;
     if (resumeThreadId) {
       try {
-        thread = this.codexClient.resumeThread(resumeThreadId, this.threadOptions());
+        thread = this.codexClient.resumeThread(resumeThreadId, this.threadOptions(config));
       } catch {
         // Thread resume failed (e.g. expired session), fall back to new thread.
-        thread = this.codexClient.startThread(this.threadOptions());
+        thread = this.codexClient.startThread(this.threadOptions(config));
       }
     } else {
-      thread = this.codexClient.startThread(this.threadOptions());
+      thread = this.codexClient.startThread(this.threadOptions(config));
     }
 
     this.roomThreads.set(roomId, thread);
@@ -160,9 +187,10 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
     items: ThreadItem[],
     roomId: string,
     threadId: string | null,
+    config: CodexAdapterConfig,
   ): Promise<void> {
     for (const item of items) {
-      if (item.type === "reasoning" && this.config.emitThoughtEvents) {
+      if (item.type === "reasoning" && config.emitThoughtEvents) {
         await tools.sendEvent(item.text, "thought");
         continue;
       }
@@ -176,25 +204,25 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
     }
   }
 
-  private threadOptions(): ThreadOptions {
+  private threadOptions(config: CodexAdapterConfig): ThreadOptions {
     const options: ThreadOptions = {
-      approvalPolicy: this.config.approvalPolicy,
-      sandboxMode: this.config.sandboxMode,
-      networkAccessEnabled: this.config.networkAccessEnabled,
-      webSearchMode: this.config.webSearchMode,
-      skipGitRepoCheck: this.config.skipGitRepoCheck,
+      approvalPolicy: config.approvalPolicy,
+      sandboxMode: config.sandboxMode,
+      networkAccessEnabled: config.networkAccessEnabled,
+      webSearchMode: config.webSearchMode,
+      skipGitRepoCheck: config.skipGitRepoCheck,
     };
 
-    if (this.config.model) {
-      options.model = this.config.model;
+    if (config.model) {
+      options.model = config.model;
     }
 
-    if (this.config.cwd) {
-      options.workingDirectory = this.config.cwd;
+    if (config.cwd) {
+      options.workingDirectory = config.cwd;
     }
 
-    if (this.config.reasoningEffort) {
-      options.modelReasoningEffort = this.config.reasoningEffort;
+    if (config.reasoningEffort) {
+      options.modelReasoningEffort = config.reasoningEffort;
     }
 
     return options;
@@ -206,14 +234,6 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
       : null;
   }
 
-  private threadIdOrNull(thread: CodexThreadLike | undefined): string | null {
-    if (!thread) {
-      return null;
-    }
-
-    return this.threadId(thread);
-  }
-
   private async handleLocalCommand(input: {
     tools: MessagingTools;
     message: PlatformMessage;
@@ -223,7 +243,8 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
     args: string;
   }): Promise<boolean> {
     const mention = [{ id: input.message.senderId, handle: input.message.senderName ?? undefined }];
-    const mappedThreadId = this.threadIdOrNull(this.roomThreads.get(input.roomId))
+    const existingThread = this.roomThreads.get(input.roomId);
+    const mappedThreadId = (existingThread ? this.threadId(existingThread) : null)
       ?? extractThreadIdFromHistory(input.history.raw);
 
     if (input.command === "help") {
@@ -235,15 +256,16 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
     }
 
     if (input.command === "status") {
+      const roomConfig = this.getConfig(input.roomId);
       await input.tools.sendMessage(
         [
           "Codex status:",
-          `- selected_model: ${this.config.model ?? "auto"}`,
+          `- selected_model: ${roomConfig.model ?? "auto"}`,
           `- room_id: ${input.roomId}`,
           `- thread_id: ${mappedThreadId ?? "not mapped"}`,
-          `- approval_policy: ${this.config.approvalPolicy ?? "never"}`,
-          `- sandbox_mode: ${this.config.sandboxMode ?? "workspace-write"}`,
-          `- reasoning_effort: ${this.config.reasoningEffort ?? "default"}`,
+          `- approval_policy: ${roomConfig.approvalPolicy ?? "never"}`,
+          `- sandbox_mode: ${roomConfig.sandboxMode ?? "workspace-write"}`,
+          `- reasoning_effort: ${roomConfig.reasoningEffort ?? "default"}`,
         ].join("\n"),
         mention,
       );
@@ -253,8 +275,9 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
     if (input.command === "model" || input.command === "models") {
       const modelArg = input.args.trim();
       if (!modelArg) {
+        const roomConfig = this.getConfig(input.roomId);
         await input.tools.sendMessage(
-          `Current model: \`${this.config.model ?? "auto"}\`. Use \`/model list\` or \`/model <id>\`.`,
+          `Current model: \`${roomConfig.model ?? "auto"}\`. Use \`/model list\` or \`/model <id>\`.`,
           mention,
         );
         return true;
@@ -268,7 +291,9 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
         return true;
       }
 
-      this.config.model = modelArg;
+      const overrides = this.roomConfigOverrides.get(input.roomId) ?? {};
+      overrides.model = modelArg;
+      this.roomConfigOverrides.set(input.roomId, overrides);
       this.roomThreads.delete(input.roomId);
       await input.tools.sendMessage(
         `Model override set to \`${modelArg}\` for subsequent turns.`,
@@ -282,8 +307,9 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
       const validEfforts: CodexReasoningEffort[] = ["minimal", "low", "medium", "high", "xhigh"];
 
       if (!effortArg) {
+        const roomConfig = this.getConfig(input.roomId);
         await input.tools.sendMessage(
-          `Current reasoning effort: \`${this.config.reasoningEffort ?? "default"}\`. Use \`/reasoning ${validEfforts.join("|")}\`.`,
+          `Current reasoning effort: \`${roomConfig.reasoningEffort ?? "default"}\`. Use \`/reasoning ${validEfforts.join("|")}\`.`,
           mention,
         );
         return true;
@@ -297,7 +323,9 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
         return true;
       }
 
-      this.config.reasoningEffort = effortArg as CodexReasoningEffort;
+      const overrides = this.roomConfigOverrides.get(input.roomId) ?? {};
+      overrides.reasoningEffort = effortArg as CodexReasoningEffort;
+      this.roomConfigOverrides.set(input.roomId, overrides);
       this.roomThreads.delete(input.roomId);
       await input.tools.sendMessage(
         `Reasoning effort set to \`${effortArg}\` for subsequent turns.`,

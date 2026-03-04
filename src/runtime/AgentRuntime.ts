@@ -1,6 +1,8 @@
 import type { ThenvoiLink } from "../platform/ThenvoiLink";
 import type { ContactEvent, PlatformEvent } from "../platform/events";
 import { UnsupportedFeatureError } from "../core/errors";
+import type { Logger } from "../core/logger";
+import { NoopLogger } from "../core/logger";
 import { Execution } from "./Execution";
 import { ExecutionContext } from "./ExecutionContext";
 import type { AgentConfig, SessionConfig } from "./types";
@@ -13,6 +15,7 @@ interface AgentRuntimeOptions {
   onContactEvent?: (event: ContactEvent) => Promise<void>;
   sessionConfig?: SessionConfig;
   agentConfig?: AgentConfig;
+  logger?: Logger;
 }
 
 export class AgentRuntime {
@@ -25,6 +28,7 @@ export class AgentRuntime {
   private readonly autoSubscribeExistingRooms: boolean;
   private readonly contexts = new Map<string, ExecutionContext>();
   private readonly executions = new Map<string, Execution>();
+  private readonly logger: Logger;
   private running = false;
   private stopping = false;
   private stopController = new AbortController();
@@ -35,6 +39,7 @@ export class AgentRuntime {
     this.agentId = options.agentId;
     this.onExecute = options.onExecute;
     this.onSessionCleanup = options.onSessionCleanup ?? (async () => undefined);
+    this.logger = options.logger ?? new NoopLogger();
     this.onContactEvent = options.onContactEvent;
     this.sessionConfig = {
       enableContextCache: options.sessionConfig?.enableContextCache ?? true,
@@ -124,7 +129,15 @@ export class AgentRuntime {
       if (!event) {
         return;
       }
-      await this.handleEvent(event);
+      try {
+        await this.handleEvent(event);
+      } catch (error) {
+        this.logger.error("Error handling platform event", {
+          eventType: event.type,
+          roomId: event.roomId,
+          error,
+        });
+      }
     }
   }
 

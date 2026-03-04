@@ -48,7 +48,8 @@ export class GracefulShutdown {
 
   private async shutdown(_signal: NodeJS.Signals): Promise<void> {
     if (this.shuttingDown) {
-      return;
+      // Second signal received during shutdown — force exit.
+      process.exit(1);
     }
 
     this.shuttingDown = true;

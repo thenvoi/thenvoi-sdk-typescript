@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 
 import {
   OpenAIAdapter,
   type AgentToolsProtocol,
+  type CustomToolDef,
   type HistoryProvider,
   type PlatformMessage,
   type ToolCallingModel,
@@ -18,6 +20,7 @@ import type {
 } from "../src/contracts/dtos";
 
 class FakeTools implements AgentToolsProtocol {
+  public readonly capabilities = { peers: false, contacts: false, memory: false };
   public readonly events: Array<Record<string, unknown>> = [];
   public readonly messages: string[] = [];
 
@@ -190,5 +193,83 @@ describe("ToolCallingAdapter", () => {
     expect(tools.events[0]?.messageType).toBe("tool_call");
     expect(tools.events[1]?.messageType).toBe("tool_result");
     expect(tools.messages).toEqual(["final answer"]);
+  });
+
+  it("dispatches custom tools before platform tools", async () => {
+    const calls: string[] = [];
+
+    const customTool: CustomToolDef = {
+      schema: z.object({ city: z.string() }),
+      handler: (args) => {
+        calls.push(`custom:${(args as { city: string }).city}`);
+        return "Sunny, 72F";
+      },
+      name: "get_weather",
+    };
+
+    class CustomToolModel implements ToolCallingModel {
+      private turns = 0;
+      public async complete(): Promise<{ text?: string; toolCalls?: Array<{ id: string; name: string; input: Record<string, unknown> }> }> {
+        this.turns += 1;
+        if (this.turns === 1) {
+          return {
+            toolCalls: [
+              { id: "tc1", name: "get_weather", input: { city: "NYC" } },
+            ],
+          };
+        }
+        return { text: "done" };
+      }
+    }
+
+    const adapter = new OpenAIAdapter({
+      model: new CustomToolModel(),
+      customTools: [customTool],
+    });
+
+    const tools = new FakeTools();
+    await adapter.onMessage(fakeMessage, tools, fakeHistory, null, null, {
+      isSessionBootstrap: true,
+      roomId: "r1",
+    });
+
+    expect(calls).toEqual(["custom:NYC"]);
+    expect(tools.messages).toEqual(["done"]);
+  });
+
+  it("catches custom tool errors and returns error string", async () => {
+    const customTool: CustomToolDef = {
+      schema: z.object({ query: z.string() }),
+      handler: () => { throw new Error("API down"); },
+      name: "search",
+    };
+
+    class ErrorToolModel implements ToolCallingModel {
+      private turns = 0;
+      public async complete(req: { toolResults?: Array<{ output: unknown }> }): Promise<{ text?: string; toolCalls?: Array<{ id: string; name: string; input: Record<string, unknown> }> }> {
+        this.turns += 1;
+        if (this.turns === 1) {
+          return {
+            toolCalls: [{ id: "tc1", name: "search", input: { query: "test" } }],
+          };
+        }
+        // Verify the error was caught and passed as tool result
+        const result = req.toolResults?.[0]?.output;
+        return { text: typeof result === "string" && result.includes("API down") ? "error_caught" : "no_error" };
+      }
+    }
+
+    const adapter = new OpenAIAdapter({
+      model: new ErrorToolModel(),
+      customTools: [customTool],
+    });
+
+    const tools = new FakeTools();
+    await adapter.onMessage(fakeMessage, tools, fakeHistory, null, null, {
+      isSessionBootstrap: true,
+      roomId: "r1",
+    });
+
+    expect(tools.messages).toEqual(["error_caught"]);
   });
 });

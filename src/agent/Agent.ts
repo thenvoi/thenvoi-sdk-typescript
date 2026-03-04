@@ -13,6 +13,7 @@ export class Agent {
   private readonly platformRuntime: PlatformRuntime;
   private readonly adapter: FrameworkAdapter;
   private started = false;
+  private startPromise: Promise<void> | null = null;
   private shutdownTimeoutMs: number | null = 30_000;
 
   public constructor(runtime: PlatformRuntime, adapter: FrameworkAdapter) {
@@ -21,10 +22,7 @@ export class Agent {
   }
 
   public static create(options: AgentCreateOptions): Agent {
-    const runtime = new PlatformRuntime({
-      ...options,
-      preprocessor: options.preprocessor,
-    });
+    const runtime = new PlatformRuntime(options);
     const agent = new Agent(runtime, options.adapter);
     agent.shutdownTimeoutMs = options.shutdownTimeoutMs ?? 30_000;
     return agent;
@@ -55,12 +53,17 @@ export class Agent {
   }
 
   public async start(): Promise<void> {
-    if (this.started) {
-      return;
+    if (this.startPromise) {
+      return this.startPromise;
     }
 
-    await this.platformRuntime.start(this.adapter);
-    this.started = true;
+    this.startPromise = this.platformRuntime.start(this.adapter).then(() => {
+      this.started = true;
+    }).catch((error) => {
+      this.startPromise = null;
+      throw error;
+    });
+    return this.startPromise;
   }
 
   public async stop(timeoutMs?: number | null): Promise<boolean> {
@@ -68,10 +71,14 @@ export class Agent {
       return true;
     }
 
-    const graceful = await this.platformRuntime.stop(timeoutMs ?? undefined);
-    await this.adapter.onRuntimeStop?.();
-    this.started = false;
-    return graceful;
+    try {
+      const graceful = await this.platformRuntime.stop(timeoutMs ?? undefined);
+      await this.adapter.onRuntimeStop?.();
+      return graceful;
+    } finally {
+      this.started = false;
+      this.startPromise = null;
+    }
   }
 
   public async runForever(): Promise<void> {

@@ -151,7 +151,7 @@ export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
     const result = await graph.invoke(input, graphConfig);
     const text = extractAssistantText(result);
     if (text) {
-      await tools.sendMessage(text);
+      await tools.sendMessage(text, [{ id: message.senderId, handle: message.senderName ?? message.senderType }]);
     }
   }
 

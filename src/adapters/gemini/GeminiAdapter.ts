@@ -32,6 +32,7 @@ export class GeminiAdapter extends ToolCallingAdapter {
     super({
       ...adapterOptions,
       model: resolvedModel,
+      // Gemini's OpenAI-compatible endpoint accepts OpenAI-format tool schemas.
       toolFormat: "openai",
     });
   }

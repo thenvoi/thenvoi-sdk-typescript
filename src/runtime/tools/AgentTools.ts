@@ -21,7 +21,7 @@ import {
   type AgentToolsCapabilities,
   type AgentToolsProtocol,
 } from "../../contracts/protocols";
-import { assertChatEventType } from "../messages";
+import { assertChatEventType, CHAT_EVENT_TYPES } from "../messages";
 import {
   CHAT_TOOL_NAMES,
   MEMORY_TOOL_NAMES,
@@ -64,6 +64,7 @@ export class AgentTools implements AgentToolsProtocol {
     mentions: MentionInput = [],
   ): Promise<ToolOperationResult> {
     const resolvedMentions = this.resolveMentions(mentions);
+
     return this.rest.createChatMessage(
       this.roomId,
       {
@@ -191,6 +192,11 @@ export class AgentTools implements AgentToolsProtocol {
   }
 
   public async executeToolCall(toolName: string, arguments_: MetadataMap): Promise<unknown> {
+    const validationError = validateToolArgs(toolName, arguments_);
+    if (validationError) {
+      return validationError;
+    }
+
     const handlers: Record<string, () => Promise<unknown>> = {
       thenvoi_send_message: () =>
         this.sendMessage(
@@ -240,18 +246,15 @@ export class AgentTools implements AgentToolsProtocol {
 
     const handler = handlers[toolName];
     if (!handler) {
-      if (toolName.startsWith("thenvoi_list_contact") || toolName.startsWith("thenvoi_add_contact") || toolName.startsWith("thenvoi_remove_contact") || toolName.startsWith("thenvoi_respond_contact")) {
-        assertFeatureEnabled(this.capabilities.contacts, "Contacts");
-      }
-
-      if (toolName.includes("memory")) {
-        assertFeatureEnabled(this.capabilities.memory, "Memory");
-      }
-
-      throw new Error(`Unknown tool: ${toolName}`);
+      return `Unknown tool: ${toolName}`;
     }
 
-    return handler();
+    try {
+      return await handler();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return `Error executing ${toolName}: ${message}`;
+    }
   }
 
   public getToolSchemas(format: "openai" | "anthropic", options?: { includeMemory?: boolean }): ToolSchemaRecord[] {
@@ -371,17 +374,26 @@ export class AgentTools implements AgentToolsProtocol {
     }
 
     const participantsByHandle = new Map<string, MentionReference>();
+    const participantsById = new Map<string, MentionReference>();
     for (const participant of this.participants) {
+      const ref: MentionReference = {
+        id: String(participant.id),
+        handle: typeof participant.handle === "string" ? participant.handle : undefined,
+      };
+      participantsById.set(ref.id, ref);
       const handle = participant.handle;
       if (typeof handle === "string") {
-        participantsByHandle.set(this.normalizeMentionHandle(handle), {
-          id: String(participant.id),
-          handle,
-        });
+        participantsByHandle.set(this.normalizeMentionHandle(handle), ref);
       }
     }
 
     return (mentions as string[]).map((mention) => {
+      // Try by ID first (UUID strings), then by handle
+      const byId = participantsById.get(mention);
+      if (byId) {
+        return byId;
+      }
+
       const normalized = this.normalizeMentionHandle(mention);
       const found = participantsByHandle.get(normalized);
       if (!found) {
@@ -478,4 +490,74 @@ export class AgentTools implements AgentToolsProtocol {
 
     return Object.freeze(tools);
   }
+}
+
+/**
+ * Validate tool arguments before execution.
+ * Returns an LLM-friendly error string if validation fails, or null if valid.
+ * Mirrors Python SDK's Pydantic validation pattern.
+ */
+function validateToolArgs(toolName: string, args: Record<string, unknown>): string | null {
+  const errors: string[] = [];
+
+  const model = TOOL_MODELS[toolName as keyof typeof TOOL_MODELS];
+  if (!model) {
+    return null;
+  }
+
+  // Check required fields
+  for (const field of model.required) {
+    if (args[field] === undefined || args[field] === null) {
+      errors.push(`${field}: Field required`);
+    }
+  }
+
+  // Tool-specific validations
+  if (toolName === "thenvoi_send_message") {
+    const mentions = args.mentions;
+    if (Array.isArray(mentions) && mentions.length === 0) {
+      errors.push("mentions: At least one mention is required");
+    }
+  }
+
+  if (toolName === "thenvoi_send_event") {
+    const messageType = args.message_type;
+    if (typeof messageType === "string" && !(CHAT_EVENT_TYPES as readonly string[]).includes(messageType)) {
+      errors.push(
+        `message_type: Invalid value '${messageType}'. Expected one of: ${[...CHAT_EVENT_TYPES].join(", ")}`,
+      );
+    }
+  }
+
+  if (toolName === "thenvoi_respond_contact_request") {
+    const action = args.action;
+    const validActions = ["approve", "reject", "cancel"];
+    if (typeof action === "string" && !validActions.includes(action)) {
+      errors.push(
+        `action: Invalid value '${action}'. Expected one of: ${validActions.join(", ")}`,
+      );
+    }
+  }
+
+  if (toolName === "thenvoi_store_memory") {
+    const validSystems = ["sensory", "working", "long_term"];
+    const validTypes = ["iconic", "echoic", "haptic", "episodic", "semantic", "procedural"];
+    const validSegments = ["user", "agent", "tool", "guideline"];
+
+    if (typeof args.system === "string" && !validSystems.includes(args.system)) {
+      errors.push(`system: Invalid value '${args.system}'. Expected one of: ${validSystems.join(", ")}`);
+    }
+    if (typeof args.type === "string" && !validTypes.includes(args.type)) {
+      errors.push(`type: Invalid value '${args.type}'. Expected one of: ${validTypes.join(", ")}`);
+    }
+    if (typeof args.segment === "string" && !validSegments.includes(args.segment)) {
+      errors.push(`segment: Invalid value '${args.segment}'. Expected one of: ${validSegments.join(", ")}`);
+    }
+  }
+
+  if (errors.length > 0) {
+    return `Invalid arguments for ${toolName}: ${errors.join("; ")}`;
+  }
+
+  return null;
 }

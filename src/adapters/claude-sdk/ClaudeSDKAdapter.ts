@@ -153,9 +153,8 @@ export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
             await tools.sendEvent("Claude SDK session", "task", {
               claude_session_id: sessionId,
             });
-          } catch (error) {
+          } catch {
             // Best-effort persistence marker — session continues regardless.
-            void error;
           }
         }
       }
@@ -177,7 +176,7 @@ export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
     }
 
     if (finalText.trim()) {
-      await tools.sendMessage(finalText.trim());
+      await tools.sendMessage(finalText.trim(), [{ id: message.senderId, handle: message.senderName ?? message.senderType }]);
     }
   }
 

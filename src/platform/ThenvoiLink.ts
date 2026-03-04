@@ -1,9 +1,9 @@
 import { ValidationError } from "../core/errors";
 import type { Logger } from "../core/logger";
 import { NoopLogger } from "../core/logger";
-import { FernRestAdapter, RestFacade, type RestFacadeOptions } from "../client/rest/RestFacade";
+import { RestFacade, type RestFacadeOptions } from "../client/rest/RestFacade";
+import { AgentRestAdapter } from "../client/rest/AgentRestAdapter";
 import type { ThenvoiLinkRestApi } from "../client/rest/types";
-import { ThenvoiClient } from "@thenvoi/rest-client";
 import type { PlatformEvent } from "./events";
 import { assertCapability } from "../runtime/capabilities";
 import {
@@ -43,7 +43,7 @@ interface PendingWaiter {
 
 export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
   public readonly agentId: string;
-  public readonly apiKey: string;
+  private readonly apiKey: string;
   public readonly wsUrl: string;
   public readonly restUrl: string;
   public readonly rest: RestFacade;
@@ -67,12 +67,13 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
       ...options.capabilities,
     };
 
-    const restApi = options.restApi ?? new FernRestAdapter(
-      new ThenvoiClient({
-        apiKey: this.apiKey,
-        baseUrl: this.restUrl,
-      }),
-    );
+    // TEMPORARY UNTIL FERN MERGE — default to AgentRestAdapter which uses
+    // /api/v1/agent/* endpoints directly, since @thenvoi/rest-client only has
+    // user-facing endpoints.
+    const restApi = options.restApi ?? new AgentRestAdapter({
+      baseUrl: this.restUrl,
+      apiKey: this.apiKey,
+    });
 
     this.rest = new RestFacade({
       api: restApi,
@@ -220,10 +221,13 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
 
   public [Symbol.asyncIterator](): AsyncIterator<PlatformEvent> {
     return {
-      next: async () => ({
-        done: false,
-        value: (await this.nextEvent()) as PlatformEvent,
-      }),
+      next: async () => {
+        const value = await this.nextEvent();
+        if (value === null) {
+          return { done: true, value: undefined } as IteratorReturnResult<undefined>;
+        }
+        return { done: false, value };
+      },
     };
   }
 
@@ -255,7 +259,11 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
     const schema = payloadSchemas[eventType];
     const parsed = schema.safeParse(payload);
     if (!parsed.success) {
-      throw new ValidationError(`Invalid ${eventType} payload: ${parsed.error.message}`, parsed.error);
+      this.logger.warn(`Invalid ${eventType} payload, dropping event`, {
+        error: parsed.error.message,
+        roomId,
+      });
+      return;
     }
 
     this.queueEvent({

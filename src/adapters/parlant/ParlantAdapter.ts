@@ -97,6 +97,7 @@ export class ParlantAdapter
   private readonly clientFactory?: ParlantClientFactory;
 
   private client: ParlantClientLike | null = null;
+  private clientInitPromise: Promise<ParlantClientLike> | null = null;
   private systemPrompt = "";
   private readonly roomSessions = new Map<string, string>();
   private readonly roomCustomers = new Map<string, string>();
@@ -146,8 +147,7 @@ export class ParlantAdapter
     contactsMessage: string | null,
     context: { isSessionBootstrap: boolean; roomId: string },
   ): Promise<void> {
-    const client = this.client ?? (await this.createClient());
-    this.client = client;
+    const client = await this.ensureClient();
 
     const senderName = message.senderName ?? message.senderId ?? "User";
 
@@ -335,9 +335,8 @@ export class ParlantAdapter
           },
           this.requestOptions(),
         );
-      } catch (error) {
-        // Best-effort history injection. Continue with the request even if one event fails.
-        void error; // logged at debug level only to avoid noise
+      } catch {
+        // Best-effort history injection — continue even if one event fails.
       }
     }
   }
@@ -414,6 +413,19 @@ export class ParlantAdapter
     return { headers };
   }
 
+  private async ensureClient(): Promise<ParlantClientLike> {
+    if (this.client) {
+      return this.client;
+    }
+    if (!this.clientInitPromise) {
+      this.clientInitPromise = this.createClient().then((client) => {
+        this.client = client;
+        return client;
+      });
+    }
+    return this.clientInitPromise;
+  }
+
   private async createClient(): Promise<ParlantClientLike> {
     const factory = this.clientFactory ?? (await loadParlantClientFactory({
       environment: this.environment,
@@ -443,10 +455,7 @@ function selectCompleteExchanges(history: ParlantMessages): ParlantMessages {
       continue;
     }
 
-    if (current.role === "assistant" && current.content) {
-      complete.push(current);
-    }
-
+    // Skip orphaned assistant messages without a preceding user message.
     index += 1;
   }
 

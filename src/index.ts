@@ -32,6 +32,16 @@ export {
   mcpToolNames,
 } from "./runtime/tools/schemas";
 export {
+  type CustomToolDef,
+  getCustomToolName,
+  customToolToOpenAISchema,
+  customToolToAnthropicSchema,
+  customToolsToSchemas,
+  findCustomTool,
+  buildCustomToolIndex,
+  executeCustomTool,
+} from "./runtime/tools/customTools";
+export {
   CHAT_EVENT_TYPES,
   CHAT_MESSAGE_TYPES,
   isChatEventType,
@@ -71,6 +81,7 @@ export type {
   PaginatedResponse,
 } from "./client/rest/types";
 export { RestFacade, FernRestAdapter } from "./client/rest/RestFacade";
+export { AgentRestAdapter, type AgentRestAdapterOptions } from "./client/rest/AgentRestAdapter";
 export { DEFAULT_REQUEST_OPTIONS } from "./client/rest/requestOptions";
 export { fetchPaginated, normalizePaginationMetadata } from "./client/rest/pagination";
 export {

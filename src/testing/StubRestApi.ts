@@ -45,6 +45,13 @@ export class StubRestApi implements RestApi {
     return { ok: true };
   }
 
+  public async listChats() {
+    return {
+      data: [],
+      metadata: { page: 1, pageSize: 100, totalCount: 0, totalPages: 1 },
+    };
+  }
+
   public async listPeers() {
     return {
       data: [],

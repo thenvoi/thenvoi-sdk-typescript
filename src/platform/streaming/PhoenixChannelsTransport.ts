@@ -17,16 +17,25 @@ interface PhoenixChannelsTransportOptions {
 export class PhoenixChannelsTransport implements StreamingTransport {
   private readonly socket: Socket;
   private readonly channels = new Map<string, Channel>();
+  private readonly pendingJoins = new Map<string, Promise<void>>();
   private readonly logger: Logger;
   private connected = false;
   private connectPromise: Promise<void> | null = null;
+  private connectResolve: (() => void) | null = null;
 
   public constructor(options: PhoenixChannelsTransportOptions) {
     this.logger = options.logger ?? new NoopLogger();
 
-    this.socket = new Socket(options.wsUrl, {
+    // The phoenix JS library appends /websocket to the endpoint URL.
+    // Strip it if the user-provided URL already includes it.
+    let wsUrl = options.wsUrl;
+    if (wsUrl.endsWith("/websocket")) {
+      wsUrl = wsUrl.slice(0, -"/websocket".length);
+    }
+
+    this.socket = new Socket(wsUrl, {
       params: {
-        token: options.apiKey,
+        api_key: options.apiKey,
         agent_id: options.agentId,
       },
       heartbeatIntervalMs: options.heartbeatIntervalMs,
@@ -36,6 +45,8 @@ export class PhoenixChannelsTransport implements StreamingTransport {
 
     this.socket.onOpen(() => {
       this.connected = true;
+      this.connectResolve?.();
+      this.connectResolve = null;
       this.logger.info("Phoenix socket opened");
     });
 
@@ -82,6 +93,19 @@ export class PhoenixChannelsTransport implements StreamingTransport {
       return;
     }
 
+    const pendingJoin = this.pendingJoins.get(topic);
+    if (pendingJoin) {
+      return pendingJoin;
+    }
+
+    const joinPromise = this.doJoin(topic, handlers).finally(() => {
+      this.pendingJoins.delete(topic);
+    });
+    this.pendingJoins.set(topic, joinPromise);
+    return joinPromise;
+  }
+
+  private async doJoin(topic: string, handlers: TopicHandlers): Promise<void> {
     const channel = this.socket.channel(topic, {});
 
     for (const [event, handler] of Object.entries(handlers)) {
@@ -143,14 +167,20 @@ export class PhoenixChannelsTransport implements StreamingTransport {
   }
 
   private async waitForConnection(timeoutMs = 10_000): Promise<void> {
-    const startedAt = Date.now();
-    while (!this.connected) {
-      if (Date.now() - startedAt >= timeoutMs) {
-        throw new TransportError("Timed out waiting for Phoenix socket connection");
-      }
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, 25);
-      });
+    if (this.connected) {
+      return;
     }
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.connectResolve = null;
+        reject(new TransportError("Timed out waiting for Phoenix socket connection"));
+      }, timeoutMs);
+
+      this.connectResolve = () => {
+        clearTimeout(timeout);
+        resolve();
+      };
+    });
   }
 }

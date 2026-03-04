@@ -1,4 +1,5 @@
 import type { AgentToolsProtocol, PlatformMessage } from "../src/index";
+import { DEFAULT_AGENT_TOOLS_CAPABILITIES } from "../src/contracts/protocols";
 import type { RestApi, PaginatedResponse, AgentIdentity } from "../src/client/rest/types";
 import type {
   PaginatedList,
@@ -20,6 +21,7 @@ interface FakeToolsOptions {
 }
 
 export class FakeTools implements AgentToolsProtocol {
+  public readonly capabilities = { ...DEFAULT_AGENT_TOOLS_CAPABILITIES };
   public readonly messages: string[] = [];
   public readonly events: CapturedToolEvent[] = [];
   private readonly failOn: Set<FakeToolMethod>;

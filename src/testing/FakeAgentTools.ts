@@ -1,9 +1,11 @@
 import type {
   AdapterToolsProtocol,
+  AgentToolsCapabilities,
   PeerLookupTools,
   ContactTools,
   MemoryTools,
 } from "../contracts/protocols";
+import { DEFAULT_AGENT_TOOLS_CAPABILITIES } from "../contracts/protocols";
 import type {
   ContactRecord,
   ContactRequestRecord,
@@ -48,6 +50,12 @@ export interface FakeAgentToolsOptions {
 export class FakeAgentTools
   implements AdapterToolsProtocol, PeerLookupTools, ContactTools, MemoryTools
 {
+  public readonly capabilities: Readonly<AgentToolsCapabilities> = {
+    ...DEFAULT_AGENT_TOOLS_CAPABILITIES,
+    peers: true,
+    contacts: true,
+    memory: true,
+  };
   public readonly messagesSent: CapturedMessage[] = [];
   public readonly eventsSent: CapturedEvent[] = [];
   public readonly participantsAdded: CapturedParticipant[] = [];

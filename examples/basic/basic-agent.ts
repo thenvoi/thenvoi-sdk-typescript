@@ -2,7 +2,9 @@ import { Agent, GenericAdapter, loadAgentConfig, isDirectExecution } from "../..
 
 export function createBasicAgent(overrides?: { agentId?: string; apiKey?: string }): Agent {
   const adapter = new GenericAdapter(async ({ message, tools }) => {
-    await tools.sendMessage(`Echo: ${message.content}`);
+    await tools.sendMessage(`Echo: ${message.content}`, [
+      { id: message.senderId, handle: message.senderName ?? message.senderType },
+    ]);
   });
 
   return Agent.create({

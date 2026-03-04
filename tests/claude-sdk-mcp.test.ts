@@ -8,6 +8,7 @@ describe("createThenvoiMcpBridge", () => {
     const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
 
     const roomTools: AgentToolsProtocol = {
+      capabilities: { peers: false, contacts: false, memory: false },
       sendMessage: async () => ({ ok: true }),
       sendEvent: async () => ({ ok: true }),
       addParticipant: async () => ({ ok: true }),

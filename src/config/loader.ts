@@ -83,11 +83,27 @@ export function loadAgentConfig(
     );
   }
 
+  if (ws_url !== undefined && typeof ws_url !== "string") {
+    throw new ValidationError(`ws_url in ${filePath} must be a string`);
+  }
+  if (rest_url !== undefined && typeof rest_url !== "string") {
+    throw new ValidationError(`rest_url in ${filePath} must be a string`);
+  }
+
+  // Filter out keys that could pollute the object prototype.
+  const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype", "toString", "valueOf"]);
+  const safeRest: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(rest)) {
+    if (!UNSAFE_KEYS.has(key)) {
+      safeRest[key] = value;
+    }
+  }
+
   return {
     agentId: agent_id as string,
     apiKey: api_key as string,
-    ...(ws_url !== undefined ? { wsUrl: ws_url as string } : {}),
-    ...(rest_url !== undefined ? { restUrl: rest_url as string } : {}),
-    ...rest,
+    ...(ws_url !== undefined ? { wsUrl: ws_url } : {}),
+    ...(rest_url !== undefined ? { restUrl: rest_url } : {}),
+    ...safeRest,
   };
 }
