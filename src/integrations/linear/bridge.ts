@@ -9,6 +9,7 @@ import type {
   SessionRoomRecord,
 } from "./types";
 import { dedupeHandles, stripHandlePrefix } from "./handles";
+import { postThought, postError } from "./activities";
 
 interface NormalizedBridgeConfig {
   roomStrategy: "issue" | "session";
@@ -17,7 +18,7 @@ interface NormalizedBridgeConfig {
   defaultSpecialistHandles: string[];
 }
 
-const SUPPORTED_ACTIONS = new Set(["created", "updated", "canceled"]);
+const SUPPORTED_ACTIONS = new Set(["created", "updated", "canceled", "prompted"]);
 const MAX_PEER_LOOKUP_PAGES = 25;
 const PEER_PAGE_SIZE = 100;
 
@@ -51,78 +52,118 @@ export async function handleAgentSessionEvent(input: HandleAgentSessionEventInpu
     return;
   }
 
-  const roomRecord = await resolveRoomRecord({
-    thenvoiRest: input.deps.thenvoiRest,
-    store: input.deps.store,
-    roomStrategy: config.roomStrategy,
-    sessionId,
-    issueId,
-    logger,
-  });
+  if (action === "prompted") {
+    await handlePromptedAction({
+      deps: input.deps,
+      logger,
+      sessionId,
+      payload: input.payload,
+    });
+    return;
+  }
 
-  const inferredHandles = extractMentionHandles([
-    input.payload.promptContext,
-    input.payload.agentSession.comment?.body,
-    input.payload.agentSession.issue?.title,
-    input.payload.agentSession.issue?.description,
-  ]);
+  // Acknowledge receipt to Linear before room resolution (created only).
+  if (action === "created") {
+    try {
+      await postThought(input.deps.linearClient, sessionId, "Received session. Setting up workspace...");
+    } catch (ackError) {
+      logger.warn("linear_thenvoi_bridge.acknowledgment_failed", {
+        sessionId,
+        error: ackError instanceof Error ? ackError.message : String(ackError),
+      });
+    }
+  }
 
-  const specialistHandles = dedupeHandles([
-    ...config.defaultSpecialistHandles,
-    ...inferredHandles,
-  ]).filter((handle) => handle !== config.hostAgentHandle);
+  try {
+    const roomRecord = await resolveRoomRecord({
+      thenvoiRest: input.deps.thenvoiRest,
+      store: input.deps.store,
+      roomStrategy: config.roomStrategy,
+      sessionId,
+      issueId,
+      logger,
+    });
 
-  const allHandles = dedupeHandles([
-    config.hostAgentHandle,
-    ...specialistHandles,
-  ]);
+    const inferredHandles = extractMentionHandles([
+      input.payload.promptContext,
+      input.payload.agentSession.comment?.body,
+      input.payload.agentSession.issue?.title,
+      input.payload.agentSession.issue?.description,
+    ]);
 
-  await ensureRoomParticipants({
-    thenvoiRest: input.deps.thenvoiRest,
-    roomId: roomRecord.thenvoiRoomId,
-    handles: allHandles,
-    logger,
-  });
+    const specialistHandles = dedupeHandles([
+      ...config.defaultSpecialistHandles,
+      ...inferredHandles,
+    ]).filter((handle) => handle !== config.hostAgentHandle);
 
-  const message = buildBridgeMessage({
-    action,
-    hostHandle: config.hostAgentHandle,
-    specialistHandles,
-    promptContext: input.payload.promptContext,
-    issueTitle: input.payload.agentSession.issue?.title,
-    commentBody: input.payload.agentSession.comment?.body,
-  });
+    const allHandles = dedupeHandles([
+      config.hostAgentHandle,
+      ...specialistHandles,
+    ]);
 
-  const mentions = await resolveMentionTargets({
-    thenvoiRest: input.deps.thenvoiRest,
-    roomId: roomRecord.thenvoiRoomId,
-    handles: [config.hostAgentHandle],
-    logger,
-  });
+    await ensureRoomParticipants({
+      thenvoiRest: input.deps.thenvoiRest,
+      roomId: roomRecord.thenvoiRoomId,
+      handles: allHandles,
+      logger,
+    });
 
-  await input.deps.thenvoiRest.createChatMessage(
-    roomRecord.thenvoiRoomId,
-    {
-      content: message,
-      messageType: "task",
-      metadata: {
-        linear_event_action: action,
-        linear_session_id: sessionId,
-        linear_issue_id: issueId,
-        linear_prompt_context: input.payload.promptContext ?? null,
-        linear_writeback_mode: config.writebackMode,
-        linear_bridge: "thenvoi",
+    const message = buildBridgeMessage({
+      action,
+      hostHandle: config.hostAgentHandle,
+      specialistHandles,
+      promptContext: input.payload.promptContext,
+      issueTitle: input.payload.agentSession.issue?.title,
+      commentBody: input.payload.agentSession.comment?.body,
+    });
+
+    const mentions = await resolveMentionTargets({
+      thenvoiRest: input.deps.thenvoiRest,
+      roomId: roomRecord.thenvoiRoomId,
+      handles: [config.hostAgentHandle],
+      logger,
+    });
+
+    await input.deps.thenvoiRest.createChatMessage(
+      roomRecord.thenvoiRoomId,
+      {
+        content: message,
+        messageType: "task",
+        metadata: {
+          linear_event_action: action,
+          linear_session_id: sessionId,
+          linear_issue_id: issueId,
+          linear_prompt_context: input.payload.promptContext ?? null,
+          linear_writeback_mode: config.writebackMode,
+          linear_bridge: "thenvoi",
+        },
+        mentions,
       },
-      mentions,
-    },
-  );
+    );
 
-  logger.info("linear_thenvoi_bridge.message_forwarded", {
-    sessionId,
-    issueId,
-    roomId: roomRecord.thenvoiRoomId,
-    action,
-  });
+    logger.info("linear_thenvoi_bridge.message_forwarded", {
+      sessionId,
+      issueId,
+      roomId: roomRecord.thenvoiRoomId,
+      action,
+    });
+  } catch (error) {
+    // Report errors back to Linear before re-throwing.
+    try {
+      await postError(
+        input.deps.linearClient,
+        sessionId,
+        `Bridge error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } catch (reportError) {
+      logger.warn("linear_thenvoi_bridge.error_reporting_failed", {
+        sessionId,
+        error: reportError instanceof Error ? reportError.message : String(reportError),
+      });
+    }
+
+    throw error;
+  }
 }
 
 export async function postFinalResponseToLinearSession(input: {
@@ -156,7 +197,9 @@ function normalizeConfig(config: LinearThenvoiBridgeConfig): NormalizedBridgeCon
   };
 }
 
-function normalizeAction(action: string | null | undefined): "created" | "updated" | "canceled" | null {
+type SupportedAction = "created" | "updated" | "canceled" | "prompted";
+
+function normalizeAction(action: string | null | undefined): SupportedAction | null {
   if (!action) {
     return null;
   }
@@ -166,7 +209,7 @@ function normalizeAction(action: string | null | undefined): "created" | "update
     return null;
   }
 
-  return normalized as "created" | "updated" | "canceled";
+  return normalized as SupportedAction;
 }
 
 async function handleCanceledAction(input: {
@@ -197,6 +240,49 @@ async function handleCanceledAction(input: {
     issueId: input.issueId,
     hadRoom: Boolean(existing),
     action: input.payloadAction,
+  });
+}
+
+async function handlePromptedAction(input: {
+  deps: HandleAgentSessionEventInput["deps"];
+  logger: Logger;
+  sessionId: string;
+  payload: HandleAgentSessionEventInput["payload"];
+}): Promise<void> {
+  const existing = await input.deps.store.getBySessionId(input.sessionId);
+
+  if (!existing) {
+    input.logger.warn("linear_thenvoi_bridge.prompted_no_room", {
+      sessionId: input.sessionId,
+    });
+    return;
+  }
+
+  const userResponse = extractPromptedResponseBody(input.payload);
+
+  if (!userResponse) {
+    input.logger.warn("linear_thenvoi_bridge.prompted_empty_response", {
+      sessionId: input.sessionId,
+    });
+    return;
+  }
+
+  await input.deps.thenvoiRest.createChatMessage(
+    existing.thenvoiRoomId,
+    {
+      content: `[Linear User Response]: ${userResponse}`,
+      messageType: "text",
+      metadata: {
+        linear_event_action: "prompted",
+        linear_session_id: input.sessionId,
+        linear_bridge: "thenvoi",
+      },
+    },
+  );
+
+  input.logger.info("linear_thenvoi_bridge.prompted_forwarded", {
+    sessionId: input.sessionId,
+    roomId: existing.thenvoiRoomId,
   });
 }
 
@@ -466,6 +552,27 @@ function extractMentionHandles(chunks: Array<string | null | undefined>): string
   }
 
   return dedupeHandles(handles);
+}
+
+/** Extract `agentActivity.content.body` from a prompted webhook payload. */
+function extractPromptedResponseBody(payload: unknown): string {
+  if (typeof payload !== "object" || payload === null) {
+    return "";
+  }
+
+  const record = payload as Record<string, unknown>;
+  const activity = record.agentActivity;
+  if (typeof activity !== "object" || activity === null) {
+    return "";
+  }
+
+  const content = (activity as Record<string, unknown>).content;
+  if (typeof content !== "object" || content === null) {
+    return "";
+  }
+
+  const body = (content as Record<string, unknown>).body;
+  return typeof body === "string" ? body : "";
 }
 
 function firstNonEmpty(...values: Array<string | null | undefined>): string | null {

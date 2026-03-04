@@ -193,6 +193,14 @@ export {
   createSqliteSessionRoomStore,
   stripHandlePrefix,
   dedupeHandles,
+  postThought,
+  postAction,
+  postError,
+  postResponse,
+  postElicitation,
+  updatePlan,
+  createLinearTools,
+  DEFAULT_STATUS_MAPPING,
 } from "./integrations/linear";
 export type {
   RoomStrategy,
@@ -203,4 +211,7 @@ export type {
   SessionRoomStore,
   LinearThenvoiBridgeDeps,
   HandleAgentSessionEventInput,
+  LinearActivityClient,
+  PlanStep,
+  LinearSessionStatus,
 } from "./integrations/linear";

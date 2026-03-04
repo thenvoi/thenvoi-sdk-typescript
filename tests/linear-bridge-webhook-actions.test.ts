@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   handleAgentSessionEvent,
@@ -81,7 +81,7 @@ function makePayload(action: "created" | "updated" | "canceled") {
           name: "Integrations",
         },
         teamId: "team-1",
-        url: "https://linear.app/thenvoi/issue/INT-1",
+        url: "https://linear.app/example/issue/INT-1",
       },
       comment: {
         id: "comment-1",
@@ -93,10 +93,14 @@ function makePayload(action: "created" | "updated" | "canceled") {
   return payload;
 }
 
-function makeLinearClient(): HandleAgentSessionEventInput["deps"]["linearClient"] {
+function makeLinearClient(): HandleAgentSessionEventInput["deps"]["linearClient"] & {
+  createAgentActivity: ReturnType<typeof vi.fn>;
+} {
   return {
-    createAgentActivity: async () => ({ ok: true }),
-  } as unknown as HandleAgentSessionEventInput["deps"]["linearClient"];
+    createAgentActivity: vi.fn(async () => ({ ok: true })),
+  } as unknown as HandleAgentSessionEventInput["deps"]["linearClient"] & {
+    createAgentActivity: ReturnType<typeof vi.fn>;
+  };
 }
 
 describe("linear bridge webhook actions", () => {
@@ -161,5 +165,120 @@ describe("linear bridge webhook actions", () => {
     await expect(store.getBySessionId("session-1")).resolves.toMatchObject({
       status: "canceled",
     });
+  });
+
+  it("sends acknowledgment thought on created events only", async () => {
+    const restApi = new LinearThenvoiExampleRestApi();
+    const store = new MemorySessionRoomStore();
+    const linearClient = makeLinearClient();
+
+    await handleAgentSessionEvent({
+      payload: makePayload("created"),
+      config,
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    // Acknowledgment should be the first call to createAgentActivity
+    expect(linearClient.createAgentActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentSessionId: "session-1",
+        content: expect.objectContaining({
+          type: "thought",
+          body: "Received session. Setting up workspace...",
+        }),
+      }),
+    );
+  });
+
+  it("does not send acknowledgment on updated events", async () => {
+    const restApi = new LinearThenvoiExampleRestApi();
+    const store = new MemorySessionRoomStore();
+    const linearClient = makeLinearClient();
+
+    // First create so the room exists.
+    await handleAgentSessionEvent({
+      payload: makePayload("created"),
+      config,
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    const updatedClient = makeLinearClient();
+    await handleAgentSessionEvent({
+      payload: makePayload("updated"),
+      config,
+      deps: { thenvoiRest: restApi, linearClient: updatedClient, store },
+    });
+
+    // Updated event should not trigger any createAgentActivity calls
+    expect(updatedClient.createAgentActivity).not.toHaveBeenCalled();
+  });
+
+  it("reports errors back to Linear and re-throws", async () => {
+    const restApi = new LinearThenvoiExampleRestApi();
+    const store = new MemorySessionRoomStore();
+    const linearClient = makeLinearClient();
+
+    // Make createChat throw to simulate a failure after acknowledgment.
+    const originalCreateChat = restApi.createChat.bind(restApi);
+    restApi.createChat = async () => {
+      throw new Error("Room creation failed");
+    };
+
+    await expect(
+      handleAgentSessionEvent({
+        payload: makePayload("created"),
+        config,
+        deps: { thenvoiRest: restApi, linearClient, store },
+      }),
+    ).rejects.toThrow("Room creation failed");
+
+    // Should have called createAgentActivity twice: acknowledgment + error report
+    expect(linearClient.createAgentActivity).toHaveBeenCalledTimes(2);
+    expect(linearClient.createAgentActivity).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        agentSessionId: "session-1",
+        content: expect.objectContaining({
+          type: "error",
+          body: expect.stringContaining("Room creation failed"),
+        }),
+      }),
+    );
+
+    // Restore for other tests
+    restApi.createChat = originalCreateChat;
+  });
+
+  it("forwards prompted action as user response to room", async () => {
+    const restApi = new LinearThenvoiExampleRestApi();
+    const store = new MemorySessionRoomStore();
+    const linearClient = makeLinearClient();
+
+    // First create a session so the room exists.
+    await handleAgentSessionEvent({
+      payload: makePayload("created"),
+      config,
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    const promptedPayload = {
+      ...makePayload("created"),
+      action: "prompted",
+      agentActivity: {
+        content: {
+          body: "Yes, please proceed with option A",
+        },
+      },
+    } as unknown as HandleAgentSessionEventInput["payload"];
+
+    await handleAgentSessionEvent({
+      payload: promptedPayload,
+      config,
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    expect(restApi.roomMessages).toHaveLength(2);
+    expect(restApi.roomMessages[1]?.content).toContain("[Linear User Response]");
+    expect(restApi.roomMessages[1]?.content).toContain("Yes, please proceed with option A");
+    expect(restApi.roomMessages[1]?.metadata?.linear_event_action).toBe("prompted");
   });
 });

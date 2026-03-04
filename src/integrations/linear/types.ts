@@ -46,3 +46,12 @@ export interface HandleAgentSessionEventInput {
   config: LinearThenvoiBridgeConfig;
   deps: LinearThenvoiBridgeDeps;
 }
+
+export type { LinearActivityClient, PlanStep } from "./activities";
+
+export type LinearSessionStatus =
+  | "active"
+  | "canceled"
+  | "completed"
+  | "errored"
+  | "waiting";

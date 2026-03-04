@@ -83,7 +83,7 @@ function makePayload(sessionId: string, issueId: string) {
           name: "Integrations",
         },
         teamId: "team-1",
-        url: "https://linear.app/thenvoi/issue/INT-1",
+        url: "https://linear.app/example/issue/INT-1",
       },
     },
   };

@@ -62,7 +62,7 @@ export function createLinearThenvoiOrchestratorAgent(
       try {
         await tools.addParticipant(specialistHandle, "member");
       } catch {
-        // Best-effort in example: addParticipant may fail when peer lookup is unavailable.
+        // Best-effort: addParticipant may fail when peer lookup is unavailable.
       }
     }
 
