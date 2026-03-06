@@ -116,6 +116,7 @@ describe("PlatformRuntime", () => {
     });
 
     await seenPromise;
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(runtime.name).toBe("Agent");
     expect(seenMessage).toBe("hello runtime");
@@ -192,14 +193,111 @@ describe("PlatformRuntime", () => {
       inserted_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     });
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(seenMessages).toEqual(["hello existing"]);
 
     await transport.emit("room_participants:room-existing", "room_deleted", {
       id: "room-existing",
     });
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(transport.hasTopic("chat_room:room-existing")).toBe(false);
     expect(transport.hasTopic("room_participants:room-existing")).toBe(false);
+
+    await runtime.stop();
+  });
+
+  it("synchronizes existing rooms via /messages/next and skips the sync-point websocket duplicate", async () => {
+    const transport = new FakeTransport();
+    let releaseSync!: () => void;
+    const syncGate = new Promise<void>((resolve) => {
+      releaseSync = resolve;
+    });
+    const backlog = [
+      {
+        id: "m-backlog",
+        content: "recover me first",
+        sender_id: "u1",
+        sender_type: "User",
+        sender_name: "Jane",
+        message_type: "text",
+        metadata: {},
+        inserted_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      {
+        id: "m-sync",
+        content: "recover me second",
+        sender_id: "u1",
+        sender_type: "User",
+        sender_name: "Jane",
+        message_type: "text",
+        metadata: {},
+        inserted_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ];
+    const restApi = new FakeRestApi({
+      listChats: async () => ({
+        data: [{ id: "room-existing", title: "Existing Room" }],
+        metadata: { page: 1, pageSize: 100, totalPages: 1, totalCount: 1 },
+      }),
+      getNextMessage: async () => {
+        await syncGate;
+        return backlog.shift() ?? null;
+      },
+    });
+    const seenMessages: string[] = [];
+
+    const adapter = new GenericAdapter(async ({ message }) => {
+      seenMessages.push(message.content);
+    });
+
+    const runtime = new PlatformRuntime({
+      agentId: "a1",
+      apiKey: "k",
+      link: new ThenvoiLink({
+        agentId: "a1",
+        apiKey: "k",
+        transport,
+        restApi,
+      }),
+      agentConfig: {
+        autoSubscribeExistingRooms: true,
+      },
+    });
+
+    await runtime.start(adapter);
+
+    await transport.emit("chat_room:room-existing", "message_created", {
+      id: "m-sync",
+      content: "recover me second",
+      message_type: "text",
+      sender_id: "u1",
+      sender_type: "User",
+      sender_name: "Jane",
+      inserted_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    await transport.emit("chat_room:room-existing", "message_created", {
+      id: "m-live",
+      content: "live only",
+      message_type: "text",
+      sender_id: "u1",
+      sender_type: "User",
+      sender_name: "Jane",
+      inserted_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    releaseSync();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(seenMessages).toEqual([
+      "recover me first",
+      "recover me second",
+      "live only",
+    ]);
 
     await runtime.stop();
   });

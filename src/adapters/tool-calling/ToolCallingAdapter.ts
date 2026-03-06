@@ -1,6 +1,8 @@
 import { SimpleAdapter } from "../../core/simpleAdapter";
 import type { MessagingTools, ToolExecutor, ToolSchemaProvider } from "../../contracts/protocols";
 import type { ToolModelMessage } from "../../contracts/dtos";
+import type { Logger } from "../../core/logger";
+import { NoopLogger } from "../../core/logger";
 import type { HistoryProvider, PlatformMessage } from "../../runtime/types";
 import { formatHistoryForLlm } from "../../runtime/formatters";
 import {
@@ -26,6 +28,7 @@ export interface ToolCallingAdapterOptions {
   maxToolRounds?: number;
   enableExecutionReporting?: boolean;
   customTools?: CustomToolDef[];
+  logger?: Logger;
 }
 
 type ToolCallingTools = MessagingTools & ToolExecutor & ToolSchemaProvider;
@@ -39,6 +42,7 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
   private readonly enableExecutionReporting: boolean;
   private readonly customTools: CustomToolDef[];
   private readonly customToolIndex: Map<string, CustomToolDef>;
+  private readonly logger: Logger;
 
   public constructor(options: ToolCallingAdapterOptions) {
     super();
@@ -50,6 +54,7 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
     this.enableExecutionReporting = options.enableExecutionReporting ?? false;
     this.customTools = options.customTools ?? [];
     this.customToolIndex = buildCustomToolIndex(this.customTools);
+    this.logger = options.logger ?? new NoopLogger();
   }
 
   public async onMessage(
@@ -92,18 +97,15 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
       const roundToolResults: ToolResult[] = [];
       for (const call of roundToolCalls) {
         if (this.enableExecutionReporting) {
-          try {
-            await tools.sendEvent(
-              JSON.stringify({
-                name: call.name,
-                args: call.input,
-                tool_call_id: call.id,
-              }),
-              "tool_call",
-            );
-          } catch {
-            // Best effort event reporting; never break tool execution on event failures.
-          }
+          await this.reportExecutionEvent(
+            tools,
+            {
+              name: call.name,
+              args: call.input,
+              tool_call_id: call.id,
+            },
+            "tool_call",
+          );
         }
 
         const customTool = findCustomTool(this.customToolIndex, call.name);
@@ -127,18 +129,15 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
         });
 
         if (this.enableExecutionReporting) {
-          try {
-            await tools.sendEvent(
-              JSON.stringify({
-                name: call.name,
-                output,
-                tool_call_id: call.id,
-              }),
-              "tool_result",
-            );
-          } catch {
-            // Best effort event reporting; never break tool execution on event failures.
-          }
+          await this.reportExecutionEvent(
+            tools,
+            {
+              name: call.name,
+              output,
+              tool_call_id: call.id,
+            },
+            "tool_result",
+          );
         }
       }
 
@@ -164,7 +163,7 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
     participantsMessage: string | null,
     contactsMessage: string | null,
   ): ToolModelMessage[] {
-    const base = formatHistoryForLlm(history.raw) as ToolModelMessage[];
+    const base = formatHistoryForLlm(history.raw);
     base.push({
       role: message.senderType === "Agent" ? "assistant" : "user",
       content: message.content,
@@ -183,6 +182,22 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
     }
 
     return base;
+  }
+
+  private async reportExecutionEvent(
+    tools: ToolCallingTools,
+    payload: Record<string, unknown>,
+    messageType: "tool_call" | "tool_result",
+  ): Promise<void> {
+    try {
+      await tools.sendEvent(JSON.stringify(payload), messageType);
+    } catch (error) {
+      this.logger.warn("Tool execution reporting failed", {
+        messageType,
+        payload,
+        error,
+      });
+    }
   }
 }
 

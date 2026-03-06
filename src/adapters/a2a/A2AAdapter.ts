@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 
-import { UnsupportedFeatureError } from "../../core/errors";
+import { UnsupportedFeatureError, ValidationError } from "../../core/errors";
 import { SimpleAdapter } from "../../core/simpleAdapter";
 import type { MessagingTools } from "../../contracts/protocols";
+import type { Logger } from "../../core/logger";
+import { NoopLogger } from "../../core/logger";
 import type { PlatformMessage } from "../../runtime/types";
 import { asErrorMessage } from "../shared/coercion";
 import {
@@ -13,7 +15,7 @@ import {
 } from "./types";
 
 const TERMINAL_STATES = new Set(["completed", "failed", "canceled", "rejected", "auth-required"]);
-const MAX_STREAM_EVENTS = 10_000;
+const DEFAULT_MAX_STREAM_EVENTS = 10_000;
 
 type A2ATaskState =
   | "submitted"
@@ -98,6 +100,8 @@ export interface A2AAdapterOptions {
   auth?: A2AAuth;
   streaming?: boolean;
   clientFactory?: A2AClientFactory;
+  maxStreamEvents?: number;
+  logger?: Logger;
 }
 
 export type A2AClientFactory = (input: {
@@ -110,6 +114,8 @@ export class A2AAdapter extends SimpleAdapter<A2ASessionState, MessagingTools> {
   private readonly authHeaders: Record<string, string>;
   private readonly streaming: boolean;
   private readonly clientFactory?: A2AClientFactory;
+  private readonly maxStreamEvents: number;
+  private readonly logger: Logger;
   private client: A2AClientLike | null = null;
   private readonly contexts = new Map<string, string>();
   private readonly tasks = new Map<string, string>();
@@ -123,6 +129,8 @@ export class A2AAdapter extends SimpleAdapter<A2ASessionState, MessagingTools> {
     this.authHeaders = buildA2AAuthHeaders(options.auth);
     this.streaming = options.streaming ?? true;
     this.clientFactory = options.clientFactory;
+    this.maxStreamEvents = normalizeMaxStreamEvents(options.maxStreamEvents);
+    this.logger = options.logger ?? new NoopLogger();
   }
 
   public async onStarted(agentName: string, agentDescription: string): Promise<void> {
@@ -151,8 +159,8 @@ export class A2AAdapter extends SimpleAdapter<A2ASessionState, MessagingTools> {
         let streamEventCount = 0;
         for await (const event of client.sendMessageStream(request)) {
           streamEventCount += 1;
-          if (streamEventCount > MAX_STREAM_EVENTS) {
-            throw new Error(`A2A stream exceeded maximum event limit (${MAX_STREAM_EVENTS})`);
+          if (streamEventCount > this.maxStreamEvents) {
+            throw new Error(`A2A stream exceeded maximum event limit (${this.maxStreamEvents})`);
           }
           await this.handleEvent(event, tools, context.roomId, message.senderId);
         }
@@ -162,6 +170,11 @@ export class A2AAdapter extends SimpleAdapter<A2ASessionState, MessagingTools> {
       const response = await client.sendMessage(request);
       await this.handleEvent(response, tools, context.roomId, message.senderId);
     } catch (error) {
+      this.logger.error("A2A adapter request failed", {
+        roomId: context.roomId,
+        remoteUrl: this.remoteUrl,
+        error,
+      });
       await tools.sendEvent(`A2A agent error: ${asErrorMessage(error)}`, "error", {
         a2a_error: asErrorMessage(error),
       });
@@ -364,7 +377,12 @@ export class A2AAdapter extends SimpleAdapter<A2ASessionState, MessagingTools> {
       let resubEventCount = 0;
       for await (const raw of client.resubscribeTask({ id: state.taskId })) {
         resubEventCount += 1;
-        if (resubEventCount > MAX_STREAM_EVENTS) {
+        if (resubEventCount > this.maxStreamEvents) {
+          this.logger.warn("A2A task resubscribe exceeded event limit; continuing with fresh task", {
+            roomId,
+            taskId: state.taskId,
+            maxStreamEvents: this.maxStreamEvents,
+          });
           break;
         }
         const event = unwrapResult(raw);
@@ -394,8 +412,12 @@ export class A2AAdapter extends SimpleAdapter<A2ASessionState, MessagingTools> {
           break;
         }
       }
-    } catch {
-      // Resubscribe failed (e.g. task expired or peer unreachable). Continue as fresh task.
+    } catch (error) {
+      this.logger.warn("A2A task resubscribe failed; continuing with fresh task", {
+        roomId,
+        taskId: state.taskId,
+        error,
+      });
     }
   }
 
@@ -410,6 +432,15 @@ export class A2AAdapter extends SimpleAdapter<A2ASessionState, MessagingTools> {
 
 function roomTaskKey(roomId: string, taskId: string): string {
   return `${roomId}:${taskId}`;
+}
+
+function normalizeMaxStreamEvents(value: number | undefined): number {
+  const maxStreamEvents = value ?? DEFAULT_MAX_STREAM_EVENTS;
+  if (!Number.isSafeInteger(maxStreamEvents) || maxStreamEvents < 1) {
+    throw new ValidationError("A2AAdapter `maxStreamEvents` must be a positive integer.");
+  }
+
+  return maxStreamEvents;
 }
 
 function normalizeState(state: unknown): A2ATaskState {

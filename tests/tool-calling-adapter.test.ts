@@ -7,11 +7,11 @@ import {
   type CustomToolDef,
   type HistoryProvider,
   type PlatformMessage,
-  type ToolCallingModel,
 } from "../src/index";
+import type { ToolCallingModel } from "../src/adapters";
 import type {
+  ContactRequestsResult,
   ContactRecord,
-  ContactRequestRecord,
   MemoryRecord,
   MetadataMap,
   PaginatedList,
@@ -86,7 +86,7 @@ class FakeTools implements AgentToolsProtocol {
     throw new Error("not implemented");
   }
 
-  public async listContactRequests(): Promise<PaginatedList<ContactRequestRecord>> {
+  public async listContactRequests(): Promise<ContactRequestsResult> {
     throw new Error("not implemented");
   }
 
@@ -98,11 +98,11 @@ class FakeTools implements AgentToolsProtocol {
     throw new Error("not implemented");
   }
 
-  public async storeMemory(): Promise<Record<string, unknown>> {
+  public async storeMemory(): Promise<MemoryRecord> {
     throw new Error("not implemented");
   }
 
-  public async getMemory(): Promise<Record<string, unknown>> {
+  public async getMemory(): Promise<MemoryRecord> {
     throw new Error("not implemented");
   }
 

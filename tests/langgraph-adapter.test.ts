@@ -195,4 +195,61 @@ describe("LangGraphAdapter", () => {
     expect(invokeCalls[0]?.messages?.[0]?.[0]).toBe("system");
     expect(invokeCalls[1]?.messages?.[0]?.[0]).toBe("system");
   });
+
+  it("logs stream event serialization fallbacks instead of swallowing them", async () => {
+    const circularEvent: Record<string, unknown> = {
+      event: "on_tool_start",
+      name: "thenvoi_send_message",
+    };
+    circularEvent.self = circularEvent;
+
+    const graph = {
+      streamEvents() {
+        return streamFrom([
+          circularEvent,
+          {
+            event: "on_chain_end",
+            data: { output: { messages: [["assistant", "done"]] } },
+          },
+        ]);
+      },
+    };
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const adapter = new LangGraphAdapter({
+      graph,
+      emitExecutionEvents: true,
+      logger,
+    });
+    await adapter.onStarted("LangGraph Agent", "Graph-backed assistant");
+
+    const tools = new FakeTools();
+    await adapter.onMessage(
+      makeMessage("run", "room-serialize"),
+      tools,
+      new HistoryProvider([]),
+      null,
+      null,
+      { isSessionBootstrap: false, roomId: "room-serialize" },
+    );
+
+    expect(tools.events).toHaveLength(1);
+    expect(tools.events[0]?.messageType).toBe("tool_call");
+    expect(JSON.parse(tools.events[0]?.content ?? "{}")).toMatchObject({
+      event: "on_tool_start",
+      serialization_error: expect.any(String),
+    });
+    expect(tools.messages).toEqual(["done"]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      "LangGraph event serialization fell back to a safe value",
+      expect.objectContaining({
+        eventType: "on_tool_start",
+      }),
+    );
+  });
 });

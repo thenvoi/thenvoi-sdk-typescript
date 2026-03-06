@@ -15,19 +15,29 @@ export interface A2ASessionState {
 }
 
 export function buildA2AAuthHeaders(auth?: A2AAuth): Record<string, string> {
-  const headers: Record<string, string> = {
-    ...(auth?.headers ?? {}),
-  };
+  const headers: Record<string, string> = {};
+
+  for (const [key, value] of Object.entries(auth?.headers ?? {})) {
+    headers[key] = sanitizeHeaderValue(value, key);
+  }
 
   if (auth?.apiKey) {
-    headers["X-API-Key"] = auth.apiKey;
+    headers["X-API-Key"] = sanitizeHeaderValue(auth.apiKey, "X-API-Key");
   }
 
   if (auth?.bearerToken) {
-    headers.Authorization = `Bearer ${auth.bearerToken}`;
+    headers.Authorization = `Bearer ${sanitizeHeaderValue(auth.bearerToken, "Authorization")}`;
   }
 
   return headers;
+}
+
+function sanitizeHeaderValue(value: string, headerName: string): string {
+  if (/[\r\n]/u.test(value)) {
+    throw new Error(`${headerName} header value must not contain CR or LF characters.`);
+  }
+
+  return value;
 }
 
 export class A2AHistoryConverter implements HistoryConverter<A2ASessionState> {

@@ -3,7 +3,7 @@ import { writeFileSync, unlinkSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { loadAgentConfig } from "../src/config/loader";
+import { loadAgentConfig, loadAgentConfigFromEnv } from "../src/config/loader";
 
 function tmpFile(content: string): string {
   const dir = join(tmpdir(), `thenvoi-test-${Date.now()}`);
@@ -120,8 +120,8 @@ rest_url: "https://rest.example.com"
 
   it("omits wsUrl/restUrl when not present in config", () => {
     const path = tmpFile(`
-agent_id: "agent-minimal"
-api_key: "key-minimal"
+agent_id: "agent-basic"
+api_key: "key-basic"
 `);
     cleanup.push(path);
 
@@ -143,6 +143,41 @@ ws_url: "wss://example.com"
     expect(options.agentId).toBe("agent-spread");
     expect(options.apiKey).toBe("key-spread");
     expect(options.wsUrl).toBe("wss://example.com");
+  });
+
+  it("loads credentials from THENVOI_ env vars by default", () => {
+    const result = loadAgentConfigFromEnv({
+      env: {
+        THENVOI_AGENT_ID: "agent-env",
+        THENVOI_API_KEY: "key-env",
+        THENVOI_WS_URL: "wss://ws.example.com",
+        THENVOI_REST_URL: "https://rest.example.com",
+      },
+    });
+
+    expect(result.agentId).toBe("agent-env");
+    expect(result.apiKey).toBe("key-env");
+    expect(result.wsUrl).toBe("wss://ws.example.com");
+    expect(result.restUrl).toBe("https://rest.example.com");
+  });
+
+  it("supports custom env prefixes without requiring a trailing underscore", () => {
+    const result = loadAgentConfigFromEnv({
+      prefix: "BASIC_AGENT",
+      env: {
+        BASIC_AGENT_AGENT_ID: "agent-prefixed",
+        BASIC_AGENT_API_KEY: "key-prefixed",
+      },
+    });
+
+    expect(result.agentId).toBe("agent-prefixed");
+    expect(result.apiKey).toBe("key-prefixed");
+  });
+
+  it("throws a helpful error when required env vars are missing", () => {
+    expect(() => loadAgentConfigFromEnv({ env: {} })).toThrow("THENVOI_AGENT_ID");
+    expect(() => loadAgentConfigFromEnv({ env: {} })).toThrow("THENVOI_API_KEY");
+    expect(() => loadAgentConfigFromEnv({ env: {} })).toThrow("loadAgentConfig()");
   });
 
   it("throws for non-string agent_id", () => {

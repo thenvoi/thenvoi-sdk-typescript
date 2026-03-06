@@ -54,7 +54,7 @@ export abstract class SimpleAdapter<H, TTools = AdapterToolsProtocol>
 
   private convertHistory(provider: HistoryLike): H {
     if (!this.historyConverter) {
-      return provider as unknown as H;
+      return provider as H;
     }
 
     return provider.convert(this.historyConverter);

@@ -7,14 +7,17 @@ import type {
 } from "../contracts/protocols";
 import { DEFAULT_AGENT_TOOLS_CAPABILITIES } from "../contracts/protocols";
 import type {
+  ContactRequestAction,
   ContactRecord,
-  ContactRequestRecord,
+  ContactRequestsResult,
+  ListMemoriesArgs,
   MemoryRecord,
   MentionInput,
   MetadataMap,
   PaginatedList,
   ParticipantRecord,
   PeerRecord,
+  StoreMemoryArgs,
   ToolOperationResult,
   ToolSchemaRecord,
 } from "../contracts/dtos";
@@ -56,11 +59,11 @@ export class FakeAgentTools
     contacts: true,
     memory: true,
   };
-  public readonly messagesSent: CapturedMessage[] = [];
-  public readonly eventsSent: CapturedEvent[] = [];
-  public readonly participantsAdded: CapturedParticipant[] = [];
-  public readonly participantsRemoved: string[] = [];
-  public readonly toolCalls: CapturedToolCall[] = [];
+  public messagesSent: CapturedMessage[] = [];
+  public eventsSent: CapturedEvent[] = [];
+  public participantsAdded: CapturedParticipant[] = [];
+  public participantsRemoved: string[] = [];
+  public toolCalls: CapturedToolCall[] = [];
 
   private messageCounter = 0;
   private eventCounter = 0;
@@ -188,13 +191,13 @@ export class FakeAgentTools
     _page?: number,
     _pageSize?: number,
     _sentStatus?: string,
-  ): Promise<PaginatedList<ContactRequestRecord>> {
+  ): Promise<ContactRequestsResult> {
     this.maybeFail("listContactRequests");
-    return { data: [] };
+    return { received: [], sent: [] };
   }
 
   public async respondContactRequest(
-    _action: string,
+    _action: ContactRequestAction,
     _handle?: string,
     _requestId?: string,
   ): Promise<ToolOperationResult> {
@@ -204,20 +207,20 @@ export class FakeAgentTools
 
   // Memory stubs
   public async listMemories(
-    _args?: MetadataMap,
+    _args?: ListMemoriesArgs,
   ): Promise<PaginatedList<MemoryRecord>> {
     this.maybeFail("listMemories");
     return { data: [] };
   }
 
-  public async storeMemory(_args: MetadataMap): Promise<ToolOperationResult> {
+  public async storeMemory(args: StoreMemoryArgs): Promise<MemoryRecord> {
     this.maybeFail("storeMemory");
-    return { status: "ok" };
+    return { ...args, id: "mem-0", status: "active" };
   }
 
-  public async getMemory(_memoryId: string): Promise<ToolOperationResult> {
+  public async getMemory(memoryId: string): Promise<MemoryRecord> {
     this.maybeFail("getMemory");
-    return { status: "ok" };
+    return { id: memoryId, status: "active" };
   }
 
   public async supersedeMemory(

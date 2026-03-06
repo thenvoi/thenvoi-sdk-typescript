@@ -214,9 +214,9 @@ export class ContactEventHandler {
         return `Contact added: ${event.payload.name} (@${event.payload.handle}), type: ${event.payload.type}.`;
       case "contact_removed":
         return `Contact removed: ${event.payload.id}.`;
-      default:
-        return "Contact event received.";
     }
+
+    return assertNever(event);
   }
 
   private formatBroadcast(event: ContactEvent): string {
@@ -225,9 +225,9 @@ export class ContactEventHandler {
         return `[System]: Contact added: ${event.payload.name} (@${event.payload.handle}).`;
       case "contact_removed":
         return `[System]: Contact removed: ${event.payload.id}.`;
-      default:
-        return `[System]: Contact event: ${event.type}.`;
     }
+
+    return `[System]: Contact event: ${event.type}.`;
   }
 
   private cacheRequestInfo(id: string, info: RequestInfo): void {
@@ -259,4 +259,8 @@ export class ContactEventHandler {
       }
     }
   }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled contact event: ${JSON.stringify(value)}`);
 }

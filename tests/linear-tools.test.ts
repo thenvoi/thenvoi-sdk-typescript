@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createLinearTools, type LinearActivityClient } from "../src/index";
+import { createLinearTools, type LinearActivityClient } from "../src/linear";
 import { executeCustomTool } from "../src/runtime/tools/customTools";
 
 function makeMockClient(): LinearActivityClient {

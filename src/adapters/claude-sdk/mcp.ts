@@ -24,7 +24,7 @@ interface CreateThenvoiMcpBridgeOptions {
 export interface ThenvoiMcpBridge {
   serverConfig: McpSdkServerConfigWithInstance;
   allowedTools: string[];
-  toolDefinitions: SdkMcpToolDefinition[];
+  toolDefinitions: Array<SdkMcpToolDefinition<any>>;
 }
 
 export function createThenvoiMcpBridge(
@@ -37,7 +37,7 @@ export function createThenvoiMcpBridge(
     }
   }
 
-  const toolDefinitions: SdkMcpToolDefinition[] = [];
+  const toolDefinitions: Array<SdkMcpToolDefinition<any>> = [];
   for (const toolName of toolNames) {
     const model = TOOL_MODELS[toolName as keyof typeof TOOL_MODELS];
     if (!model) {
@@ -62,7 +62,7 @@ export function createThenvoiMcpBridge(
         toolName,
         getToolDescription(toolName),
         shape,
-        async (args) => {
+        async (args: Record<string, unknown>) => {
           const roomId = asRoomId(args.room_id);
           if (!roomId) {
             return asErrorResult("Missing required room_id");

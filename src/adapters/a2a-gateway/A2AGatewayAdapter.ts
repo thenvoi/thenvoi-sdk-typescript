@@ -20,7 +20,7 @@ import type {
   PendingA2ATask,
 } from "./types";
 
-const DEFAULT_HOST = "0.0.0.0";
+const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 10_000;
 const DEFAULT_GATEWAY_URL = `http://localhost:${DEFAULT_PORT}`;
 const DEFAULT_RESPONSE_TIMEOUT_MS = 120_000;
@@ -39,6 +39,7 @@ export class A2AGatewayAdapter
   private readonly gatewayUrl: string;
   private readonly host: string;
   private readonly port: number;
+  private readonly authToken?: string;
   private readonly responseTimeoutMs: number;
   private readonly peerPageSize: number;
   private readonly maxPeerPages: number;
@@ -62,6 +63,7 @@ export class A2AGatewayAdapter
     this.gatewayUrl = options.gatewayUrl ?? DEFAULT_GATEWAY_URL;
     this.host = options.host ?? DEFAULT_HOST;
     this.port = options.port ?? DEFAULT_PORT;
+    this.authToken = options.authToken;
     this.responseTimeoutMs = options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS;
     this.peerPageSize = options.peerPageSize ?? DEFAULT_PEER_PAGE_SIZE;
     this.maxPeerPages = options.maxPeerPages ?? DEFAULT_MAX_PEER_PAGES;
@@ -81,6 +83,7 @@ export class A2AGatewayAdapter
       gatewayUrl: this.gatewayUrl,
       host: this.host,
       port: this.port,
+      authToken: this.authToken,
       onRequest: (request) => this.handleGatewayRequest(request),
       onCancel: async (request) => {
         this.cancelPendingTask(request.taskId, request.peerId);

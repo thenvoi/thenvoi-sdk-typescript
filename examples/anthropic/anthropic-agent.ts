@@ -16,8 +16,10 @@ export function createAnthropicAgent(
 
   return Agent.create({
     adapter,
-    agentId: overrides?.agentId ?? "anthropic-agent",
-    apiKey: overrides?.apiKey ?? "api-key",
+    config: {
+      agentId: overrides?.agentId ?? "anthropic-agent",
+      apiKey: overrides?.apiKey ?? "api-key",
+    },
   });
 }
 

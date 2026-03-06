@@ -1,4 +1,5 @@
-import { A2AGatewayAdapter, Agent, FernRestAdapter, loadAgentConfig, isDirectExecution } from "../../src/index";
+import { A2AGatewayAdapter, Agent, loadAgentConfig, isDirectExecution } from "../../src/index";
+import { FernRestAdapter } from "../../src/rest";
 import { ThenvoiClient } from "@thenvoi/rest-client";
 
 export function createA2AGatewayAgent(
@@ -18,8 +19,10 @@ export function createA2AGatewayAgent(
 
   return Agent.create({
     adapter,
-    agentId: overrides?.agentId ?? "agent-a2a-gateway",
-    apiKey: thenvoiApiKey,
+    config: {
+      agentId: overrides?.agentId ?? "agent-a2a-gateway",
+      apiKey: thenvoiApiKey,
+    },
     linkOptions: { restApi },
   });
 }

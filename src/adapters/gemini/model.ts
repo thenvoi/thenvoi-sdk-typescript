@@ -6,6 +6,7 @@ import type {
   ToolResult,
 } from "../tool-calling";
 import { toDisplayText, toWireString } from "../shared/coercion";
+import { LazyAsyncValue } from "../shared/lazyAsyncValue";
 import {
   ensureToolCalls,
   normalizeConversationRole,
@@ -70,9 +71,8 @@ export class GeminiToolCallingModel implements ToolCallingModel {
   private readonly model: string;
   private readonly apiKey?: string;
   private readonly clientFactory?: GeminiClientFactory;
-  private client: GeminiClientLike | null = null;
-  private clientInitPromise: Promise<GeminiClientLike> | null = null;
-  private partFactoriesPromise: Promise<void> | null = null;
+  private readonly clientLoader: LazyAsyncValue<GeminiClientLike>;
+  private readonly partFactoryLoader: LazyAsyncValue<void>;
   private createPartFromFunctionCall: ((name: string, args: Record<string, unknown>) => unknown) | null = null;
   private createPartFromFunctionResponse:
     | ((id: string, name: string, response: Record<string, unknown>) => unknown)
@@ -85,6 +85,36 @@ export class GeminiToolCallingModel implements ToolCallingModel {
     this.createPartFromFunctionCall = options.partFactory?.createPartFromFunctionCall ?? null;
     this.createPartFromFunctionResponse =
       options.partFactory?.createPartFromFunctionResponse ?? null;
+    this.clientLoader = new LazyAsyncValue({
+      load: async () => {
+        const factory = this.clientFactory ?? (await loadGeminiClientFactory());
+        return factory({ apiKey: this.apiKey });
+      },
+    });
+    this.partFactoryLoader = new LazyAsyncValue({
+      load: async () => {
+        const module = (await import("@google/genai")) as {
+          createPartFromFunctionCall?: (
+            name: string,
+            args: Record<string, unknown>,
+          ) => unknown;
+          createPartFromFunctionResponse?: (
+            id: string,
+            name: string,
+            response: Record<string, unknown>,
+          ) => unknown;
+        };
+
+        if (!module.createPartFromFunctionCall || !module.createPartFromFunctionResponse) {
+          throw new Error(
+            'GeminiAdapter requires createPartFromFunctionCall/createPartFromFunctionResponse from "@google/genai".',
+          );
+        }
+
+        this.createPartFromFunctionCall = module.createPartFromFunctionCall;
+        this.createPartFromFunctionResponse = module.createPartFromFunctionResponse;
+      },
+    });
   }
 
   public async complete(request: ToolCallingModelRequest): Promise<ToolCallingResponse> {
@@ -246,24 +276,7 @@ export class GeminiToolCallingModel implements ToolCallingModel {
   }
 
   private async getClient(): Promise<GeminiClientLike> {
-    if (this.client) {
-      return this.client;
-    }
-
-    if (!this.clientInitPromise) {
-      this.clientInitPromise = (async () => {
-        const factory = this.clientFactory ?? (await loadGeminiClientFactory());
-        const client = await factory({ apiKey: this.apiKey });
-        this.client = client;
-        return client;
-      })();
-
-      this.clientInitPromise.catch(() => {
-        this.clientInitPromise = null;
-      });
-    }
-
-    return this.clientInitPromise;
+    return this.clientLoader.get();
   }
 
   private async ensurePartFactories(): Promise<void> {
@@ -271,36 +284,7 @@ export class GeminiToolCallingModel implements ToolCallingModel {
       return;
     }
 
-    if (!this.partFactoriesPromise) {
-      this.partFactoriesPromise = (async () => {
-        const module = (await import("@google/genai")) as {
-          createPartFromFunctionCall?: (
-            name: string,
-            args: Record<string, unknown>,
-          ) => unknown;
-          createPartFromFunctionResponse?: (
-            id: string,
-            name: string,
-            response: Record<string, unknown>,
-          ) => unknown;
-        };
-
-        if (!module.createPartFromFunctionCall || !module.createPartFromFunctionResponse) {
-          throw new Error(
-            'GeminiAdapter requires createPartFromFunctionCall/createPartFromFunctionResponse from "@google/genai".',
-          );
-        }
-
-        this.createPartFromFunctionCall = module.createPartFromFunctionCall;
-        this.createPartFromFunctionResponse = module.createPartFromFunctionResponse;
-      })();
-
-      this.partFactoriesPromise.catch(() => {
-        this.partFactoriesPromise = null;
-      });
-    }
-
-    return this.partFactoriesPromise;
+    return this.partFactoryLoader.get();
   }
 }
 

@@ -1,22 +1,56 @@
 import { SimpleAdapter } from "../../core/simpleAdapter";
 import type { MessagingTools } from "../../contracts/protocols";
+import type { Logger } from "../../core/logger";
+import { NoopLogger } from "../../core/logger";
 import type { HistoryProvider, PlatformMessage } from "../../runtime/types";
 import { buildConversationPrompt } from "../shared/conversationPrompt";
 import { findLatestTaskMetadata } from "../shared/history";
+import { LazyAsyncValue } from "../shared/lazyAsyncValue";
 import type {
   ApprovalMode,
-  Codex as CodexClient,
   ModelReasoningEffort,
   SandboxMode,
-  Thread as CodexThread,
-  ThreadItem,
-  ThreadOptions,
   WebSearchMode,
 } from "@openai/codex-sdk";
 
 export type CodexApprovalPolicy = ApprovalMode;
 export type CodexSandboxMode = SandboxMode;
-export type CodexReasoningEffort = ModelReasoningEffort;
+export type CodexWebSearchMode = WebSearchMode;
+const CODEX_REASONING_EFFORTS = ["low", "medium", "high", "xhigh"] as const satisfies readonly ModelReasoningEffort[];
+export type CodexReasoningEffort = (typeof CODEX_REASONING_EFFORTS)[number];
+
+interface CodexThreadItem {
+  id?: string;
+  type: string;
+  text?: string;
+  [key: string]: unknown;
+}
+
+interface CodexRunResult {
+  finalResponse?: string | null;
+  items: CodexThreadItem[];
+}
+
+interface CodexThreadLike {
+  id: string | null;
+  run(input: string): Promise<CodexRunResult>;
+}
+
+interface CodexClientLike {
+  startThread(options?: CodexThreadOptions): CodexThreadLike;
+  resumeThread(id: string, options?: CodexThreadOptions): CodexThreadLike;
+}
+
+interface CodexThreadOptions {
+  model?: string;
+  sandboxMode?: CodexSandboxMode;
+  workingDirectory?: string;
+  skipGitRepoCheck?: boolean;
+  modelReasoningEffort?: CodexReasoningEffort;
+  networkAccessEnabled?: boolean;
+  webSearchMode?: CodexWebSearchMode;
+  approvalPolicy?: CodexApprovalPolicy;
+}
 
 export interface CodexAdapterConfig {
   model?: string;
@@ -25,17 +59,13 @@ export interface CodexAdapterConfig {
   sandboxMode?: CodexSandboxMode;
   reasoningEffort?: CodexReasoningEffort;
   networkAccessEnabled?: boolean;
-  webSearchMode?: WebSearchMode;
+  webSearchMode?: CodexWebSearchMode;
   skipGitRepoCheck?: boolean;
   enableExecutionReporting?: boolean;
   emitThoughtEvents?: boolean;
   maxHistoryMessages?: number;
   enableLocalCommands?: boolean;
 }
-
-type CodexThreadLike = Pick<CodexThread, "id" | "run">;
-
-type CodexClientLike = Pick<CodexClient, "startThread" | "resumeThread">;
 
 export interface CodexFactory {
   (): Promise<CodexClientLike>;
@@ -45,13 +75,13 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
   private readonly baseConfig: CodexAdapterConfig;
   private readonly roomConfigOverrides = new Map<string, Partial<CodexAdapterConfig>>();
   private readonly factoryOverride?: CodexFactory;
-  private clientInitPromise: Promise<CodexClientLike> | null = null;
-  private codexClient: CodexClientLike | null = null;
+  private readonly logger: Logger;
+  private readonly clientLoader: LazyAsyncValue<CodexClientLike>;
   private lastInitFailure = 0;
   private readonly roomThreads = new Map<string, CodexThreadLike>();
   private readonly roomThreadInitPromises = new Map<string, Promise<CodexThreadLike>>();
 
-  public constructor(options?: { config?: CodexAdapterConfig; factory?: CodexFactory }) {
+  public constructor(options?: { config?: CodexAdapterConfig; factory?: CodexFactory; logger?: Logger }) {
     super();
     this.baseConfig = {
       approvalPolicy: "never",
@@ -63,6 +93,19 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
       ...options?.config,
     };
     this.factoryOverride = options?.factory;
+    this.logger = options?.logger ?? new NoopLogger();
+    this.clientLoader = new LazyAsyncValue({
+      load: async () => {
+        const client = await (this.factoryOverride ?? loadCodexFactory())();
+        return client;
+      },
+      onRejected: (error) => {
+        this.lastInitFailure = Date.now();
+        this.logger.error("Codex client initialization failed", {
+          error,
+        });
+      },
+    });
   }
 
   private getConfig(roomId: string): CodexAdapterConfig {
@@ -74,30 +117,19 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
   }
 
   private async ensureClient(): Promise<CodexClientLike> {
-    if (this.codexClient) {
-      return this.codexClient;
+    if (this.clientLoader.current) {
+      return this.clientLoader.get();
     }
-    if (!this.clientInitPromise) {
-      const cooldownMs = 2_000;
-      const elapsed = Date.now() - this.lastInitFailure;
-      if (this.lastInitFailure > 0 && elapsed < cooldownMs) {
-        throw new Error(
-          `Codex client init failed recently (${elapsed}ms ago). Retrying after ${cooldownMs}ms cooldown.`,
-        );
-      }
 
-      this.clientInitPromise = (this.factoryOverride ?? loadCodexFactory())()
-        .then((client) => {
-          this.codexClient = client;
-          return client;
-        })
-        .catch((error: unknown) => {
-          this.clientInitPromise = null;
-          this.lastInitFailure = Date.now();
-          throw error;
-        });
+    const cooldownMs = 2_000;
+    const elapsed = Date.now() - this.lastInitFailure;
+    if (this.lastInitFailure > 0 && elapsed < cooldownMs) {
+      throw new Error(
+        `Codex client init failed recently (${elapsed}ms ago). Retrying after ${cooldownMs}ms cooldown.`,
+      );
     }
-    return this.clientInitPromise;
+
+    return this.clientLoader.get();
   }
 
   public async onMessage(
@@ -180,10 +212,10 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
       return initializing;
     }
 
-    if (!this.codexClient) {
+    const client = this.clientLoader.current;
+    if (!client) {
       throw new Error("Codex client not initialized");
     }
-    const client = this.codexClient;
 
     const initPromise = (async (): Promise<CodexThreadLike> => {
       const resumeThreadId = isSessionBootstrap
@@ -194,8 +226,12 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
       if (resumeThreadId) {
         try {
           thread = client.resumeThread(resumeThreadId, this.threadOptions(config));
-        } catch {
-          // Thread resume failed (e.g. expired session), fall back to new thread.
+        } catch (error) {
+          this.logger.warn("Codex thread resume failed; starting a new thread", {
+            roomId,
+            resumeThreadId,
+            error,
+          });
           thread = client.startThread(this.threadOptions(config));
         }
       } else {
@@ -219,13 +255,13 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
 
   private async reportItems(
     tools: MessagingTools,
-    items: ThreadItem[],
+    items: CodexThreadItem[],
     roomId: string,
     threadId: string | null,
     config: CodexAdapterConfig,
   ): Promise<void> {
     for (const item of items) {
-      if (item.type === "reasoning" && config.emitThoughtEvents) {
+      if (item.type === "reasoning" && config.emitThoughtEvents && typeof item.text === "string") {
         await tools.sendEvent(item.text, "thought");
         continue;
       }
@@ -239,8 +275,8 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
     }
   }
 
-  private threadOptions(config: CodexAdapterConfig): ThreadOptions {
-    const options: ThreadOptions = {
+  private threadOptions(config: CodexAdapterConfig): CodexThreadOptions {
+    const options: CodexThreadOptions = {
       approvalPolicy: config.approvalPolicy,
       sandboxMode: config.sandboxMode,
       networkAccessEnabled: config.networkAccessEnabled,
@@ -284,7 +320,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
 
     if (input.command === "help") {
       await input.tools.sendMessage(
-        "Codex commands: `/status`, `/model`, `/models`, `/model list`, `/models list`, `/model <id>`, `/reasoning [minimal|low|medium|high|xhigh]`, `/help`.",
+        "Codex commands: `/status`, `/model`, `/models`, `/model list`, `/models list`, `/model <id>`, `/reasoning [low|medium|high|xhigh]`, `/help`.",
         mention,
       );
       return true;
@@ -339,7 +375,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, MessagingTools>
 
     if (input.command === "reasoning") {
       const effortArg = input.args.trim().toLowerCase();
-      const validEfforts: CodexReasoningEffort[] = ["minimal", "low", "medium", "high", "xhigh"];
+      const validEfforts = [...CODEX_REASONING_EFFORTS];
 
       if (!effortArg) {
         const roomConfig = this.getConfig(input.roomId);

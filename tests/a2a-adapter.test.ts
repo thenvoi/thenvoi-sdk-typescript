@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { A2AAdapter } from "../src/adapters/a2a/A2AAdapter";
 import { A2AHistoryConverter } from "../src/adapters/a2a/types";
@@ -254,5 +254,67 @@ describe("A2AAdapter", () => {
     expect(tools.events[0]?.messageType).toBe("error");
     expect(tools.events[0]?.content).toContain("upstream failure");
     expect(tools.events[0]?.metadata).toMatchObject({ a2a_error: "upstream failure" });
+  });
+
+  it("honors a custom maxStreamEvents limit and logs the failure", async () => {
+    const client = new FakeA2AClient({
+      streamBatches: [
+        [
+          {
+            kind: "message",
+            parts: [{ kind: "text", text: "first chunk" }],
+          },
+          {
+            kind: "message",
+            parts: [{ kind: "text", text: "second chunk" }],
+          },
+        ],
+      ],
+    });
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const adapter = new A2AAdapter({
+      remoteUrl: "a2a-remote",
+      clientFactory: async () => client,
+      maxStreamEvents: 1,
+      logger,
+    });
+
+    const tools = new FakeTools();
+    await adapter.onMessage(
+      makeMessage("hello", "room-limit"),
+      tools,
+      { contextId: null, taskId: null, taskState: null },
+      null,
+      null,
+      { isSessionBootstrap: false, roomId: "room-limit" },
+    );
+
+    expect(tools.messages).toEqual(["first chunk"]);
+    expect(tools.events).toHaveLength(1);
+    expect(tools.events[0]?.messageType).toBe("error");
+    expect(tools.events[0]?.content).toContain("maximum event limit (1)");
+    expect(logger.error).toHaveBeenCalledWith(
+      "A2A adapter request failed",
+      expect.objectContaining({
+        roomId: "room-limit",
+        remoteUrl: "a2a-remote",
+      }),
+    );
+  });
+
+  it("rejects invalid maxStreamEvents values", () => {
+    expect(
+      () =>
+        new A2AAdapter({
+          remoteUrl: "a2a-remote",
+          maxStreamEvents: 0,
+        }),
+    ).toThrow("positive integer");
   });
 });

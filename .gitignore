@@ -9,3 +9,11 @@ coverage
 .claude
 scorecard.png
 agent_config.yaml
+.env
+.env.*
+.env.local
+.env.*.local
+!.env.example
+*.pem
+*.key
+credentials.json

@@ -1,6 +1,11 @@
 import type { AgentToolsProtocol, PlatformMessage } from "../src/index";
 import { DEFAULT_AGENT_TOOLS_CAPABILITIES } from "../src/contracts/protocols";
-import type { RestApi, PaginatedResponse, AgentIdentity } from "../src/client/rest/types";
+import type {
+  AgentIdentity,
+  PaginatedResponse,
+  PlatformChatMessage,
+  RestApi,
+} from "../src/client/rest/types";
 import type {
   PaginatedList,
   ParticipantRecord,
@@ -224,5 +229,23 @@ export class FakeRestApi implements RestApi {
     }
 
     return { data: [] };
+  }
+
+  public async listMessages(
+    request: Parameters<NonNullable<RestApi["listMessages"]>>[0],
+    options?: Parameters<NonNullable<RestApi["listMessages"]>>[1],
+  ): Promise<PaginatedResponse<PlatformChatMessage>> {
+    if (this.overrides.listMessages) {
+      return this.overrides.listMessages(request, options);
+    }
+
+    return { data: [] };
+  }
+
+  public async getNextMessage(
+    request: Parameters<NonNullable<RestApi["getNextMessage"]>>[0],
+    options?: Parameters<NonNullable<RestApi["getNextMessage"]>>[1],
+  ): Promise<PlatformChatMessage | null> {
+    return this.overrides.getNextMessage?.(request, options) ?? null;
   }
 }

@@ -3,8 +3,6 @@ export class ParticipantTracker {
   private lastSent: Array<Record<string, unknown>> | null = null;
   private loaded = false;
 
-  public constructor(_roomId = "") {}
-
   public get participants(): Array<Record<string, unknown>> {
     return [...this.participantsList];
   }

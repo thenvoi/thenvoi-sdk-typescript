@@ -59,7 +59,7 @@ describe("runtime utilities", () => {
   });
 
   it("tracks participants and retries", () => {
-    const tracker = new ParticipantTracker("room-1");
+    const tracker = new ParticipantTracker();
     expect(tracker.changed()).toBe(true);
     tracker.add({ id: "u1", name: "Jane" });
     expect(tracker.changed()).toBe(true);

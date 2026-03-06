@@ -2,9 +2,15 @@ import { UnsupportedFeatureError } from "../../core/errors";
 import type { Logger } from "../../core/logger";
 import { NoopLogger } from "../../core/logger";
 import type {
+  ContactRecord,
+  ContactRequestAction,
+  ContactRequestsResult,
+  ListMemoriesArgs,
+  MemoryRecord,
   MentionReference,
   MetadataMap,
   PeerRecord,
+  StoreMemoryArgs,
   ToolOperationResult,
 } from "../../contracts/dtos";
 import { DEFAULT_REQUEST_OPTIONS, type RestRequestOptions } from "./requestOptions";
@@ -15,6 +21,7 @@ import type {
   AgentIdentity,
   ChatParticipant,
   PaginatedResponse,
+  PlatformChatMessage,
 } from "./types";
 
 function mergeOptions(options?: RestRequestOptions): RestRequestOptions {
@@ -24,15 +31,144 @@ function mergeOptions(options?: RestRequestOptions): RestRequestOptions {
   };
 }
 
-function unwrapData<T>(value: T | { data?: T }): T {
-  if (value && typeof value === "object" && "data" in value) {
-    const data = value.data;
-    if (data !== undefined) {
-      return data;
-    }
+function unwrapData<T>(value: unknown): T {
+  const record = asRecord(value);
+  if (record?.data !== undefined) {
+    return record.data as T;
   }
 
   return value as T;
+}
+
+function isMetadataMap(value: unknown): value is MetadataMap {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function asRecord(value: unknown): MetadataMap | undefined {
+  return isMetadataMap(value) ? value : undefined;
+}
+
+function asRecordArray<T extends MetadataMap = MetadataMap>(value: unknown): T[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value.filter((entry): entry is T => isMetadataMap(entry));
+}
+
+function extractEnvelopeData(value: unknown): unknown {
+  const record = asRecord(value);
+  if (!record || record.data === undefined) {
+    return value;
+  }
+
+  return record.data;
+}
+
+function extractEnvelopeMetadata(value: unknown): MetadataMap | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    return undefined;
+  }
+
+  return asRecord(record.metadata) ?? asRecord(record.meta);
+}
+
+function normalizePaginatedResponse<T extends MetadataMap = MetadataMap>(
+  response: unknown,
+): PaginatedResponse<T> {
+  const topLevelData = extractEnvelopeData(response);
+  const nestedData = extractEnvelopeData(topLevelData);
+
+  return {
+    data: asRecordArray<T>(topLevelData) ?? asRecordArray<T>(nestedData) ?? [],
+    metadata: normalizePaginationMetadata(
+      extractEnvelopeMetadata(response) ?? extractEnvelopeMetadata(topLevelData),
+    ),
+  };
+}
+
+function normalizeContactRequestDirection(value: unknown): MetadataMap | undefined {
+  const direction = asRecord(value);
+  if (!direction) {
+    return undefined;
+  }
+
+  return {
+    ...direction,
+    totalPages:
+      typeof direction.totalPages === "number"
+        ? direction.totalPages
+        : typeof direction.total_pages === "number"
+          ? direction.total_pages
+          : undefined,
+  };
+}
+
+function normalizeContactRequestsResult(result: ContactRequestsResult): ContactRequestsResult {
+  const metadata = asRecord(result.metadata);
+  return {
+    received: Array.isArray(result.received) ? result.received : [],
+    sent: Array.isArray(result.sent) ? result.sent : [],
+    metadata: metadata
+      ? {
+        ...metadata,
+        page:
+          typeof metadata.page === "number"
+            ? metadata.page
+            : typeof metadata.page_number === "number"
+              ? metadata.page_number
+              : undefined,
+        pageSize:
+          typeof metadata.pageSize === "number"
+            ? metadata.pageSize
+            : typeof metadata.page_size === "number"
+              ? metadata.page_size
+              : undefined,
+        received: normalizeContactRequestDirection(metadata.received),
+        sent: normalizeContactRequestDirection(metadata.sent),
+      }
+      : undefined,
+  };
+}
+
+function normalizeContactRequestsResponse(response: unknown): ContactRequestsResult {
+  const payload = asRecord(extractEnvelopeData(response));
+  return normalizeContactRequestsResult({
+    received: asRecordArray(payload?.received) ?? [],
+    sent: asRecordArray(payload?.sent) ?? [],
+    metadata: extractEnvelopeMetadata(response) ?? extractEnvelopeMetadata(payload),
+  });
+}
+
+function normalizeToolOperationResult(response: unknown): ToolOperationResult {
+  return asRecord(extractEnvelopeData(response)) ?? {};
+}
+
+function normalizeMemoryRecord(response: unknown): MemoryRecord {
+  return asRecord(extractEnvelopeData(response)) ?? {};
+}
+
+function extractChatId(response: unknown): string | undefined {
+  const payload = asRecord(extractEnvelopeData(response));
+  return typeof payload?.id === "string" ? payload.id : undefined;
+}
+
+function isChatParticipant(value: unknown): value is ChatParticipant {
+  const record = asRecord(value);
+  if (!record) {
+    return false;
+  }
+
+  return typeof record.id === "string"
+    && typeof record.name === "string"
+    && typeof record.type === "string"
+    && (record.handle === undefined || record.handle === null || typeof record.handle === "string");
+}
+
+function normalizeChatParticipantsResponse(response: unknown): ChatParticipant[] {
+  const payload = extractEnvelopeData(response);
+  return Array.isArray(payload) ? payload.filter(isChatParticipant) : [];
 }
 
 export class FernRestAdapter implements RestApi {
@@ -122,12 +258,12 @@ export class FernRestAdapter implements RestApi {
       mergeOptions(options),
     );
 
-    const room = unwrapData(response) as { id?: string };
-    if (!room.id) {
+    const roomId = extractChatId(response);
+    if (!roomId) {
       throw new UnsupportedFeatureError("Chat create response did not include id");
     }
 
-    return { id: room.id };
+    return { id: roomId };
   }
 
   public async listChatParticipants(
@@ -143,7 +279,7 @@ export class FernRestAdapter implements RestApi {
       {},
       mergeOptions(options),
     );
-    return unwrapData(response) as ChatParticipant[];
+    return normalizeChatParticipantsResponse(response);
   }
 
   public async addChatParticipant(
@@ -227,10 +363,45 @@ export class FernRestAdapter implements RestApi {
     ) as Promise<ToolOperationResult>;
   }
 
-  public async listPeers(): Promise<{ data: PeerRecord[]; metadata?: MetadataMap }> {
-    throw new UnsupportedFeatureError(
-      "Peer listing is not yet available in this SDK version",
+  public async getNextMessage(
+    request: { chatId: string },
+    options?: RestRequestOptions,
+  ): Promise<PlatformChatMessage | null> {
+    if (!this.client.chatMessages?.getNextMessage) {
+      throw new UnsupportedFeatureError("Fern client missing chatMessages.getNextMessage");
+    }
+
+    const response = await this.client.chatMessages.getNextMessage(
+      request.chatId,
+      mergeOptions(options),
     );
+    const payload = asRecord(extractEnvelopeData(response));
+    if (!payload) {
+      return null;
+    }
+
+    return payload as PlatformChatMessage;
+  }
+
+  public async listPeers(
+    request: { page: number; pageSize: number; notInChat: string },
+    options?: RestRequestOptions,
+  ): Promise<{ data: PeerRecord[]; metadata?: MetadataMap }> {
+    if (!this.client.agentPeers?.listAgentPeers) {
+      throw new UnsupportedFeatureError(
+        "Fern client missing agentPeers.listAgentPeers",
+      );
+    }
+
+    const response = await this.client.agentPeers.listAgentPeers(
+      {
+        page: request.page,
+        page_size: request.pageSize,
+        not_in_chat: request.notInChat,
+      },
+      mergeOptions(options),
+    );
+    return normalizePaginatedResponse<PeerRecord>(response);
   }
 
   public async listChats(
@@ -249,39 +420,169 @@ export class FernRestAdapter implements RestApi {
       mergeOptions(options),
     );
 
-    if (Array.isArray(response)) {
-      return { data: response as MetadataMap[] };
+    return normalizePaginatedResponse<MetadataMap>(response);
+  }
+
+  public async listContacts(
+    request: { page: number; pageSize: number },
+    options?: RestRequestOptions,
+  ): Promise<PaginatedResponse<ContactRecord>> {
+    if (!this.client.agentContacts?.listAgentContacts) {
+      throw new UnsupportedFeatureError("Fern client missing agentContacts.listAgentContacts");
     }
 
-    const topLevel = response as MetadataMap;
-    const topLevelData = topLevel.data;
+    const response = await this.client.agentContacts.listAgentContacts(
+      {
+        page: request.page,
+        page_size: request.pageSize,
+      },
+      mergeOptions(options),
+    );
 
-    if (Array.isArray(topLevelData)) {
-      return {
-        data: topLevelData as MetadataMap[],
-        metadata: normalizePaginationMetadata(
-          typeof topLevel.metadata === "object" && topLevel.metadata !== null
-            ? (topLevel.metadata as MetadataMap)
-            : undefined,
-        ),
-      };
+    return normalizePaginatedResponse<ContactRecord>(response);
+  }
+
+  public async addContact(
+    handle: string,
+    message?: string,
+    options?: RestRequestOptions,
+  ): Promise<ToolOperationResult> {
+    if (!this.client.agentContacts?.addAgentContact) {
+      throw new UnsupportedFeatureError("Fern client missing agentContacts.addAgentContact");
     }
 
-    if (topLevelData && typeof topLevelData === "object") {
-      const nested = topLevelData as MetadataMap;
-      if (Array.isArray(nested.data)) {
-        return {
-          data: nested.data as MetadataMap[],
-          metadata: normalizePaginationMetadata(
-            typeof nested.metadata === "object" && nested.metadata !== null
-              ? (nested.metadata as MetadataMap)
-              : undefined,
-          ),
-        };
-      }
+    return normalizeToolOperationResult(
+      await this.client.agentContacts.addAgentContact(
+        { handle, ...(message ? { message } : {}) },
+        mergeOptions(options),
+      ),
+    );
+  }
+
+  public async removeContact(
+    request: { handle?: string; contactId?: string },
+    options?: RestRequestOptions,
+  ): Promise<ToolOperationResult> {
+    if (!this.client.agentContacts?.removeAgentContact) {
+      throw new UnsupportedFeatureError("Fern client missing agentContacts.removeAgentContact");
     }
 
-    return { data: [] };
+    return normalizeToolOperationResult(
+      await this.client.agentContacts.removeAgentContact(
+        {
+          ...(request.handle ? { handle: request.handle } : {}),
+          ...(request.contactId ? { contact_id: request.contactId } : {}),
+        },
+        mergeOptions(options),
+      ),
+    );
+  }
+
+  public async listContactRequests(
+    request: { page: number; pageSize: number; sentStatus: string },
+    options?: RestRequestOptions,
+  ): Promise<ContactRequestsResult> {
+    if (!this.client.agentContacts?.listAgentContactRequests) {
+      throw new UnsupportedFeatureError("Fern client missing agentContacts.listAgentContactRequests");
+    }
+
+    const response = await this.client.agentContacts.listAgentContactRequests(
+      {
+        page: request.page,
+        page_size: request.pageSize,
+        sent_status: request.sentStatus,
+      },
+      mergeOptions(options),
+    );
+
+    return normalizeContactRequestsResponse(response);
+  }
+
+  public async respondContactRequest(
+    request: { action: ContactRequestAction; handle?: string; requestId?: string },
+    options?: RestRequestOptions,
+  ): Promise<ToolOperationResult> {
+    if (!this.client.agentContacts?.respondToAgentContactRequest) {
+      throw new UnsupportedFeatureError("Fern client missing agentContacts.respondToAgentContactRequest");
+    }
+
+    return normalizeToolOperationResult(
+      await this.client.agentContacts.respondToAgentContactRequest(
+        {
+          action: request.action,
+          ...(request.handle ? { handle: request.handle } : {}),
+          ...(request.requestId ? { request_id: request.requestId } : {}),
+        },
+        mergeOptions(options),
+      ),
+    );
+  }
+
+  public async listMemories(
+    request: ListMemoriesArgs,
+    options?: RestRequestOptions,
+  ): Promise<PaginatedResponse<MemoryRecord>> {
+    if (!this.client.agentMemories?.listAgentMemories) {
+      throw new UnsupportedFeatureError("Fern client missing agentMemories.listAgentMemories");
+    }
+
+    const response = await this.client.agentMemories.listAgentMemories(request, mergeOptions(options));
+    return normalizePaginatedResponse<MemoryRecord>(response);
+  }
+
+  public async storeMemory(
+    request: StoreMemoryArgs,
+    options?: RestRequestOptions,
+  ): Promise<MemoryRecord> {
+    if (!this.client.agentMemories?.createAgentMemory) {
+      throw new UnsupportedFeatureError("Fern client missing agentMemories.createAgentMemory");
+    }
+
+    return normalizeMemoryRecord(
+      await this.client.agentMemories.createAgentMemory(
+        { memory: request },
+        mergeOptions(options),
+      ),
+    );
+  }
+
+  public async getMemory(
+    memoryId: string,
+    options?: RestRequestOptions,
+  ): Promise<MemoryRecord> {
+    if (!this.client.agentMemories?.getAgentMemory) {
+      throw new UnsupportedFeatureError("Fern client missing agentMemories.getAgentMemory");
+    }
+
+    return normalizeMemoryRecord(
+      await this.client.agentMemories.getAgentMemory(memoryId, mergeOptions(options)),
+    );
+  }
+
+  public async supersedeMemory(
+    memoryId: string,
+    options?: RestRequestOptions,
+  ): Promise<ToolOperationResult> {
+    if (!this.client.agentMemories?.supersedeAgentMemory) {
+      throw new UnsupportedFeatureError("Fern client missing agentMemories.supersedeAgentMemory");
+    }
+
+    return normalizeToolOperationResult(
+      await this.client.agentMemories.supersedeAgentMemory(memoryId, mergeOptions(options)),
+    );
+  }
+
+  public async archiveMemory(
+    memoryId: string,
+    options?: RestRequestOptions,
+  ): Promise<ToolOperationResult> {
+    if (!this.client.agentMemories?.archiveAgentMemory) {
+      throw new UnsupportedFeatureError("Fern client missing agentMemories.archiveAgentMemory");
+    }
+
+    return normalizeToolOperationResult(
+      await this.client.agentMemories.archiveAgentMemory(memoryId, mergeOptions(options)),
+    );
   }
 }
 
@@ -406,6 +707,185 @@ export class RestFacade implements RestApi {
       () => this.api.markMessageFailed(chatId, messageId, error, options),
       { chatId, messageId },
     );
+  }
+
+  public getChatContext(
+    request: { chatId: string; page?: number; pageSize?: number },
+    options?: RestRequestOptions,
+  ): Promise<PaginatedResponse<PlatformChatMessage>> {
+    return this.forward("getChatContext", async () => {
+      if (!this.api.getChatContext) {
+        throw new UnsupportedFeatureError("Context hydration is not available in current REST adapter");
+      }
+
+      return this.api.getChatContext(request, options);
+    }, request);
+  }
+
+  public listMessages(
+    request: { chatId: string; page: number; pageSize: number; status?: string },
+    options?: RestRequestOptions,
+  ): Promise<PaginatedResponse<PlatformChatMessage>> {
+    return this.forward("listMessages", async () => {
+      if (!this.api.listMessages) {
+        throw new UnsupportedFeatureError("Message queue listing is not available in current REST adapter");
+      }
+
+      return this.api.listMessages(request, options);
+    }, request);
+  }
+
+  public getNextMessage(
+    request: { chatId: string },
+    options?: RestRequestOptions,
+  ): Promise<PlatformChatMessage | null> {
+    return this.forward("getNextMessage", async () => {
+      if (!this.api.getNextMessage) {
+        throw new UnsupportedFeatureError("Message queue next-item lookup is not available in current REST adapter");
+      }
+
+      return this.api.getNextMessage(request, options);
+    }, request);
+  }
+
+  public listContacts(
+    request: { page: number; pageSize: number },
+    options?: RestRequestOptions,
+  ): Promise<PaginatedResponse<ContactRecord>> {
+    return this.forward("listContacts", async () => {
+      if (!this.api.listContacts) {
+        throw new UnsupportedFeatureError("Contact listing is not available in current REST adapter");
+      }
+
+      const response = await this.api.listContacts(request, options);
+      return {
+        data: response.data ?? [],
+        metadata: normalizePaginationMetadata(response.metadata),
+      };
+    }, request);
+  }
+
+  public addContact(
+    handle: string,
+    message?: string,
+    options?: RestRequestOptions,
+  ): Promise<ToolOperationResult> {
+    return this.forward("addContact", async () => {
+      if (!this.api.addContact) {
+        throw new UnsupportedFeatureError("Contact creation is not available in current REST adapter");
+      }
+
+      return this.api.addContact(handle, message, options);
+    }, { handle });
+  }
+
+  public removeContact(
+    request: { handle?: string; contactId?: string },
+    options?: RestRequestOptions,
+  ): Promise<ToolOperationResult> {
+    return this.forward("removeContact", async () => {
+      if (!this.api.removeContact) {
+        throw new UnsupportedFeatureError("Contact removal is not available in current REST adapter");
+      }
+
+      return this.api.removeContact(request, options);
+    }, request);
+  }
+
+  public listContactRequests(
+    request: { page: number; pageSize: number; sentStatus: string },
+    options?: RestRequestOptions,
+  ): Promise<ContactRequestsResult> {
+    return this.forward("listContactRequests", async () => {
+      if (!this.api.listContactRequests) {
+        throw new UnsupportedFeatureError("Contact request listing is not available in current REST adapter");
+      }
+
+      const response = await this.api.listContactRequests(request, options);
+      return normalizeContactRequestsResult(response);
+    }, request);
+  }
+
+  public respondContactRequest(
+    request: { action: ContactRequestAction; handle?: string; requestId?: string },
+    options?: RestRequestOptions,
+  ): Promise<ToolOperationResult> {
+    return this.forward("respondContactRequest", async () => {
+      if (!this.api.respondContactRequest) {
+        throw new UnsupportedFeatureError("Contact request responses are not available in current REST adapter");
+      }
+
+      return this.api.respondContactRequest(request, options);
+    }, request);
+  }
+
+  public listMemories(
+    request: ListMemoriesArgs,
+    options?: RestRequestOptions,
+  ): Promise<PaginatedResponse<MemoryRecord>> {
+    return this.forward("listMemories", async () => {
+      if (!this.api.listMemories) {
+        throw new UnsupportedFeatureError("Memory listing is not available in current REST adapter");
+      }
+
+      const response = await this.api.listMemories(request, options);
+      return {
+        data: response.data ?? [],
+        metadata: normalizePaginationMetadata(response.metadata),
+      };
+    }, request);
+  }
+
+  public storeMemory(
+    request: StoreMemoryArgs,
+    options?: RestRequestOptions,
+  ): Promise<MemoryRecord> {
+    return this.forward("storeMemory", async () => {
+      if (!this.api.storeMemory) {
+        throw new UnsupportedFeatureError("Memory creation is not available in current REST adapter");
+      }
+
+      return this.api.storeMemory(request, options);
+    }, request);
+  }
+
+  public getMemory(
+    memoryId: string,
+    options?: RestRequestOptions,
+  ): Promise<MemoryRecord> {
+    return this.forward("getMemory", async () => {
+      if (!this.api.getMemory) {
+        throw new UnsupportedFeatureError("Memory lookup is not available in current REST adapter");
+      }
+
+      return this.api.getMemory(memoryId, options);
+    }, { memoryId });
+  }
+
+  public supersedeMemory(
+    memoryId: string,
+    options?: RestRequestOptions,
+  ): Promise<ToolOperationResult> {
+    return this.forward("supersedeMemory", async () => {
+      if (!this.api.supersedeMemory) {
+        throw new UnsupportedFeatureError("Memory supersede is not available in current REST adapter");
+      }
+
+      return this.api.supersedeMemory(memoryId, options);
+    }, { memoryId });
+  }
+
+  public archiveMemory(
+    memoryId: string,
+    options?: RestRequestOptions,
+  ): Promise<ToolOperationResult> {
+    return this.forward("archiveMemory", async () => {
+      if (!this.api.archiveMemory) {
+        throw new UnsupportedFeatureError("Memory archive is not available in current REST adapter");
+      }
+
+      return this.api.archiveMemory(memoryId, options);
+    }, { memoryId });
   }
 
   public listPeers(

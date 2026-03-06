@@ -16,8 +16,10 @@ export function createParlantAgent(
 
   return Agent.create({
     adapter,
-    agentId: overrides?.agentId ?? "agent-parlant",
-    apiKey: overrides?.apiKey ?? "api-key",
+    config: {
+      agentId: overrides?.agentId ?? "agent-parlant",
+      apiKey: overrides?.apiKey ?? "api-key",
+    },
   });
 }
 

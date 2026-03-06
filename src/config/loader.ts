@@ -2,17 +2,22 @@ import { readFileSync } from "node:fs";
 import yaml from "js-yaml";
 import { ValidationError } from "../core/errors";
 
-export interface AgentConfigResult {
+export interface AgentCredentials {
   agentId: string;
   apiKey: string;
   wsUrl?: string;
   restUrl?: string;
+}
+
+export interface AgentConfigResult extends AgentCredentials {
   [key: string]: unknown;
 }
 
 const DEFAULT_CONFIG_PATH = "./agent_config.yaml";
+const DEFAULT_ENV_PREFIX = "THENVOI_";
 
 const REQUIRED_FIELDS = ["agent_id", "api_key"] as const;
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype", "toString", "valueOf"]);
 
 function toSnakeCase(key: string): string {
   return key.replace(/([A-Z])/g, "_$1").toLowerCase();
@@ -24,6 +29,53 @@ function normalizeKeys(obj: Record<string, unknown>): Record<string, unknown> {
     result[toSnakeCase(key)] = value;
   }
   return result;
+}
+
+function toAgentConfigResult(section: Record<string, unknown>, sourceLabel: string): AgentConfigResult {
+  const missing = REQUIRED_FIELDS.filter((field) => !section[field]);
+  if (missing.length > 0) {
+    throw new ValidationError(
+      `Missing required fields in ${sourceLabel}: ${missing.join(", ")}`,
+    );
+  }
+
+  const invalid = REQUIRED_FIELDS.filter(
+    (field) => typeof section[field] !== "string" || (section[field] as string).trim() === "",
+  );
+  if (invalid.length > 0) {
+    throw new ValidationError(
+      `Invalid fields in ${sourceLabel}: ${invalid.join(", ")} must be non-empty strings`,
+    );
+  }
+
+  const { agent_id, api_key, ws_url, rest_url, ...rest } = section;
+
+  if (ws_url !== undefined && typeof ws_url !== "string") {
+    throw new ValidationError(`ws_url in ${sourceLabel} must be a string`);
+  }
+  if (rest_url !== undefined && typeof rest_url !== "string") {
+    throw new ValidationError(`rest_url in ${sourceLabel} must be a string`);
+  }
+
+  const safeRest: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(rest)) {
+    if (!UNSAFE_KEYS.has(key)) {
+      safeRest[key] = value;
+    }
+  }
+
+  return {
+    agentId: (agent_id as string).trim(),
+    apiKey: (api_key as string).trim(),
+    ...(typeof ws_url === "string" && ws_url.trim() !== "" ? { wsUrl: ws_url.trim() } : {}),
+    ...(typeof rest_url === "string" && rest_url.trim() !== "" ? { restUrl: rest_url.trim() } : {}),
+    ...safeRest,
+  };
+}
+
+export interface LoadAgentConfigFromEnvOptions {
+  env?: Record<string, string | undefined>;
+  prefix?: string;
 }
 
 export function loadAgentConfig(
@@ -63,47 +115,37 @@ export function loadAgentConfig(
     section = normalizeKeys(config);
   }
 
-  const missing = REQUIRED_FIELDS.filter((field) => !section[field]);
-  if (missing.length > 0) {
-    const keyHint = agentKey ? ` under key "${agentKey}"` : "";
-    throw new ValidationError(
-      `Missing required fields${keyHint} in ${filePath}: ${missing.join(", ")}`,
-    );
-  }
+  const sourceLabel = agentKey && agentKey in config
+    ? `${filePath} under key "${agentKey}"`
+    : filePath;
+  return toAgentConfigResult(section, sourceLabel);
+}
 
-  const { agent_id, api_key, ws_url, rest_url, ...rest } = section;
+export function loadAgentConfigFromEnv(
+  options?: LoadAgentConfigFromEnvOptions,
+): AgentCredentials {
+  const env = options?.env ?? process.env;
+  const prefix = options?.prefix === undefined
+    ? DEFAULT_ENV_PREFIX
+    : options.prefix === "" || options.prefix.endsWith("_")
+      ? options.prefix
+      : `${options.prefix}_`;
 
-  const invalid = REQUIRED_FIELDS.filter(
-    (field) => typeof section[field] !== "string" || (section[field] as string).trim() === "",
-  );
-  if (invalid.length > 0) {
-    const keyHint = agentKey ? ` under key "${agentKey}"` : "";
-    throw new ValidationError(
-      `Invalid fields${keyHint} in ${filePath}: ${invalid.join(", ")} must be non-empty strings`,
-    );
-  }
+  const section = normalizeKeys({
+    agent_id: env[`${prefix}AGENT_ID`],
+    api_key: env[`${prefix}API_KEY`],
+    ws_url: env[`${prefix}WS_URL`],
+    rest_url: env[`${prefix}REST_URL`],
+  });
 
-  if (ws_url !== undefined && typeof ws_url !== "string") {
-    throw new ValidationError(`ws_url in ${filePath} must be a string`);
-  }
-  if (rest_url !== undefined && typeof rest_url !== "string") {
-    throw new ValidationError(`rest_url in ${filePath} must be a string`);
-  }
-
-  // Filter out keys that could pollute the object prototype.
-  const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype", "toString", "valueOf"]);
-  const safeRest: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(rest)) {
-    if (!UNSAFE_KEYS.has(key)) {
-      safeRest[key] = value;
+  try {
+    return toAgentConfigResult(section, `environment variables (${prefix}AGENT_ID, ${prefix}API_KEY)`);
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      throw new ValidationError(
+        `${error.message}. Set ${prefix}AGENT_ID and ${prefix}API_KEY, or use loadAgentConfig() for agent_config.yaml.`,
+      );
     }
+    throw error;
   }
-
-  return {
-    agentId: agent_id as string,
-    apiKey: api_key as string,
-    ...(ws_url !== undefined ? { wsUrl: ws_url } : {}),
-    ...(rest_url !== undefined ? { restUrl: rest_url } : {}),
-    ...safeRest,
-  };
 }

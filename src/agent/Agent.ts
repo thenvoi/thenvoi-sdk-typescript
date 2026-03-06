@@ -1,11 +1,15 @@
-import type { FrameworkAdapter, Preprocessor } from "../contracts/protocols";
-import type { PlatformEvent } from "../platform/events";
+import type { FrameworkAdapter } from "../contracts/protocols";
+import type { AgentCredentials } from "../config";
 import { PlatformRuntime, type PlatformRuntimeOptions } from "../runtime/PlatformRuntime";
 import { GracefulShutdown } from "../runtime/shutdown";
 
-interface AgentCreateOptions extends PlatformRuntimeOptions {
+export interface AgentCreateOptions extends Omit<PlatformRuntimeOptions, "agentId" | "apiKey" | "wsUrl" | "restUrl"> {
   adapter: FrameworkAdapter;
-  preprocessor?: Preprocessor<PlatformEvent>;
+  config?: AgentCredentials;
+  agentId?: string;
+  apiKey?: string;
+  wsUrl?: string;
+  restUrl?: string;
   shutdownTimeoutMs?: number | null;
 }
 
@@ -22,9 +26,29 @@ export class Agent {
   }
 
   public static create(options: AgentCreateOptions): Agent {
-    const runtime = new PlatformRuntime(options);
-    const agent = new Agent(runtime, options.adapter);
-    agent.shutdownTimeoutMs = options.shutdownTimeoutMs ?? 30_000;
+    const {
+      adapter,
+      config,
+      agentId,
+      apiKey,
+      wsUrl,
+      restUrl,
+      shutdownTimeoutMs,
+      ...runtimeOptions
+    } = options;
+    const runtime = new PlatformRuntime({
+      ...runtimeOptions,
+      agentId: agentId ?? config?.agentId ?? "",
+      apiKey: apiKey ?? config?.apiKey ?? "",
+      ...(wsUrl !== undefined || config?.wsUrl !== undefined
+        ? { wsUrl: wsUrl ?? config?.wsUrl }
+        : {}),
+      ...(restUrl !== undefined || config?.restUrl !== undefined
+        ? { restUrl: restUrl ?? config?.restUrl }
+        : {}),
+    });
+    const agent = new Agent(runtime, adapter);
+    agent.shutdownTimeoutMs = shutdownTimeoutMs ?? 30_000;
     return agent;
   }
 

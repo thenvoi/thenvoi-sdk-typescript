@@ -1,3 +1,9 @@
+import type { MetadataMap, ToolModelMessage } from "../contracts/dtos";
+
+function isMetadataMap(value: unknown): value is MetadataMap {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 export function replaceUuidMentions(
   content: string,
   participants: Array<Record<string, unknown>>,
@@ -21,7 +27,7 @@ export function replaceUuidMentions(
 export function formatMessageForLlm(
   message: Record<string, unknown>,
   participants?: Array<Record<string, unknown>>,
-): Record<string, unknown> {
+): ToolModelMessage {
   const senderType = String(message.sender_type ?? "");
   const senderName = String(message.sender_name ?? message.name ?? senderType);
   const content = participants
@@ -34,10 +40,7 @@ export function formatMessageForLlm(
     sender_name: senderName,
     sender_type: senderType,
     message_type: String(message.message_type ?? "text"),
-    metadata:
-      typeof message.metadata === "object" && message.metadata !== null
-        ? (message.metadata as Record<string, unknown>)
-        : {},
+    metadata: isMetadataMap(message.metadata) ? message.metadata : {},
   };
 }
 
@@ -47,7 +50,7 @@ export function formatHistoryForLlm(
     excludeId?: string;
     participants?: Array<Record<string, unknown>>;
   },
-): Array<Record<string, unknown>> {
+): ToolModelMessage[] {
   const excludeId = options?.excludeId;
   const participants = options?.participants;
 

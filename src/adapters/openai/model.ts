@@ -5,6 +5,7 @@ import type {
   ToolCallingResponse,
 } from "../tool-calling";
 import { toDisplayText, toWireString } from "../shared/coercion";
+import { LazyAsyncValue } from "../shared/lazyAsyncValue";
 import {
   ensureToolCalls,
   mapConversationMessages,
@@ -40,13 +41,18 @@ export class OpenAIToolCallingModel implements ToolCallingModel {
   private readonly model: string;
   private readonly apiKey?: string;
   private readonly clientFactory?: OpenAIClientFactory;
-  private client: OpenAIClientLike | null = null;
-  private clientInitPromise: Promise<OpenAIClientLike> | null = null;
+  private readonly clientLoader: LazyAsyncValue<OpenAIClientLike>;
 
   public constructor(options: OpenAIToolCallingModelOptions) {
     this.model = options.model;
     this.apiKey = options.apiKey;
     this.clientFactory = options.clientFactory;
+    this.clientLoader = new LazyAsyncValue({
+      load: async () => {
+        const factory = this.clientFactory ?? (await loadOpenAIClientFactory());
+        return factory({ apiKey: this.apiKey });
+      },
+    });
   }
 
   public async complete(request: ToolCallingModelRequest): Promise<ToolCallingResponse> {
@@ -66,24 +72,7 @@ export class OpenAIToolCallingModel implements ToolCallingModel {
   }
 
   private async getClient(): Promise<OpenAIClientLike> {
-    if (this.client) {
-      return this.client;
-    }
-
-    if (!this.clientInitPromise) {
-      this.clientInitPromise = (async () => {
-        const factory = this.clientFactory ?? (await loadOpenAIClientFactory());
-        const client = await factory({ apiKey: this.apiKey });
-        this.client = client;
-        return client;
-      })();
-
-      this.clientInitPromise.catch(() => {
-        this.clientInitPromise = null;
-      });
-    }
-
-    return this.clientInitPromise;
+    return this.clientLoader.get();
   }
 }
 

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+import * as adapters from "../src/adapters";
 import * as sdk from "../src/index";
+import * as linear from "../src/linear";
+import * as rest from "../src/rest";
+import * as testing from "../src/testing";
 
 const expectedCoreExports = [
   "Agent",
@@ -9,6 +13,8 @@ const expectedCoreExports = [
   "AgentRuntime",
   "ExecutionContext",
   "AgentTools",
+  "loadAgentConfig",
+  "loadAgentConfigFromEnv",
   "TOOL_MODELS",
   "CHAT_EVENT_TYPES",
   "MCP_TOOL_PREFIX",
@@ -35,8 +41,16 @@ const expectedCoreExports = [
   "ClaudeSDKAdapter",
   "CodexAdapter",
   "SimpleAdapter",
-  "RestFacade",
+];
+
+const movedToSubpaths = [
+  "AgentRestAdapter",
+  "FakeAgentTools",
   "FernRestAdapter",
+  "RestFacade",
+  "createLinearTools",
+  "createSqliteSessionRoomStore",
+  "handleAgentSessionEvent",
 ];
 
 describe("sdk public surface", () => {
@@ -51,5 +65,21 @@ describe("sdk public surface", () => {
     expect(sdk.TOOL_MODELS).toHaveProperty("thenvoi_send_message");
     expect(sdk.TOOL_MODELS).toHaveProperty("thenvoi_lookup_peers");
     expect(sdk.TOOL_MODELS).toHaveProperty("thenvoi_list_memories");
+  });
+
+  it("keeps advanced helper modules off the root barrel", () => {
+    for (const symbol of movedToSubpaths) {
+      expect(sdk).not.toHaveProperty(symbol);
+    }
+  });
+
+  it("exposes advanced helper modules via subpaths", () => {
+    expect(rest).toHaveProperty("RestFacade");
+    expect(rest).toHaveProperty("FernRestAdapter");
+    expect(rest).toHaveProperty("AgentRestAdapter");
+    expect(linear).toHaveProperty("createLinearTools");
+    expect(linear).toHaveProperty("handleAgentSessionEvent");
+    expect(testing).toHaveProperty("FakeAgentTools");
+    expect(adapters).toHaveProperty("GeminiToolCallingModel");
   });
 });

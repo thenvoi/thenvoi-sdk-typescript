@@ -28,8 +28,10 @@ export function createLangGraphAgent(
 
   return Agent.create({
     adapter,
-    agentId: overrides?.agentId ?? "agent-langgraph",
-    apiKey: overrides?.apiKey ?? "api-key",
+    config: {
+      agentId: overrides?.agentId ?? "agent-langgraph",
+      apiKey: overrides?.apiKey ?? "api-key",
+    },
   });
 }
 

@@ -16,8 +16,10 @@ export function createGeminiAgent(
 
   return Agent.create({
     adapter,
-    agentId: overrides?.agentId ?? "gemini-agent",
-    apiKey: overrides?.apiKey ?? "api-key",
+    config: {
+      agentId: overrides?.agentId ?? "gemini-agent",
+      apiKey: overrides?.apiKey ?? "api-key",
+    },
   });
 }
 

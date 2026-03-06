@@ -4,15 +4,16 @@ import { LinearWebhookClient } from "@linear/sdk/webhooks";
 
 import {
   ConsoleLogger,
-  FernRestAdapter,
   type Logger,
-  type RestApi,
+  isDirectExecution,
+} from "../../src/index";
+import {
   createSqliteSessionRoomStore,
   handleAgentSessionEvent,
   type LinearThenvoiBridgeConfig,
   type RoomStrategy,
-  isDirectExecution,
-} from "../../src/index";
+} from "../../src/linear";
+import { FernRestAdapter, type RestApi } from "../../src/rest";
 import { ThenvoiClient } from "@thenvoi/rest-client";
 
 interface LinearThenvoiBridgeServerOptions {

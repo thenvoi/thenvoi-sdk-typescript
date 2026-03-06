@@ -1,5 +1,5 @@
 {
-  "name": "@thenvoi/thenvoi-sdk-typescript",
+  "name": "@thenvoi/sdk",
   "version": "0.1.0",
   "description": "Thenvoi TypeScript SDK core runtime",
   "license": "MIT",
@@ -16,10 +16,45 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./adapters": {
+      "types": "./dist/adapters.d.ts",
+      "import": "./dist/adapters.js",
+      "require": "./dist/adapters.cjs"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "import": "./dist/config.js",
+      "require": "./dist/config.cjs"
+    },
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.js",
+      "require": "./dist/core.cjs"
+    },
+    "./linear": {
+      "types": "./dist/linear.d.ts",
+      "import": "./dist/linear.js",
+      "require": "./dist/linear.cjs"
+    },
+    "./rest": {
+      "types": "./dist/rest.d.ts",
+      "import": "./dist/rest.js",
+      "require": "./dist/rest.cjs"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "import": "./dist/runtime.js",
+      "require": "./dist/runtime.cjs"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js",
+      "require": "./dist/testing.cjs"
     }
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm,cjs --dts --external @langchain/langgraph/prebuilt --external @langchain/core/tools --external @a2a-js/sdk --external @a2a-js/sdk/client --external @a2a-js/sdk/server --external @a2a-js/sdk/server/express --external @anthropic-ai/sdk --external @google/genai --external openai --external parlant-client",
+    "build": "tsup --config tsup.config.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
@@ -30,17 +65,60 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.63",
     "@linear/sdk": "^76.0.0",
-    "@openai/codex-sdk": "^0.107.0",
     "@thenvoi/rest-client": "link:../fern-javascript-sdk",
-    "express": "^5.2.1",
     "js-yaml": "^4.1.1",
     "phoenix": "^1.8.4",
     "zod": "^3.24.2",
     "zod-to-json-schema": "^3.25.1"
   },
+  "peerDependencies": {
+    "@a2a-js/sdk": "^0.3.10",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.63",
+    "@anthropic-ai/sdk": "^0.78.0",
+    "@google/genai": "^1.44.0",
+    "@langchain/core": "^1.1.31",
+    "@langchain/langgraph": "^1.2.0",
+    "@openai/codex-sdk": "^0.107.0",
+    "express": "^5.2.1",
+    "openai": "^6.27.0",
+    "parlant-client": "^3.2.0"
+  },
+  "peerDependenciesMeta": {
+    "@a2a-js/sdk": {
+      "optional": true
+    },
+    "@anthropic-ai/claude-agent-sdk": {
+      "optional": true
+    },
+    "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "@google/genai": {
+      "optional": true
+    },
+    "@langchain/core": {
+      "optional": true
+    },
+    "@langchain/langgraph": {
+      "optional": true
+    },
+    "@openai/codex-sdk": {
+      "optional": true
+    },
+    "express": {
+      "optional": true
+    },
+    "openai": {
+      "optional": true
+    },
+    "parlant-client": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.63",
+    "@openai/codex-sdk": "^0.107.0",
     "@types/express": "^5.0.6",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.13.14",

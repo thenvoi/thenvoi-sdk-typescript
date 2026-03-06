@@ -1,9 +1,12 @@
 import { RuntimeStateError, UnsupportedFeatureError, ValidationError } from "../../core/errors";
+import type { Logger } from "../../core/logger";
+import { NoopLogger } from "../../core/logger";
 import { SimpleAdapter } from "../../core/simpleAdapter";
 import type { AdapterToolsProtocol } from "../../contracts/protocols";
 import { renderSystemPrompt } from "../../runtime/prompts";
 import type { HistoryProvider, PlatformMessage } from "../../runtime/types";
 import { asErrorMessage, asRecord } from "../shared/coercion";
+import { LazyAsyncValue } from "../shared/lazyAsyncValue";
 
 type LangGraphRole = "system" | "user" | "assistant";
 type LangGraphTupleMessage = [LangGraphRole, string];
@@ -52,6 +55,7 @@ export interface LangGraphAdapterOptions {
   maxHistoryMessages?: number;
   emitExecutionEvents?: boolean;
   includeMemoryTools?: boolean;
+  logger?: Logger;
 }
 
 export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterToolsProtocol> {
@@ -66,6 +70,8 @@ export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
   private readonly maxHistoryMessages: number;
   private readonly emitExecutionEvents: boolean;
   private readonly includeMemoryTools: boolean;
+  private readonly logger: Logger;
+  private readonly sdkLoader: LazyAsyncValue<LangGraphSdk>;
   private renderedSystemPrompt = "";
   private readonly bootstrappedRooms = new Set<string>();
 
@@ -87,6 +93,13 @@ export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
     this.maxHistoryMessages = options.maxHistoryMessages ?? 100;
     this.emitExecutionEvents = options.emitExecutionEvents ?? true;
     this.includeMemoryTools = options.includeMemoryTools ?? false;
+    this.logger = options.logger ?? new NoopLogger();
+    this.sdkLoader = new LazyAsyncValue({
+      load: async () => loadLangGraphSdk(),
+      onRejected: (error: unknown) => {
+        this.logger.warn("LangGraph SDK initialization failed", { error });
+      },
+    });
   }
 
   public async onStarted(agentName: string, agentDescription: string): Promise<void> {
@@ -111,12 +124,13 @@ export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
     let sdk: LangGraphSdk | undefined;
     let langGraphTools = [...this.additionalTools];
     if (!this.graph || this.graphFactory) {
-      sdk = await loadLangGraphSdk();
+      sdk = await this.sdkLoader.get();
       langGraphTools = [
         ...(await buildLangGraphTools({
           sdk,
           tools,
           includeMemoryTools: this.includeMemoryTools,
+          logger: this.logger,
         })),
         ...this.additionalTools,
       ];
@@ -245,10 +259,22 @@ export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
       const data = asRecord(event);
       const eventType = String(data.event ?? "");
       if (eventType === "on_tool_start") {
-        await tools.sendEvent(JSON.stringify(data), "tool_call");
+        await tools.sendEvent(
+          stringifyJsonWithFallback(data, this.logger, {
+            label: "LangGraph event",
+            eventType,
+          }),
+          "tool_call",
+        );
       }
       if (eventType === "on_tool_end") {
-        await tools.sendEvent(JSON.stringify(data), "tool_result");
+        await tools.sendEvent(
+          stringifyJsonWithFallback(data, this.logger, {
+            label: "LangGraph event",
+            eventType,
+          }),
+          "tool_result",
+        );
       }
       if (eventType === "on_chain_end") {
         const output = asRecord(data.data);
@@ -267,6 +293,7 @@ async function buildLangGraphTools(input: {
   sdk: LangGraphSdk;
   tools: AdapterToolsProtocol;
   includeMemoryTools: boolean;
+  logger: Logger;
 }): Promise<unknown[]> {
   const schemas = input.tools.getToolSchemas("openai", {
     includeMemory: input.includeMemoryTools,
@@ -283,7 +310,7 @@ async function buildLangGraphTools(input: {
       input.sdk.tool(
         async (args: Record<string, unknown>) => {
           const result = await input.tools.executeToolCall(spec.name, args);
-          return stringifyToolResult(result);
+          return stringifyToolResult(result, input.logger, spec.name);
         },
         {
           name: spec.name,
@@ -314,16 +341,20 @@ function toLangGraphToolSpec(schema: Record<string, unknown>): LangGraphToolLike
   };
 }
 
-function stringifyToolResult(value: unknown): string {
+function stringifyToolResult(
+  value: unknown,
+  logger: Logger,
+  toolName: string,
+): string {
   if (typeof value === "string") {
     return value;
   }
 
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
+  return stringifyJsonWithFallback(value, logger, {
+    label: "LangGraph tool result",
+    toolName,
+    fallback: String(value),
+  });
 }
 
 function extractAssistantText(result: unknown): string | null {
@@ -388,35 +419,51 @@ function asMessageContent(value: unknown): string | null {
   return null;
 }
 
-let langGraphSdkPromise: Promise<LangGraphSdk> | null = null;
-
 async function loadLangGraphSdk(): Promise<LangGraphSdk> {
-  if (langGraphSdkPromise) {
-    return langGraphSdkPromise;
-  }
+  try {
+    const [{ createReactAgent }, { tool }] = await Promise.all([
+      import("@langchain/langgraph/prebuilt"),
+      import("@langchain/core/tools"),
+    ]);
 
-  langGraphSdkPromise = (async () => {
-    try {
-      const [{ createReactAgent }, { tool }] = await Promise.all([
-        import("@langchain/langgraph/prebuilt"),
-        import("@langchain/core/tools"),
-      ]);
-
-      if (typeof createReactAgent !== "function" || typeof tool !== "function") {
-        throw new UnsupportedFeatureError("LangGraph SDK exports are unavailable.");
-      }
-
-      return { createReactAgent, tool };
-    } catch (error) {
-      throw new UnsupportedFeatureError(
-        `LangGraphAdapter requires @langchain/langgraph and @langchain/core. Install them with "pnpm add @langchain/langgraph @langchain/core". (${asErrorMessage(error)})`,
-      );
+    if (typeof createReactAgent !== "function" || typeof tool !== "function") {
+      throw new UnsupportedFeatureError("LangGraph SDK exports are unavailable.");
     }
-  })();
 
-  langGraphSdkPromise.catch(() => {
-    langGraphSdkPromise = null;
-  });
+    return { createReactAgent, tool };
+  } catch (error) {
+    throw new UnsupportedFeatureError(
+      `LangGraphAdapter requires @langchain/langgraph and @langchain/core. Install them with "pnpm add @langchain/langgraph @langchain/core". (${asErrorMessage(error)})`,
+    );
+  }
+}
 
-  return langGraphSdkPromise;
+function stringifyJsonWithFallback(
+  value: unknown,
+  logger: Logger,
+  context: {
+    label: string;
+    eventType?: string;
+    toolName?: string;
+    fallback?: string;
+  },
+): string {
+  try {
+    return JSON.stringify(value);
+  } catch (error) {
+    logger.warn(`${context.label} serialization fell back to a safe value`, {
+      eventType: context.eventType,
+      toolName: context.toolName,
+      error,
+    });
+
+    if (context.fallback !== undefined) {
+      return context.fallback;
+    }
+
+    return JSON.stringify({
+      event: context.eventType ?? null,
+      serialization_error: asErrorMessage(error),
+    });
+  }
 }

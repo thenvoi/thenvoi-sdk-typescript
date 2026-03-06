@@ -1,12 +1,16 @@
 import type {
+  ContactRequestAction,
   ContactRecord,
   ContactRequestRecord,
+  ContactRequestsResult,
+  ListMemoriesArgs,
   MemoryRecord,
   MentionInput,
   MetadataMap,
   PaginatedList,
   ParticipantRecord,
   PeerRecord,
+  StoreMemoryArgs,
   ToolOperationResult,
   ToolSchemaRecord,
 } from "./dtos";
@@ -73,24 +77,24 @@ export interface ContactTools {
     page?: number,
     pageSize?: number,
     sentStatus?: string,
-  ): Promise<PaginatedList<ContactRequestRecord>>;
+  ): Promise<ContactRequestsResult>;
   respondContactRequest(
-    action: string,
+    action: ContactRequestAction,
     handle?: string,
     requestId?: string,
   ): Promise<ToolOperationResult>;
 }
 
 export interface MemoryTools {
-  listMemories(args?: MetadataMap): Promise<PaginatedList<MemoryRecord>>;
-  storeMemory(args: MetadataMap): Promise<ToolOperationResult>;
-  getMemory(memoryId: string): Promise<ToolOperationResult>;
+  listMemories(args?: ListMemoriesArgs): Promise<PaginatedList<MemoryRecord>>;
+  storeMemory(args: StoreMemoryArgs): Promise<MemoryRecord>;
+  getMemory(memoryId: string): Promise<MemoryRecord>;
   supersedeMemory(memoryId: string): Promise<ToolOperationResult>;
   archiveMemory(memoryId: string): Promise<ToolOperationResult>;
 }
 
 export interface ToolExecutor {
-  executeToolCall(toolName: string, arguments_: MetadataMap): Promise<unknown>;
+  executeToolCall(toolName: string, toolArgs: MetadataMap): Promise<unknown>;
 }
 
 export interface ParticipantTools extends RoomParticipantTools, PeerLookupTools {}
@@ -134,9 +138,11 @@ export interface FrameworkAdapterInput {
 
 export interface PreprocessorContext {
   roomId: string;
+  hasMessage(messageId: string): boolean;
   recordMessage(message: PlatformMessageLike): void;
   getTools(): AdapterToolsProtocol;
   getRawHistory(): MetadataMap[];
+  getHydratedHistory(excludeMessageId?: string): Promise<MetadataMap[]>;
   consumeParticipantsMessage(): string | null;
   consumeContactsMessage(): string | null;
   consumeBootstrap(): boolean;

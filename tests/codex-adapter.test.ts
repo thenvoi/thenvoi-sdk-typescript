@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { CodexAdapter } from "../src/adapters/codex/CodexAdapter";
 import { HistoryProvider } from "../src/runtime/types";
@@ -249,17 +249,28 @@ describe("CodexAdapter", () => {
       null,
       { isSessionBootstrap: false, roomId: "room-cmd" },
     );
+    await adapter.onMessage(
+      makeMessage("/reasoning nope"),
+      tools,
+      new HistoryProvider([]),
+      null,
+      null,
+      { isSessionBootstrap: false, roomId: "room-cmd" },
+    );
 
     expect(startCount).toBe(0);
     expect(tools.messages[0]).toContain("Codex status");
     expect(tools.messages[1]).toContain("Model override set to");
+    expect(tools.messages[2]).toContain("Invalid reasoning effort `nope`");
   });
 
   it("reuses in-flight thread initialization across concurrent room messages", async () => {
     let startCount = 0;
-    let releaseRuns: (() => void) | null = null;
+    let releaseRuns!: () => void;
     const runGate = new Promise<void>((resolve) => {
-      releaseRuns = resolve;
+      releaseRuns = () => {
+        resolve();
+      };
     });
 
     const thread = {
@@ -302,10 +313,43 @@ describe("CodexAdapter", () => {
       { isSessionBootstrap: false, roomId: "room-race" },
     );
 
-    releaseRuns?.();
+    releaseRuns();
     await Promise.all([first, second]);
 
     expect(startCount).toBe(1);
     expect(tools.messages).toEqual(["ok", "ok"]);
+  });
+
+  it("logs client initialization failures before surfacing them", async () => {
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const adapter = new CodexAdapter({
+      factory: async () => {
+        throw new Error("codex init failed");
+      },
+      logger,
+    });
+
+    await expect(
+      adapter.onMessage(
+        makeMessage("hello"),
+        new FakeTools(),
+        new HistoryProvider([]),
+        null,
+        null,
+        { isSessionBootstrap: false, roomId: "room-init" },
+      ),
+    ).rejects.toThrow("codex init failed");
+
+    expect(logger.error).toHaveBeenCalledWith(
+      "Codex client initialization failed",
+      expect.objectContaining({
+        error: expect.any(Error),
+      }),
+    );
   });
 });

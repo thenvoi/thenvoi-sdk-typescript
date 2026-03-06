@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   ClaudeSDKAdapter,
@@ -185,5 +185,50 @@ describe("ClaudeSDKAdapter", () => {
 
     expect(calls[0]?.options?.resume).toBe("session-from-history");
     expect(tools.events.some((event) => event.messageType === "task")).toBe(true);
+  });
+
+  it("logs session marker failures and continues responding", async () => {
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const queryFn: ClaudeSdkQuery = () =>
+      streamFrom([
+        {
+          type: "assistant",
+          session_id: "session-logger",
+          message: {
+            content: [{ type: "text", text: "still answered" }],
+          },
+        } as never,
+      ]) as never;
+
+    const adapter = new ClaudeSDKAdapter({
+      queryFn,
+      enableMcpTools: false,
+      logger,
+    });
+    await adapter.onStarted("Parity Agent", "Parity test agent");
+
+    const tools = new FakeTools({ failOn: ["sendEvent"] });
+    await adapter.onMessage(
+      makeMessage("hello", "room-log"),
+      tools,
+      new HistoryProvider([]),
+      null,
+      null,
+      { isSessionBootstrap: false, roomId: "room-log" },
+    );
+
+    expect(tools.messages).toEqual(["still answered"]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Claude SDK session marker event failed",
+      expect.objectContaining({
+        roomId: "room-log",
+        sessionId: "session-logger",
+      }),
+    );
   });
 });

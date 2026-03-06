@@ -1,10 +1,12 @@
-import { UnsupportedFeatureError } from "../../core/errors";
+import { UnsupportedFeatureError, ValidationError } from "../../core/errors";
 import type { AgentToolsRestApi } from "../../client/rest/types";
 import { DEFAULT_REQUEST_OPTIONS } from "../../client/rest/requestOptions";
 import { assertCapability } from "../capabilities";
 import type {
+  ContactRequestAction,
   ContactRecord,
-  ContactRequestRecord,
+  ContactRequestsResult,
+  ListMemoriesArgs,
   MemoryRecord,
   MentionInput,
   MentionReference,
@@ -12,6 +14,7 @@ import type {
   PaginatedList,
   ParticipantRecord,
   PeerRecord,
+  StoreMemoryArgs,
   ToolOperationResult,
   ToolSchemaRecord,
 } from "../../contracts/dtos";
@@ -148,7 +151,7 @@ export class AgentTools implements AgentToolsProtocol {
     );
 
     if (!participant?.id) {
-      throw new Error(`Participant '${name}' not found in room`);
+      throw new ValidationError(`Participant '${name}' not found in room`);
     }
 
     await this.rest.removeChatParticipant(this.roomId, String(participant.id), DEFAULT_REQUEST_OPTIONS);
@@ -233,12 +236,12 @@ export class AgentTools implements AgentToolsProtocol {
         ),
       thenvoi_respond_contact_request: () =>
         this.respondContactRequest(
-          String(arguments_.action ?? ""),
+          String(arguments_.action ?? "") as ContactRequestAction,
           arguments_.handle as string | undefined,
           arguments_.request_id as string | undefined,
         ),
-      thenvoi_list_memories: () => this.listMemories(arguments_),
-      thenvoi_store_memory: () => this.storeMemory(arguments_),
+      thenvoi_list_memories: () => this.listMemories(arguments_ as ListMemoriesArgs),
+      thenvoi_store_memory: () => this.storeMemory(arguments_ as StoreMemoryArgs),
       thenvoi_get_memory: () => this.getMemory(String(arguments_.memory_id ?? "")),
       thenvoi_supersede_memory: () => this.supersedeMemory(String(arguments_.memory_id ?? "")),
       thenvoi_archive_memory: () => this.archiveMemory(String(arguments_.memory_id ?? "")),
@@ -314,52 +317,160 @@ export class AgentTools implements AgentToolsProtocol {
     return this.getToolSchemas("openai", options);
   }
 
-  public async listContacts(_page = 1, _pageSize = 50): Promise<PaginatedList<ContactRecord>> {
-    this.throwUnsupportedContacts();
+  public async listContacts(page = 1, pageSize = 50): Promise<PaginatedList<ContactRecord>> {
+    assertCapability(this.capabilities, "contacts");
+    if (!this.rest.listContacts) {
+      throw new UnsupportedFeatureError("Contact listing is not available in current REST adapter");
+    }
+
+    return this.rest.listContacts(
+      {
+        page,
+        pageSize,
+      },
+      DEFAULT_REQUEST_OPTIONS,
+    );
   }
 
-  public async addContact(_handle: string, _message?: string): Promise<ToolOperationResult> {
-    this.throwUnsupportedContacts();
+  public async addContact(handle: string, message?: string): Promise<ToolOperationResult> {
+    assertCapability(this.capabilities, "contacts");
+    if (!this.rest.addContact) {
+      throw new UnsupportedFeatureError("Contact creation is not available in current REST adapter");
+    }
+
+    const normalizedHandle = handle.trim();
+    if (normalizedHandle.length === 0) {
+      throw new ValidationError("handle is required");
+    }
+
+    return this.rest.addContact(normalizedHandle, message, DEFAULT_REQUEST_OPTIONS);
   }
 
-  public async removeContact(_handle?: string, _contactId?: string): Promise<ToolOperationResult> {
-    this.throwUnsupportedContacts();
+  public async removeContact(handle?: string, contactId?: string): Promise<ToolOperationResult> {
+    assertCapability(this.capabilities, "contacts");
+    if (!this.rest.removeContact) {
+      throw new UnsupportedFeatureError("Contact removal is not available in current REST adapter");
+    }
+
+    const normalizedHandle = handle?.trim();
+    const normalizedContactId = contactId?.trim();
+    if (!normalizedHandle && !normalizedContactId) {
+      throw new ValidationError("Either handle or contactId must be provided");
+    }
+
+    return this.rest.removeContact(
+      {
+        handle: normalizedHandle,
+        contactId: normalizedContactId,
+      },
+      DEFAULT_REQUEST_OPTIONS,
+    );
   }
 
   public async listContactRequests(
-    _page = 1,
-    _pageSize = 50,
-    _sentStatus = "pending",
-  ): Promise<PaginatedList<ContactRequestRecord>> {
-    this.throwUnsupportedContacts();
+    page = 1,
+    pageSize = 50,
+    sentStatus = "pending",
+  ): Promise<ContactRequestsResult> {
+    assertCapability(this.capabilities, "contacts");
+    if (!this.rest.listContactRequests) {
+      throw new UnsupportedFeatureError("Contact request listing is not available in current REST adapter");
+    }
+
+    return this.rest.listContactRequests(
+      {
+        page,
+        pageSize,
+        sentStatus,
+      },
+      DEFAULT_REQUEST_OPTIONS,
+    );
   }
 
   public async respondContactRequest(
-    _action: string,
-    _handle?: string,
-    _requestId?: string,
+    action: ContactRequestAction,
+    handle?: string,
+    requestId?: string,
   ): Promise<ToolOperationResult> {
-    this.throwUnsupportedContacts();
+    assertCapability(this.capabilities, "contacts");
+    if (!this.rest.respondContactRequest) {
+      throw new UnsupportedFeatureError("Contact request responses are not available in current REST adapter");
+    }
+
+    const normalizedHandle = handle?.trim();
+    const normalizedRequestId = requestId?.trim();
+    if (!normalizedHandle && !normalizedRequestId) {
+      throw new ValidationError("Either handle or requestId must be provided");
+    }
+
+    return this.rest.respondContactRequest(
+      {
+        action,
+        handle: normalizedHandle,
+        requestId: normalizedRequestId,
+      },
+      DEFAULT_REQUEST_OPTIONS,
+    );
   }
 
-  public async listMemories(_args: MetadataMap = {}): Promise<PaginatedList<MemoryRecord>> {
-    this.throwUnsupportedMemory();
+  public async listMemories(args: ListMemoriesArgs = {}): Promise<PaginatedList<MemoryRecord>> {
+    assertCapability(this.capabilities, "memory");
+    if (!this.rest.listMemories) {
+      throw new UnsupportedFeatureError("Memory listing is not available in current REST adapter");
+    }
+
+    return this.rest.listMemories(args, DEFAULT_REQUEST_OPTIONS);
   }
 
-  public async storeMemory(_args: MetadataMap): Promise<ToolOperationResult> {
-    this.throwUnsupportedMemory();
+  public async storeMemory(args: StoreMemoryArgs): Promise<MemoryRecord> {
+    assertCapability(this.capabilities, "memory");
+    if (!this.rest.storeMemory) {
+      throw new UnsupportedFeatureError("Memory creation is not available in current REST adapter");
+    }
+
+    return this.rest.storeMemory(args, DEFAULT_REQUEST_OPTIONS);
   }
 
-  public async getMemory(_memoryId: string): Promise<ToolOperationResult> {
-    this.throwUnsupportedMemory();
+  public async getMemory(memoryId: string): Promise<MemoryRecord> {
+    assertCapability(this.capabilities, "memory");
+    if (!this.rest.getMemory) {
+      throw new UnsupportedFeatureError("Memory lookup is not available in current REST adapter");
+    }
+
+    const normalizedMemoryId = memoryId.trim();
+    if (normalizedMemoryId.length === 0) {
+      throw new ValidationError("memoryId is required");
+    }
+
+    return this.rest.getMemory(normalizedMemoryId, DEFAULT_REQUEST_OPTIONS);
   }
 
-  public async supersedeMemory(_memoryId: string): Promise<ToolOperationResult> {
-    this.throwUnsupportedMemory();
+  public async supersedeMemory(memoryId: string): Promise<ToolOperationResult> {
+    assertCapability(this.capabilities, "memory");
+    if (!this.rest.supersedeMemory) {
+      throw new UnsupportedFeatureError("Memory supersede is not available in current REST adapter");
+    }
+
+    const normalizedMemoryId = memoryId.trim();
+    if (normalizedMemoryId.length === 0) {
+      throw new ValidationError("memoryId is required");
+    }
+
+    return this.rest.supersedeMemory(normalizedMemoryId, DEFAULT_REQUEST_OPTIONS);
   }
 
-  public async archiveMemory(_memoryId: string): Promise<ToolOperationResult> {
-    this.throwUnsupportedMemory();
+  public async archiveMemory(memoryId: string): Promise<ToolOperationResult> {
+    assertCapability(this.capabilities, "memory");
+    if (!this.rest.archiveMemory) {
+      throw new UnsupportedFeatureError("Memory archive is not available in current REST adapter");
+    }
+
+    const normalizedMemoryId = memoryId.trim();
+    if (normalizedMemoryId.length === 0) {
+      throw new ValidationError("memoryId is required");
+    }
+
+    return this.rest.archiveMemory(normalizedMemoryId, DEFAULT_REQUEST_OPTIONS);
   }
 
   private resolveMentions(
@@ -375,6 +486,7 @@ export class AgentTools implements AgentToolsProtocol {
 
     const participantsByHandle = new Map<string, MentionReference>();
     const participantsById = new Map<string, MentionReference>();
+    const participantsByName = new Map<string, MentionReference>();
     for (const participant of this.participants) {
       const ref: MentionReference = {
         id: String(participant.id),
@@ -385,10 +497,14 @@ export class AgentTools implements AgentToolsProtocol {
       if (typeof handle === "string") {
         participantsByHandle.set(this.normalizeMentionHandle(handle), ref);
       }
+      const name = participant.name;
+      if (typeof name === "string" && name.trim().length > 0) {
+        participantsByName.set(name.trim().toLowerCase(), ref);
+      }
     }
 
     return (mentions as string[]).map((mention) => {
-      // Try by ID first (UUID strings), then by handle
+      // Try by ID first (UUID strings), then by handle, then by display name.
       const byId = participantsById.get(mention);
       if (byId) {
         return byId;
@@ -396,11 +512,16 @@ export class AgentTools implements AgentToolsProtocol {
 
       const normalized = this.normalizeMentionHandle(mention);
       const found = participantsByHandle.get(normalized);
-      if (!found) {
-        throw new Error(`Mention '${mention}' not found in participants`);
+      if (found) {
+        return found;
       }
 
-      return found;
+      const byName = participantsByName.get(mention.trim().toLowerCase());
+      if (byName) {
+        return byName;
+      }
+
+      throw new ValidationError(`Mention '${mention}' not found in participants`);
     });
   }
 
@@ -436,20 +557,6 @@ export class AgentTools implements AgentToolsProtocol {
 
   private replaceParticipants(participants: ParticipantRecord[]): void {
     this.participants.splice(0, this.participants.length, ...participants);
-  }
-
-  private throwUnsupportedContacts(): never {
-    assertCapability(this.capabilities, "contacts");
-    throw new UnsupportedFeatureError(
-      "Contact endpoints are not yet available in this SDK version",
-    );
-  }
-
-  private throwUnsupportedMemory(): never {
-    assertCapability(this.capabilities, "memory");
-    throw new UnsupportedFeatureError(
-      "Memory endpoints are not yet available in this SDK version",
-    );
   }
 
   private buildAdapterTools(): AdapterToolsProtocol {

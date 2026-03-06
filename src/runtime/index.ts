@@ -23,6 +23,7 @@ export { AgentRuntime } from "./AgentRuntime";
 export { Execution } from "./Execution";
 export { ExecutionContext } from "./ExecutionContext";
 export { PlatformRuntime } from "./PlatformRuntime";
+export { RoomPresence } from "./RoomPresence";
 
 export { AgentTools } from "./tools/AgentTools";
 export {

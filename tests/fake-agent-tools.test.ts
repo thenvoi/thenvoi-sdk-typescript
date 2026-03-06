@@ -55,16 +55,30 @@ describe("FakeAgentTools", () => {
     expect(await tools.listContacts()).toEqual({ data: [] });
     expect(await tools.addContact("alice")).toEqual({ status: "ok" });
     expect(await tools.removeContact("alice")).toEqual({ status: "ok" });
-    expect(await tools.listContactRequests()).toEqual({ data: [] });
-    expect(await tools.respondContactRequest("accept")).toEqual({ status: "ok" });
+    expect(await tools.listContactRequests()).toEqual({ received: [], sent: [] });
+    expect(await tools.respondContactRequest("approve")).toEqual({ status: "ok" });
   });
 
   it("returns empty lists for memory stubs", async () => {
     const tools = new FakeAgentTools();
 
     expect(await tools.listMemories()).toEqual({ data: [] });
-    expect(await tools.storeMemory({ content: "test" })).toEqual({ status: "ok" });
-    expect(await tools.getMemory("mem-1")).toEqual({ status: "ok" });
+    expect(await tools.storeMemory({
+      content: "test",
+      system: "working",
+      type: "semantic",
+      segment: "user",
+      thought: "remember this",
+    })).toEqual({
+      id: "mem-0",
+      content: "test",
+      system: "working",
+      type: "semantic",
+      segment: "user",
+      thought: "remember this",
+      status: "active",
+    });
+    expect(await tools.getMemory("mem-1")).toEqual({ id: "mem-1", status: "active" });
     expect(await tools.supersedeMemory("mem-1")).toEqual({ status: "ok" });
     expect(await tools.archiveMemory("mem-1")).toEqual({ status: "ok" });
   });

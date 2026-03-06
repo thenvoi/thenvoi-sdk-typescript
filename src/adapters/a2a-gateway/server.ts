@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { Server as HttpServer } from "node:http";
 
 import type {
@@ -28,6 +28,18 @@ type ExpressFactory =
   & {
     json: (options?: Record<string, unknown>) => unknown;
   };
+
+interface ExpressRequestLike {
+  headers?: Record<string, string | string[] | undefined>;
+}
+
+interface ExpressResponseLike {
+  setHeader: (name: string, value: string) => void;
+  status: (code: number) => ExpressResponseLike;
+  json: (body: unknown) => void;
+}
+
+type ExpressNext = () => void;
 
 interface RuntimeA2AServerModules {
   AGENT_CARD_PATH: string;
@@ -108,7 +120,10 @@ class GatewayPeerExecutor {
           contextId,
           state: "failed",
           final: true,
-          text: error instanceof Error ? error.message : String(error),
+          text: "Peer request failed.",
+          metadata: {
+            error_type: error instanceof Error ? error.name : "UnknownError",
+          },
         }),
       );
     } finally {
@@ -156,9 +171,15 @@ export class GatewayServer implements GatewayServerLike {
       return;
     }
 
-    const modules = await loadA2AServerModules();
+    assertGatewayAuthPolicy(this.options.host, this.options.authToken);
+
+    const modulesLoader = this.options.loadModules as (() => Promise<RuntimeA2AServerModules>) | undefined;
+    const modules = await (modulesLoader ? modulesLoader() : loadA2AServerModules());
     const app = modules.createExpressApp();
+    const gatewayAuthMiddleware = createGatewayAuthMiddleware(this.options.authToken);
+    app.use(createSecurityHeadersMiddleware());
     app.use(modules.createExpressApp.json({ limit: "1mb" }));
+    app.use("/peers", gatewayAuthMiddleware);
 
     app.get("/peers", (_request: unknown, response: { json: (body: unknown) => void }) => {
       const peers = [...this.options.peersBySlug.values()].map((peer) => ({
@@ -204,6 +225,7 @@ export class GatewayServer implements GatewayServerLike {
 
       app.use(
         `${peerBasePath}/v1`,
+        gatewayAuthMiddleware,
         modules.restHandler({
           requestHandler,
           userBuilder,
@@ -212,6 +234,7 @@ export class GatewayServer implements GatewayServerLike {
 
       app.use(
         peerBasePath,
+        gatewayAuthMiddleware,
         modules.jsonRpcHandler({
           requestHandler,
           userBuilder,
@@ -395,7 +418,107 @@ function listen(
   host: string,
 ): Promise<HttpServer> {
   return new Promise<HttpServer>((resolve, reject) => {
-    const server = app.listen(port, host, () => resolve(server));
+    let server: HttpServer | null = null;
+    const onListening = () => {
+      if (server) {
+        resolve(server);
+        return;
+      }
+
+      queueMicrotask(() => {
+        if (server) {
+          resolve(server);
+          return;
+        }
+
+        reject(new Error("Gateway server did not return an HTTP server instance."));
+      });
+    };
+
+    server = app.listen(port, host, onListening);
     server.once("error", reject);
   });
+}
+
+function assertGatewayAuthPolicy(host: string, authToken?: string): void {
+  if (authToken || isLoopbackHost(host)) {
+    return;
+  }
+
+  throw new Error(
+    "A2A gateway authToken is required when binding to a non-loopback host.",
+  );
+}
+
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  return normalized === "127.0.0.1"
+    || normalized === "::1"
+    || normalized === "localhost";
+}
+
+function createSecurityHeadersMiddleware(): (
+  _request: ExpressRequestLike,
+  response: ExpressResponseLike,
+  next: ExpressNext,
+) => void {
+  return (_request, response, next) => {
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("Referrer-Policy", "no-referrer");
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("X-Frame-Options", "DENY");
+    next();
+  };
+}
+
+function createGatewayAuthMiddleware(
+  authToken?: string,
+): (
+  request: ExpressRequestLike,
+  response: ExpressResponseLike,
+  next: ExpressNext,
+) => void {
+  if (!authToken) {
+    return (_request, _response, next) => {
+      next();
+    };
+  }
+
+  return (request, response, next) => {
+    const authorization = getAuthorizationHeader(request.headers);
+    const expected = `Bearer ${authToken}`;
+    if (authorization && safeHeaderEquals(authorization, expected)) {
+      next();
+      return;
+    }
+
+    response.status(401).json({
+      error: "Unauthorized",
+    });
+  };
+}
+
+function getAuthorizationHeader(
+  headers: ExpressRequestLike["headers"],
+): string | null {
+  if (!headers) {
+    return null;
+  }
+
+  const value = headers.authorization ?? headers.Authorization;
+  if (Array.isArray(value)) {
+    return value[0] ?? null;
+  }
+
+  return typeof value === "string" ? value : null;
+}
+
+function safeHeaderEquals(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  if (leftBuffer.length !== rightBuffer.length) {
+    return false;
+  }
+
+  return timingSafeEqual(leftBuffer, rightBuffer);
 }

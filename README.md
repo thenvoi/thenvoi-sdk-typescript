@@ -19,13 +19,13 @@ Connect your AI agents to the Thenvoi collaborative platform.
 ## Quick Start
 
 ```ts
-import { Agent, GenericAdapter, loadAgentConfig } from "@thenvoi/sdk";
+import { Agent, GenericAdapter, loadAgentConfigFromEnv } from "@thenvoi/sdk";
 
 const agent = Agent.create({
   adapter: new GenericAdapter(async ({ message, tools }) => {
     await tools.sendMessage(`Echo: ${message.content}`);
   }),
-  ...loadAgentConfig("my_agent"),
+  config: loadAgentConfigFromEnv(),
 });
 
 await agent.run(); // graceful shutdown on SIGINT/SIGTERM
@@ -48,6 +48,19 @@ await agent.run(); // graceful shutdown on SIGINT/SIGTERM
 pnpm add @thenvoi/sdk
 ```
 
+Install the SDK for the adapter you want to use:
+
+```bash
+pnpm add openai
+pnpm add @anthropic-ai/sdk
+pnpm add @google/genai
+pnpm add @anthropic-ai/claude-agent-sdk
+pnpm add @openai/codex-sdk
+pnpm add @langchain/langgraph @langchain/core
+pnpm add @a2a-js/sdk express
+pnpm add parlant-client
+```
+
 ### Option 2: Run Examples from Repository
 
 ```bash
@@ -57,6 +70,17 @@ pnpm install
 
 # Configure credentials
 cp agent_config.yaml.example agent_config.yaml  # Edit with your agent credentials
+```
+
+### Advanced Imports
+
+The root package intentionally focuses on the main runtime and adapter API. Lower-level helpers live under subpaths:
+
+```ts
+import { AgentRestAdapter, RestFacade } from "@thenvoi/sdk/rest";
+import { createLinearTools } from "@thenvoi/sdk/linear";
+import { FakeAgentTools } from "@thenvoi/sdk/testing";
+import { GeminiToolCallingModel } from "@thenvoi/sdk/adapters";
 ```
 
 ---
@@ -78,7 +102,25 @@ Before running your agent, create an external agent on the Thenvoi platform to g
 6. **Copy the API Key** that is displayed - you'll only see this once
 7. Navigate to the agent details page to find the **Agent UUID** - this is your `agent_id`
 
-### 2. Update agent_config.yaml
+### 2. Configure Credentials
+
+For production Node integrations, environment variables are usually the cleanest path:
+
+```bash
+export THENVOI_AGENT_ID="paste-your-agent-uuid-here"
+export THENVOI_API_KEY="paste-your-api-key-here"
+```
+
+```ts
+import { loadAgentConfigFromEnv } from "@thenvoi/sdk";
+
+const config = loadAgentConfigFromEnv();
+// { agentId: "...", apiKey: "..." }
+```
+
+For repo-local examples or multi-agent setups, use `agent_config.yaml`:
+
+### 3. Update agent_config.yaml
 
 Add the credentials to your `agent_config.yaml` file:
 
@@ -120,7 +162,7 @@ const agent = Agent.create({
   adapter: new GenericAdapter(async ({ message, tools }) => {
     await tools.sendMessage(`You said: ${message.content}`);
   }),
-  ...loadAgentConfig("my_agent"),
+  config: loadAgentConfig("my_agent"),
 });
 
 await agent.run();
@@ -136,7 +178,7 @@ const agent = Agent.create({
     openAIModel: "gpt-5.2",
     apiKey: process.env.OPENAI_API_KEY,
   }),
-  ...loadAgentConfig("my_agent"),
+  config: loadAgentConfig("my_agent"),
 });
 
 await agent.run();
@@ -152,7 +194,7 @@ const agent = Agent.create({
     anthropicModel: "claude-sonnet-4-6",
     apiKey: process.env.ANTHROPIC_API_KEY,
   }),
-  ...loadAgentConfig("my_agent"),
+  config: loadAgentConfig("my_agent"),
 });
 
 await agent.run();
@@ -168,7 +210,7 @@ const agent = Agent.create({
     geminiModel: "gemini-3-flash-preview",
     apiKey: process.env.GEMINI_API_KEY,
   }),
-  ...loadAgentConfig("my_agent"),
+  config: loadAgentConfig("my_agent"),
 });
 
 await agent.run();
@@ -185,7 +227,7 @@ const agent = Agent.create({
     permissionMode: "acceptEdits",
     enableMcpTools: true,
   }),
-  ...loadAgentConfig("my_agent"),
+  config: loadAgentConfig("my_agent"),
 });
 
 await agent.run();
@@ -205,7 +247,7 @@ const agent = Agent.create({
       enableExecutionReporting: true,
     },
   }),
-  ...loadAgentConfig("my_agent"),
+  config: loadAgentConfig("my_agent"),
 });
 
 await agent.run();
@@ -222,7 +264,7 @@ const agent = Agent.create({
     customSection: "Use Thenvoi tools for side effects and final replies.",
     emitExecutionEvents: true,
   }),
-  ...loadAgentConfig("my_agent"),
+  config: loadAgentConfig("my_agent"),
 });
 
 await agent.run();
@@ -240,7 +282,7 @@ const agent = Agent.create({
     remoteUrl: "http://localhost:10000",
     streaming: true,
   }),
-  ...loadAgentConfig("my_agent"),
+  config: loadAgentConfig("my_agent"),
 });
 
 await agent.run();
@@ -263,7 +305,7 @@ class MyAdapter extends SimpleAdapter<HistoryProvider> {
 
 const agent = Agent.create({
   adapter: new MyAdapter(),
-  ...loadAgentConfig("my_agent"),
+  config: loadAgentConfig("my_agent"),
 });
 
 await agent.run();
@@ -277,7 +319,7 @@ Each example lives in its own folder so you can copy it out and iterate independ
 
 | Folder | Framework | Description |
 |--------|-----------|-------------|
-| `examples/basic/` | Generic | Minimal echo agent |
+| `examples/basic/` | Generic | Simple echo agent |
 | `examples/openai/` | OpenAI | GPT-5.2 with tool calling |
 | `examples/anthropic/` | Anthropic | Claude 4.6 Sonnet with tool calling |
 | `examples/gemini/` | Gemini | Gemini 3 Flash |
@@ -309,7 +351,28 @@ npx tsx examples/anthropic/anthropic-agent.ts
 
 ### Config Loader
 
-Load agent credentials from `agent_config.yaml` with keyed entries:
+Load agent credentials from environment variables:
+
+```bash
+export THENVOI_AGENT_ID="your-uuid"
+export THENVOI_API_KEY="your-key"
+```
+
+```ts
+import { loadAgentConfigFromEnv } from "@thenvoi/sdk";
+
+const config = loadAgentConfigFromEnv();
+// Returns { agentId, apiKey } - ready for Agent.create({ config })
+```
+
+You can also use a custom prefix for multi-agent apps:
+
+```ts
+const planner = loadAgentConfigFromEnv({ prefix: "PLANNER" });
+const implementer = loadAgentConfigFromEnv({ prefix: "IMPLEMENTER" });
+```
+
+Or load from `agent_config.yaml` with keyed entries:
 
 ```yaml
 # agent_config.yaml
@@ -320,7 +383,7 @@ my_agent:
 
 ```ts
 const config = loadAgentConfig("my_agent");
-// Returns { agentId, apiKey } - ready to spread into Agent.create()
+// Returns { agentId, apiKey } - ready for Agent.create({ config })
 ```
 
 ### Graceful Shutdown
@@ -334,7 +397,7 @@ await agent.run({ signals: false });   // no signal handling (tests, custom setu
 
 ### Credential Validation
 
-Empty or missing `agentId`/`apiKey` throws `ValidationError` immediately at construction time, not on first network call. The error message points to `loadAgentConfig()`:
+Empty or missing `agentId`/`apiKey` throws `ValidationError` immediately at construction time, not on first network call. The error message points to `loadAgentConfig()` and `loadAgentConfigFromEnv()`:
 
 ```ts
 Agent.create({ adapter, agentId: "", apiKey: "" });
@@ -370,7 +433,7 @@ All adapters automatically have access to:
 ## Architecture
 
 ```
-Agent.create(adapter, ...)
+Agent.create({ adapter, config })
     |
     +-- Adapter (your LLM framework)
     |   onStarted() -> onEvent() -> onCleanup()

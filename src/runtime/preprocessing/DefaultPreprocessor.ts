@@ -41,12 +41,16 @@ export class DefaultPreprocessor implements Preprocessor<PlatformEvent> {
       return null;
     }
 
-    context.recordMessage(message);
+    if (context.hasMessage(message.id)) {
+      return null;
+    }
 
     const isSessionBootstrap = !context.isLlmInitialized;
     if (isSessionBootstrap) {
       context.markLlmInitialized();
     }
+
+    context.recordMessage(message);
 
     // Drain system messages; fall back to legacy contactsMessage for backward compat
     const systemMessages = context.consumeSystemMessages();
@@ -57,10 +61,14 @@ export class DefaultPreprocessor implements Preprocessor<PlatformEvent> {
       contactsMessage = context.consumeContactsMessage();
     }
 
+    const history = isSessionBootstrap
+      ? await context.getHydratedHistory(message.id)
+      : context.getRawHistory();
+
     return {
       message,
       tools: context.getTools(),
-      history: new HistoryProvider(context.getRawHistory()),
+      history: new HistoryProvider(history),
       participantsMessage: context.consumeParticipantsMessage(),
       contactsMessage,
       isSessionBootstrap,

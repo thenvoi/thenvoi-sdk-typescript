@@ -29,8 +29,10 @@ export function createA2ABridgeAgentWithAuth(options?: {
 
   return Agent.create({
     adapter,
-    agentId: overrides?.agentId ?? "agent-a2a-auth",
-    apiKey: overrides?.apiKey ?? "api-key",
+    config: {
+      agentId: overrides?.agentId ?? "agent-a2a-auth",
+      apiKey: overrides?.apiKey ?? "api-key",
+    },
   });
 }
 

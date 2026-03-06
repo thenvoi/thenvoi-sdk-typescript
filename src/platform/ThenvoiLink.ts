@@ -3,9 +3,10 @@ import type { Logger } from "../core/logger";
 import { NoopLogger } from "../core/logger";
 import { RestFacade, type RestFacadeOptions } from "../client/rest/RestFacade";
 import { AgentRestAdapter } from "../client/rest/AgentRestAdapter";
-import type { ThenvoiLinkRestApi } from "../client/rest/types";
+import type { PlatformChatMessage, ThenvoiLinkRestApi } from "../client/rest/types";
 import type { PlatformEvent } from "./events";
 import { assertCapability } from "../runtime/capabilities";
+import type { PlatformMessage } from "../runtime/types";
 import {
   type SupportedSocketEvent,
   payloadSchemas,
@@ -39,6 +40,20 @@ function deriveDefaultRestUrl(wsUrl: string): string {
 interface PendingWaiter {
   resolve: (event: PlatformEvent | null) => void;
   cleanup: () => void;
+}
+
+function toPlatformMessage(roomId: string, message: PlatformChatMessage): PlatformMessage {
+  return {
+    id: message.id,
+    roomId,
+    content: message.content,
+    senderId: message.sender_id,
+    senderType: message.sender_type,
+    senderName: message.sender_name ?? null,
+    messageType: message.message_type,
+    metadata: (message.metadata ?? {}) as Record<string, unknown>,
+    createdAt: new Date(message.inserted_at),
+  };
 }
 
 export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
@@ -232,7 +247,7 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
     try {
       await this.rest.markMessageProcessing(roomId, messageId);
     } catch (error: unknown) {
-      this.logger.debug("markProcessing failed (best-effort)", { roomId, messageId, error });
+      this.logger.warn("markProcessing failed (best-effort)", { roomId, messageId, error });
     }
   }
 
@@ -240,7 +255,7 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
     try {
       await this.rest.markMessageProcessed(roomId, messageId);
     } catch (error: unknown) {
-      this.logger.debug("markProcessed failed (best-effort)", { roomId, messageId, error });
+      this.logger.warn("markProcessed failed (best-effort)", { roomId, messageId, error });
     }
   }
 
@@ -248,7 +263,17 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
     try {
       await this.rest.markMessageFailed(roomId, messageId, error.trim() || "Unknown error");
     } catch (err: unknown) {
-      this.logger.debug("markFailed failed (best-effort)", { roomId, messageId, error: err });
+      this.logger.warn("markFailed failed (best-effort)", { roomId, messageId, error: err });
+    }
+  }
+
+  public async getNextMessage(roomId: string): Promise<PlatformMessage | null> {
+    try {
+      const message = await this.rest.getNextMessage({ chatId: roomId });
+      return message ? toPlatformMessage(roomId, message) : null;
+    } catch (error: unknown) {
+      this.logger.warn("getNextMessage failed (best-effort)", { roomId, error });
+      return null;
     }
   }
 

@@ -1,8 +1,11 @@
 import { SimpleAdapter } from "../../core/simpleAdapter";
 import type { MessagingTools } from "../../contracts/protocols";
+import type { Logger } from "../../core/logger";
+import { NoopLogger } from "../../core/logger";
 import type { PlatformMessage } from "../../runtime/types";
 import { renderSystemPrompt } from "../../runtime/prompts";
 import { asErrorMessage, asNonEmptyString, asRecord } from "../shared/coercion";
+import { LazyAsyncValue } from "../shared/lazyAsyncValue";
 import {
   ParlantHistoryConverter,
   type ParlantMessage,
@@ -74,6 +77,7 @@ export interface ParlantAdapterOptions {
   maxHistoryMessages?: number;
   historyConverter?: ParlantHistoryConverter;
   clientFactory?: ParlantClientFactory;
+  logger?: Logger;
 }
 
 export type ParlantClientFactory = () => Promise<ParlantClientLike>;
@@ -95,9 +99,9 @@ export class ParlantAdapter
   private readonly responseTimeoutSeconds: number;
   private readonly maxHistoryMessages: number;
   private readonly clientFactory?: ParlantClientFactory;
+  private readonly logger: Logger;
 
-  private client: ParlantClientLike | null = null;
-  private clientInitPromise: Promise<ParlantClientLike> | null = null;
+  private readonly clientLoader: LazyAsyncValue<ParlantClientLike>;
   private lastInitFailure = 0;
   private systemPrompt = "";
   private readonly roomSessions = new Map<string, string>();
@@ -124,6 +128,16 @@ export class ParlantAdapter
     this.maxHistoryMessages =
       options.maxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES;
     this.clientFactory = options.clientFactory;
+    this.logger = options.logger ?? new NoopLogger();
+    this.clientLoader = new LazyAsyncValue({
+      load: async () => this.createClient(),
+      onRejected: (error) => {
+        this.lastInitFailure = Date.now();
+        this.logger.error("Parlant client initialization failed", {
+          error,
+        });
+      },
+    });
   }
 
   public async onStarted(
@@ -150,11 +164,10 @@ export class ParlantAdapter
     contactsMessage: string | null,
     context: { isSessionBootstrap: boolean; roomId: string },
   ): Promise<void> {
-    const client = await this.ensureClient();
-
     const senderName = message.senderName ?? message.senderId ?? "User";
 
     try {
+      const client = await this.ensureClient();
       const sessionId = await this.getOrCreateSession(
         client,
         context.roomId,
@@ -206,6 +219,11 @@ export class ParlantAdapter
 
       await tools.sendMessage(reply, [{ id: message.senderId }]);
     } catch (error) {
+      this.logger.error("Parlant adapter request failed", {
+        roomId: context.roomId,
+        agentId: this.agentId,
+        error,
+      });
       await tools.sendEvent(
         `Parlant adapter error: ${asErrorMessage(error)}`,
         "error",
@@ -354,6 +372,7 @@ export class ParlantAdapter
     const completeHistory = selectCompleteExchanges(history).slice(
       -this.maxHistoryMessages,
     );
+    let failedEvents = 0;
 
     for (const item of completeHistory) {
       try {
@@ -389,11 +408,23 @@ export class ParlantAdapter
               historical: true,
             },
           },
-          this.requestOptions(),
-        );
-      } catch {
-        // Best-effort history injection — continue even if one event fails.
+            this.requestOptions(),
+          );
+      } catch (error) {
+        failedEvents += 1;
+        this.logger.warn("Parlant history injection failed", {
+          sessionId,
+          roomRole: item.role,
+          error,
+        });
       }
+    }
+
+    if (failedEvents > 0) {
+      this.logger.warn("Parlant history injection completed with skipped events", {
+        sessionId,
+        failedEvents,
+      });
     }
   }
 
@@ -470,30 +501,19 @@ export class ParlantAdapter
   }
 
   private async ensureClient(): Promise<ParlantClientLike> {
-    if (this.client) {
-      return this.client;
+    if (this.clientLoader.current) {
+      return this.clientLoader.get();
     }
-    if (!this.clientInitPromise) {
-      const cooldownMs = 2_000;
-      const elapsed = Date.now() - this.lastInitFailure;
-      if (this.lastInitFailure > 0 && elapsed < cooldownMs) {
-        throw new Error(
-          `Parlant client init failed recently (${elapsed}ms ago). Retrying after ${cooldownMs}ms cooldown.`,
-        );
-      }
 
-      this.clientInitPromise = this.createClient()
-        .then((client) => {
-          this.client = client;
-          return client;
-        })
-        .catch((error: unknown) => {
-          this.clientInitPromise = null;
-          this.lastInitFailure = Date.now();
-          throw error;
-        });
+    const cooldownMs = 2_000;
+    const elapsed = Date.now() - this.lastInitFailure;
+    if (this.lastInitFailure > 0 && elapsed < cooldownMs) {
+      throw new Error(
+        `Parlant client init failed recently (${elapsed}ms ago). Retrying after ${cooldownMs}ms cooldown.`,
+      );
     }
-    return this.clientInitPromise;
+
+    return this.clientLoader.get();
   }
 
   private async createClient(): Promise<ParlantClientLike> {

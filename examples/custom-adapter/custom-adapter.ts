@@ -15,8 +15,10 @@ export function createCustomAdapterAgent(overrides?: {
 }): Agent {
   return Agent.create({
     adapter: new EchoAdapter(),
-    agentId: overrides?.agentId ?? "agent-1",
-    apiKey: overrides?.apiKey ?? "api-key",
+    config: {
+      agentId: overrides?.agentId ?? "agent-1",
+      apiKey: overrides?.apiKey ?? "api-key",
+    },
   });
 }
 

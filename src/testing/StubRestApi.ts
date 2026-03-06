@@ -58,4 +58,8 @@ export class StubRestApi implements RestApi {
       metadata: { page: 1, pageSize: 100, totalCount: 0, totalPages: 1 },
     };
   }
+
+  public async getNextMessage() {
+    return null;
+  }
 }

@@ -1,4 +1,4 @@
-import type { PaginatedResponse, RestApi } from "../../src/index";
+import type { PaginatedResponse, RestApi } from "../../src/rest";
 import type { ChatParticipant } from "../../src/client/rest/types";
 
 interface ExamplePeer {

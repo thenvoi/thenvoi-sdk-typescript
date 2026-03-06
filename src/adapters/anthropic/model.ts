@@ -5,6 +5,7 @@ import type {
   ToolCallingResponse,
 } from "../tool-calling";
 import { toDisplayText, toWireString } from "../shared/coercion";
+import { LazyAsyncValue } from "../shared/lazyAsyncValue";
 import {
   ensureToolCalls,
   mapConversationMessages,
@@ -36,14 +37,19 @@ export class AnthropicToolCallingModel implements ToolCallingModel {
   private readonly apiKey?: string;
   private readonly maxTokens: number;
   private readonly clientFactory?: AnthropicClientFactory;
-  private client: AnthropicClientLike | null = null;
-  private clientInitPromise: Promise<AnthropicClientLike> | null = null;
+  private readonly clientLoader: LazyAsyncValue<AnthropicClientLike>;
 
   public constructor(options: AnthropicToolCallingModelOptions) {
     this.model = options.model;
     this.apiKey = options.apiKey;
     this.maxTokens = options.maxTokens ?? 4096;
     this.clientFactory = options.clientFactory;
+    this.clientLoader = new LazyAsyncValue({
+      load: async () => {
+        const factory = this.clientFactory ?? (await loadAnthropicClientFactory());
+        return factory({ apiKey: this.apiKey });
+      },
+    });
   }
 
   public async complete(request: ToolCallingModelRequest): Promise<ToolCallingResponse> {
@@ -62,24 +68,7 @@ export class AnthropicToolCallingModel implements ToolCallingModel {
   }
 
   private async getClient(): Promise<AnthropicClientLike> {
-    if (this.client) {
-      return this.client;
-    }
-
-    if (!this.clientInitPromise) {
-      this.clientInitPromise = (async () => {
-        const factory = this.clientFactory ?? (await loadAnthropicClientFactory());
-        const client = await factory({ apiKey: this.apiKey });
-        this.client = client;
-        return client;
-      })();
-
-      this.clientInitPromise.catch(() => {
-        this.clientInitPromise = null;
-      });
-    }
-
-    return this.clientInitPromise;
+    return this.clientLoader.get();
   }
 }
 

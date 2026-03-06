@@ -252,8 +252,12 @@ export class PlatformRuntime {
         return `[System]: Contact added: ${event.payload.name} (${event.payload.handle}).`;
       case "contact_removed":
         return `[System]: Contact removed: ${event.payload.id}.`;
-      default:
-        return "[System]: Contact event received.";
     }
+
+    return assertNever(event);
   }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled contact event: ${JSON.stringify(value)}`);
 }

@@ -110,7 +110,7 @@ Overall score = **40% mechanical** + **60% subjective**.
 
 When desloppify itself appears wrong or inconsistent:
 
-1. Capture a minimal repro (`command`, `path`, `expected`, `actual`).
+1. Capture a small repro (`command`, `path`, `expected`, `actual`).
 2. Open a GitHub issue in `peteromallet/desloppify`.
 3. If you can fix it safely, open a PR linked to that issue.
 4. If unsure whether it is tool bug vs user workflow, issue first, PR second.

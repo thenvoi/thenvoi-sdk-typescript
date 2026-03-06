@@ -3,10 +3,10 @@ import { LinearClient } from "@linear/sdk";
 import {
   Agent,
   GenericAdapter,
-  postFinalResponseToLinearSession,
   loadAgentConfig,
   isDirectExecution,
 } from "../../src/index";
+import { postFinalResponseToLinearSession } from "../../src/linear";
 
 interface LinearContextMetadata {
   sessionId: string;
@@ -92,8 +92,10 @@ export function createLinearThenvoiOrchestratorAgent(
 
   return Agent.create({
     adapter,
-    agentId: options?.agentId ?? "agent-linear-thenvoi-orchestrator",
-    apiKey: options?.apiKey ?? "api-key",
+    config: {
+      agentId: options?.agentId ?? "agent-linear-thenvoi-orchestrator",
+      apiKey: options?.apiKey ?? "api-key",
+    },
   });
 }
 

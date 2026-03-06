@@ -18,8 +18,10 @@ export function createClaudeSdkAgent(
 
   return Agent.create({
     adapter,
-    agentId: overrides?.agentId ?? "claude-sdk-agent",
-    apiKey: overrides?.apiKey ?? "api-key",
+    config: {
+      agentId: overrides?.agentId ?? "claude-sdk-agent",
+      apiKey: overrides?.apiKey ?? "api-key",
+    },
   });
 }
 

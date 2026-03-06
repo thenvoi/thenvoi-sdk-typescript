@@ -6,7 +6,7 @@ import {
   type LinearThenvoiBridgeConfig,
   type SessionRoomRecord,
   type SessionRoomStore,
-} from "../src/index";
+} from "../src/linear";
 import { LinearThenvoiExampleRestApi } from "../examples/linear-thenvoi/linear-thenvoi-rest-stub";
 
 class MemorySessionRoomStore implements SessionRoomStore {

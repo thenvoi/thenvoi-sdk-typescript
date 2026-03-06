@@ -2,11 +2,21 @@ import { describe, expect, it } from "vitest";
 
 import { RestFacade } from "../src/client/rest/RestFacade";
 import type { RestApi } from "../src/client/rest/types";
+import type { ContactRequestAction } from "../src/contracts/dtos";
 import { UnsupportedFeatureError, ValidationError } from "../src/core/errors";
 import { AgentTools } from "../src/runtime/tools/AgentTools";
 
 class FakeRestApi implements RestApi {
   public readonly addedParticipants: Array<{ chatId: string; participantId: string; role: string }> = [];
+  public readonly addedContacts: Array<{ handle: string; message?: string }> = [];
+  public readonly removedContacts: Array<{ handle?: string; contactId?: string }> = [];
+  public readonly contactRequestResponses: Array<{
+    action: ContactRequestAction;
+    handle?: string;
+    requestId?: string;
+  }> = [];
+  public readonly memoryQueries: Array<Record<string, unknown>> = [];
+  public readonly storedMemories: Array<Record<string, unknown>> = [];
 
   public async getAgentMe() {
     return { id: "a1", name: "Agent", description: "desc" };
@@ -72,6 +82,108 @@ class FakeRestApi implements RestApi {
       metadata: { page: 2, pageSize: 100, totalCount: 2, totalPages: 2 },
     };
   }
+
+  public async listContacts(request: { page: number; pageSize: number }) {
+    return {
+      data: [{ id: "c1", handle: "jane", name: "Jane", type: "User" }],
+      metadata: { page: request.page, pageSize: request.pageSize, totalCount: 1, totalPages: 1 },
+    };
+  }
+
+  public async addContact(handle: string, message?: string) {
+    this.addedContacts.push({ handle, message });
+    return { id: "contact-request-1", status: "pending" };
+  }
+
+  public async removeContact(request: { handle?: string; contactId?: string }) {
+    this.removedContacts.push(request);
+    return { status: "removed" };
+  }
+
+  public async listContactRequests(request: { page: number; pageSize: number; sentStatus: string }) {
+    return {
+      received: [
+        {
+          id: "req-received-1",
+          from_handle: "jane",
+          from_name: "Jane",
+          status: "pending",
+        },
+      ],
+      sent: [
+        {
+          id: "req-sent-1",
+          to_handle: "weather",
+          to_name: "Weather",
+          status: request.sentStatus,
+        },
+      ],
+      metadata: {
+        page: request.page,
+        page_size: request.pageSize,
+        received: { total: 1, total_pages: 1 },
+        sent: { total: 1, total_pages: 1 },
+      },
+    };
+  }
+
+  public async respondContactRequest(
+    request: { action: ContactRequestAction; handle?: string; requestId?: string },
+  ) {
+    this.contactRequestResponses.push(request);
+    const statusByAction: Record<ContactRequestAction, string> = {
+      approve: "approved",
+      reject: "rejected",
+      cancel: "cancelled",
+    };
+    return { id: request.requestId ?? "req-1", status: statusByAction[request.action] };
+  }
+
+  public async listMemories(
+    request: Parameters<NonNullable<RestApi["listMemories"]>>[0],
+    _options?: Parameters<NonNullable<RestApi["listMemories"]>>[1],
+  ) {
+    this.memoryQueries.push(request);
+    return {
+      data: [{
+        id: "memory-1",
+        content: "Jane likes tea",
+        system: "long_term" as const,
+        type: "semantic" as const,
+        segment: "user" as const,
+      }],
+      metadata: { pageSize: Number(request.page_size ?? 20), totalCount: 1 },
+    };
+  }
+
+  public async storeMemory(
+    request: Parameters<NonNullable<RestApi["storeMemory"]>>[0],
+    _options?: Parameters<NonNullable<RestApi["storeMemory"]>>[1],
+  ) {
+    this.storedMemories.push(request);
+    return { id: "memory-2", ...request };
+  }
+
+  public async getMemory(
+    memoryId: string,
+    _options?: Parameters<NonNullable<RestApi["getMemory"]>>[1],
+  ) {
+    return {
+      id: memoryId,
+      content: "Stored memory",
+      system: "long_term" as const,
+      type: "semantic" as const,
+      segment: "user" as const,
+    };
+  }
+
+  public async supersedeMemory(memoryId: string) {
+    return { id: memoryId, status: "superseded" };
+  }
+
+  public async archiveMemory(memoryId: string) {
+    return { id: memoryId, status: "archived" };
+  }
 }
 
 describe("AgentTools", () => {
@@ -87,6 +199,9 @@ describe("AgentTools", () => {
 
     const resultNoAt = await tools.sendMessage("hi", ["jane"]);
     expect(resultNoAt).toEqual({ ok: true });
+
+    const resultByName = await tools.sendMessage("hi", ["Jane"]);
+    expect(resultByName).toEqual({ ok: true });
   });
 
   it("gates peers endpoint when disabled", async () => {
@@ -200,5 +315,103 @@ describe("AgentTools", () => {
     expect(api.addedParticipants).toEqual([
       { chatId: "room-1", participantId: "p1", role: "member" },
     ]);
+  });
+
+  it("delegates contact tools to the REST adapter when enabled", async () => {
+    const api = new FakeRestApi();
+    const tools = new AgentTools({
+      roomId: "room-1",
+      rest: new RestFacade({ api }),
+      capabilities: { contacts: true },
+    });
+
+    await expect(tools.listContacts(2, 25)).resolves.toEqual({
+      data: [{ id: "c1", handle: "jane", name: "Jane", type: "User" }],
+      metadata: { page: 2, pageSize: 25, totalCount: 1, totalPages: 1 },
+    });
+    await expect(tools.addContact(" @jane ", "hello")).resolves.toEqual({
+      id: "contact-request-1",
+      status: "pending",
+    });
+    await expect(tools.removeContact(undefined, " contact-1 ")).resolves.toEqual({ status: "removed" });
+    await expect(tools.listContactRequests(1, 10, "approved")).resolves.toMatchObject({
+      received: [{ id: "req-received-1", from_handle: "jane" }],
+      sent: [{ id: "req-sent-1", status: "approved" }],
+    });
+    await expect(tools.respondContactRequest("approve", undefined, " req-received-1 ")).resolves.toEqual({
+      id: "req-received-1",
+      status: "approved",
+    });
+
+    expect(api.addedContacts).toEqual([{ handle: "@jane", message: "hello" }]);
+    expect(api.removedContacts).toEqual([{ contactId: "contact-1", handle: undefined }]);
+    expect(api.contactRequestResponses).toEqual([
+      { action: "approve", handle: undefined, requestId: "req-received-1" },
+    ]);
+  });
+
+  it("delegates memory tools to the REST adapter when enabled", async () => {
+    const api = new FakeRestApi();
+    const tools = new AgentTools({
+      roomId: "room-1",
+      rest: new RestFacade({ api }),
+      capabilities: { memory: true },
+    });
+
+    await expect(
+      tools.listMemories({ subject_id: " user-1 ", page_size: 5, scope: "subject" }),
+    ).resolves.toEqual({
+      data: [{ id: "memory-1", content: "Jane likes tea", system: "long_term", type: "semantic", segment: "user" }],
+      metadata: { pageSize: 5, totalCount: 1 },
+    });
+    await expect(
+      tools.storeMemory({
+        content: "  Jane prefers tea  ",
+        system: "long_term",
+        type: "semantic",
+        segment: "user",
+        thought: "  Important preference  ",
+        subject_id: " user-1 ",
+      }),
+    ).resolves.toMatchObject({
+      id: "memory-2",
+      content: "  Jane prefers tea  ",
+      subject_id: " user-1 ",
+    });
+    await expect(tools.getMemory(" memory-2 ")).resolves.toMatchObject({ id: "memory-2" });
+    await expect(tools.supersedeMemory(" memory-2 ")).resolves.toEqual({
+      id: "memory-2",
+      status: "superseded",
+    });
+    await expect(tools.archiveMemory(" memory-2 ")).resolves.toEqual({
+      id: "memory-2",
+      status: "archived",
+    });
+
+    expect(api.memoryQueries).toEqual([{ subject_id: " user-1 ", page_size: 5, scope: "subject" }]);
+    expect(api.storedMemories).toEqual([
+      {
+        content: "  Jane prefers tea  ",
+        system: "long_term",
+        type: "semantic",
+        segment: "user",
+        thought: "  Important preference  ",
+        subject_id: " user-1 ",
+      },
+    ]);
+  });
+
+  it("validates required contact and memory identifiers before delegating", async () => {
+    const tools = new AgentTools({
+      roomId: "room-1",
+      rest: new RestFacade({ api: new FakeRestApi() }),
+      capabilities: { contacts: true, memory: true },
+    });
+
+    await expect(tools.removeContact()).rejects.toThrow("Either handle or contactId must be provided");
+    await expect(tools.respondContactRequest("approve")).rejects.toThrow(
+      "Either handle or requestId must be provided",
+    );
+    await expect(tools.getMemory("   ")).rejects.toThrow("memoryId is required");
   });
 });

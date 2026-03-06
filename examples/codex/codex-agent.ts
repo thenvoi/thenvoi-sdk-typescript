@@ -27,8 +27,10 @@ export function createCodexAgent(
 
   return Agent.create({
     adapter,
-    agentId: overrides?.agentId ?? "codex-agent",
-    apiKey: overrides?.apiKey ?? "api-key",
+    config: {
+      agentId: overrides?.agentId ?? "codex-agent",
+      apiKey: overrides?.apiKey ?? "api-key",
+    },
   });
 }
 

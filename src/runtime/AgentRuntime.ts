@@ -92,8 +92,8 @@ export class AgentRuntime {
 
     for (const execution of this.executions.values()) {
       const remaining = deadline === undefined ? undefined : Math.max(0, deadline - Date.now());
-      const idle = await execution.waitForIdle(remaining);
-      if (!idle) {
+      const stopped = await execution.stop(remaining);
+      if (!stopped) {
         graceful = false;
         break;
       }
@@ -167,6 +167,7 @@ export class AgentRuntime {
       case "room_deleted":
         if (event.roomId) {
           await this.link.unsubscribeRoom(event.roomId);
+          await this.executions.get(event.roomId)?.stop();
           this.contexts.delete(event.roomId);
           this.executions.delete(event.roomId);
           await this.onSessionCleanup(event.roomId);
@@ -202,9 +203,9 @@ export class AgentRuntime {
 
         await this.getOrCreateExecution(event.roomId).enqueue(event);
         return;
-      default:
-        return;
     }
+
+    return assertNever(event);
   }
 
   public async enqueueEvent(roomId: string, event: PlatformEvent): Promise<void> {
@@ -218,8 +219,29 @@ export class AgentRuntime {
     }
 
     const execution = new Execution({
+      roomId,
+      link: this.link,
       context: this.getOrCreateContext(roomId),
       onExecute: this.onExecute,
+      onFailure: (error, event) => {
+        this.logger.error("Execution queue task failed", {
+          roomId,
+          eventType: event.type,
+          error,
+        });
+        if (this.onError) {
+          try {
+            this.onError(error, event);
+          } catch (observerError: unknown) {
+            this.logger.error("Error in runtime onError callback", {
+              eventType: event.type,
+              roomId,
+              error: observerError,
+            });
+          }
+        }
+      },
+      logger: this.logger,
     });
     this.executions.set(roomId, execution);
     return execution;
@@ -235,6 +257,10 @@ export class AgentRuntime {
       roomId,
       link: this.link,
       maxContextMessages: this.sessionConfig.maxContextMessages,
+      maxMessageRetries: this.sessionConfig.maxMessageRetries,
+      enableContextCache: this.sessionConfig.enableContextCache,
+      contextCacheTtlSeconds: this.sessionConfig.contextCacheTtlSeconds,
+      enableContextHydration: this.sessionConfig.enableContextHydration,
     });
     this.contexts.set(roomId, context);
     return context;
@@ -268,4 +294,8 @@ export class AgentRuntime {
       throw error;
     }
   }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled platform event: ${JSON.stringify(value)}`);
 }

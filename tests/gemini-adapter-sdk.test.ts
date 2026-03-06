@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { HistoryProvider } from "../src/index";
-import { GeminiAdapter, GeminiToolCallingModel } from "../src/index";
+import { GeminiAdapter } from "../src/index";
+import { GeminiToolCallingModel } from "../src/adapters";
 import { FakeTools, makeMessage } from "./testUtils";
 
 class GeminiTestTools extends FakeTools {

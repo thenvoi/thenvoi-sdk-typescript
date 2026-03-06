@@ -10,7 +10,7 @@ describe("langgraph-agent example", () => {
     expect(typeof agent.stop).toBe("function");
   });
 
-  it("provides a minimal local graph implementation", async () => {
+  it("provides a small local graph implementation", async () => {
     const graph = new EchoLangGraph();
     const result = (await graph.invoke({
       messages: [["user", "hello"]],

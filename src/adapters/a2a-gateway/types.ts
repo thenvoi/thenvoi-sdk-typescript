@@ -92,10 +92,12 @@ export interface GatewayServerOptions {
   gatewayUrl: string;
   host: string;
   port: number;
+  authToken?: string;
   onRequest: (
     request: GatewayRequest,
   ) => AsyncIterable<GatewayA2AStatusUpdateEvent>;
   onCancel?: (request: GatewayCancelRequest) => Promise<void>;
+  loadModules?: () => Promise<unknown>;
 }
 
 export type GatewayServerFactory = (
@@ -107,6 +109,7 @@ export interface A2AGatewayAdapterOptions {
   gatewayUrl?: string;
   host?: string;
   port?: number;
+  authToken?: string;
   responseTimeoutMs?: number;
   peerPageSize?: number;
   maxPeerPages?: number;

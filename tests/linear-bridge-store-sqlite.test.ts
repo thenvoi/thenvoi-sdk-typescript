@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createSqliteSessionRoomStore, type SessionRoomStore } from "../src/index";
+import { createSqliteSessionRoomStore, type SessionRoomStore } from "../src/linear";
 
 async function createStore(): Promise<{ store: SessionRoomStore; cleanup: () => Promise<void> }> {
   const dir = await mkdtemp(join(tmpdir(), "thenvoi-linear-store-"));

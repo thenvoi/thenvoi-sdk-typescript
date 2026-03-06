@@ -1,5 +1,7 @@
 import { SimpleAdapter } from "../../core/simpleAdapter";
 import type { AdapterToolsProtocol } from "../../contracts/protocols";
+import type { Logger } from "../../core/logger";
+import { NoopLogger } from "../../core/logger";
 import type { HistoryProvider, PlatformMessage } from "../../runtime/types";
 import { renderSystemPrompt } from "../../runtime/prompts";
 import { buildConversationPrompt } from "../shared/conversationPrompt";
@@ -8,21 +10,51 @@ import {
   createThenvoiMcpBridge,
   type ThenvoiMcpBridge,
 } from "./mcp";
-import type {
-  Options as ClaudeQueryOptions,
-  PermissionMode,
-  Query as ClaudeQueryStream,
-  SDKMessage,
-} from "@anthropic-ai/claude-agent-sdk";
 
-export type ClaudePermissionMode = PermissionMode;
+export type ClaudePermissionMode =
+  | "default"
+  | "acceptEdits"
+  | "bypassPermissions"
+  | "plan"
+  | "dontAsk";
+
+interface ClaudeAssistantTextBlock {
+  type?: string;
+  text?: string;
+}
+
+interface ClaudeAssistantMessage {
+  content: ClaudeAssistantTextBlock[];
+}
+
+interface ClaudeSdkMessageLike {
+  type: string;
+  session_id?: string;
+  subtype?: string;
+  result?: unknown;
+  summary?: string;
+  message?: ClaudeAssistantMessage;
+  [key: string]: unknown;
+}
+
+export interface ClaudeQueryOptions {
+  model?: string;
+  permissionMode?: ClaudePermissionMode;
+  systemPrompt?: string;
+  allowDangerouslySkipPermissions?: boolean;
+  maxThinkingTokens?: number;
+  cwd?: string;
+  resume?: string;
+  mcpServers?: Record<string, unknown>;
+  allowedTools?: string[];
+}
 
 export interface ClaudeSdkQueryParams {
   prompt: string;
   options?: ClaudeQueryOptions;
 }
 
-export type ClaudeSdkQuery = (params: ClaudeSdkQueryParams) => ClaudeQueryStream;
+export type ClaudeSdkQuery = (params: ClaudeSdkQueryParams) => AsyncIterable<ClaudeSdkMessageLike>;
 
 export interface ClaudeSDKAdapterOptions {
   model?: string;
@@ -35,6 +67,7 @@ export interface ClaudeSDKAdapterOptions {
   enableMcpTools?: boolean;
   cwd?: string;
   queryFn?: ClaudeSdkQuery;
+  logger?: Logger;
 }
 
 const DEFAULT_MODEL = "claude-sonnet-4-6";
@@ -50,6 +83,7 @@ export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
   private readonly enableMcpTools: boolean;
   private readonly cwd?: string;
   private readonly queryFnOverride?: ClaudeSdkQuery;
+  private readonly logger: Logger;
   private readonly sessionIds = new Map<string, string>();
   private readonly roomTools = new Map<string, AdapterToolsProtocol>();
   private mcpBridge: ThenvoiMcpBridge | null = null;
@@ -67,6 +101,7 @@ export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
     this.enableMcpTools = options?.enableMcpTools ?? true;
     this.cwd = options?.cwd;
     this.queryFnOverride = options?.queryFn;
+    this.logger = options?.logger ?? new NoopLogger();
   }
 
   public async onStarted(agentName: string, agentDescription: string): Promise<void> {
@@ -149,13 +184,7 @@ export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
         const previousSessionId = this.sessionIds.get(context.roomId) ?? null;
         this.sessionIds.set(context.roomId, sessionId);
         if (sessionId !== previousSessionId) {
-          try {
-            await tools.sendEvent("Claude SDK session", "task", {
-              claude_session_id: sessionId,
-            });
-          } catch {
-            // Best-effort persistence marker — session continues regardless.
-          }
+          await this.reportSessionId(tools, context.roomId, sessionId);
         }
       }
 
@@ -184,6 +213,24 @@ export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
     this.sessionIds.delete(roomId);
     this.roomTools.delete(roomId);
   }
+
+  private async reportSessionId(
+    tools: AdapterToolsProtocol,
+    roomId: string,
+    sessionId: string,
+  ): Promise<void> {
+    try {
+      await tools.sendEvent("Claude SDK session", "task", {
+        claude_session_id: sessionId,
+      });
+    } catch (error) {
+      this.logger.warn("Claude SDK session marker event failed", {
+        roomId,
+        sessionId,
+        error,
+      });
+    }
+  }
 }
 
 async function loadClaudeQuery(): Promise<ClaudeSdkQuery> {
@@ -198,12 +245,12 @@ async function loadClaudeQuery(): Promise<ClaudeSdkQuery> {
   return module.query;
 }
 
-function extractAssistantText(event: SDKMessage): string {
+function extractAssistantText(event: ClaudeSdkMessageLike): string {
   if (event.type !== "assistant") {
     return "";
   }
 
-  const blocks = event.message.content as Array<{ type?: string; text?: string }>;
+  const blocks = event.message?.content ?? [];
   return blocks
     .map((block: { type?: string; text?: string }) => (block.type === "text" ? block.text ?? "" : ""))
     .filter((text: string) => text.length > 0)

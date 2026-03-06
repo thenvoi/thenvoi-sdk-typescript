@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ParlantAdapter } from "../src/adapters/parlant/ParlantAdapter";
 import { FakeTools, makeMessage } from "./testUtils";
@@ -260,5 +260,173 @@ describe("ParlantAdapter", () => {
     expect(client.sessionCreateCount).toBe(1);
     expect(historicalEvents).toHaveLength(2);
     expect(tools.messages).toHaveLength(2);
+  });
+
+  it("logs skipped bootstrap history events instead of swallowing them", async () => {
+    const client = new FakeParlantClient();
+    client.eventPollBatches.push([
+      {
+        kind: "message",
+        offset: 60,
+        data: { message: "Recovered response" },
+      },
+    ]);
+
+    const originalCreateEvent = client.sessions.createEvent;
+    let failedHistoricalAssistantEvent = false;
+    client.sessions.createEvent = async (sessionId, params) => {
+      const metadata = (params.metadata ?? {}) as Record<string, unknown>;
+      if (
+        !failedHistoricalAssistantEvent
+        && metadata.historical === true
+        && params.source === "ai_agent"
+      ) {
+        failedHistoricalAssistantEvent = true;
+        throw new Error("history injection failed");
+      }
+
+      return originalCreateEvent(sessionId, params);
+    };
+
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const adapter = new ParlantAdapter({
+      environment: "https://parlant.example",
+      agentId: "agent-1",
+      clientFactory: async () => client,
+      responseTimeoutSeconds: 1,
+      logger,
+    });
+
+    await adapter.onStarted("Parlant Bridge", "Bridge to parlant");
+
+    const history = [
+      {
+        role: "user" as const,
+        content: "[User]: Earlier question",
+        sender: "User",
+        senderType: "User",
+      },
+      {
+        role: "assistant" as const,
+        content: "Earlier answer",
+        sender: "Assistant",
+        senderType: "Agent",
+      },
+    ];
+
+    const tools = new FakeTools();
+    await adapter.onMessage(
+      makeMessage("Current question", "room-history-warn"),
+      tools,
+      history,
+      null,
+      null,
+      { isSessionBootstrap: true, roomId: "room-history-warn" },
+    );
+
+    expect(tools.messages).toEqual(["Recovered response"]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Parlant history injection failed",
+      expect.objectContaining({
+        sessionId: "session-1",
+        roomRole: "assistant",
+      }),
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Parlant history injection completed with skipped events",
+      expect.objectContaining({
+        sessionId: "session-1",
+        failedEvents: 1,
+      }),
+    );
+  });
+
+  it("logs adapter request failures before surfacing them to the room", async () => {
+    const client = new FakeParlantClient();
+    client.sessions.listEvents = async () => {
+      throw new Error("poll failed");
+    };
+
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const adapter = new ParlantAdapter({
+      environment: "https://parlant.example",
+      agentId: "agent-1",
+      clientFactory: async () => client,
+      responseTimeoutSeconds: 1,
+      logger,
+    });
+
+    await adapter.onStarted("Parlant Bridge", "Bridge to parlant");
+
+    const tools = new FakeTools();
+    await adapter.onMessage(
+      makeMessage("Hi", "room-error"),
+      tools,
+      [],
+      null,
+      null,
+      { isSessionBootstrap: false, roomId: "room-error" },
+    );
+
+    expect(tools.events).toHaveLength(1);
+    expect(tools.events[0]?.messageType).toBe("error");
+    expect(tools.events[0]?.content).toContain("poll failed");
+    expect(logger.error).toHaveBeenCalledWith(
+      "Parlant adapter request failed",
+      expect.objectContaining({
+        roomId: "room-error",
+        agentId: "agent-1",
+      }),
+    );
+  });
+
+  it("logs client initialization failures before surfacing adapter errors", async () => {
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const adapter = new ParlantAdapter({
+      environment: "https://parlant.example",
+      agentId: "agent-1",
+      clientFactory: async () => {
+        throw new Error("parlant init failed");
+      },
+      logger,
+      responseTimeoutSeconds: 1,
+    });
+
+    await adapter.onStarted("Parlant Bridge", "Bridge to parlant");
+
+    const tools = new FakeTools();
+    await adapter.onMessage(
+      makeMessage("Hi", "room-init"),
+      tools,
+      [],
+      null,
+      null,
+      { isSessionBootstrap: false, roomId: "room-init" },
+    );
+
+    expect(logger.error).toHaveBeenCalledWith(
+      "Parlant client initialization failed",
+      expect.objectContaining({
+        error: expect.any(Error),
+      }),
+    );
+    expect(tools.events.some((event) => event.messageType === "error")).toBe(true);
   });
 });

@@ -9,8 +9,10 @@ export function createBasicAgent(overrides?: { agentId?: string; apiKey?: string
 
   return Agent.create({
     adapter,
-    agentId: overrides?.agentId ?? "basic-agent",
-    apiKey: overrides?.apiKey ?? "api-key",
+    config: {
+      agentId: overrides?.agentId ?? "basic-agent",
+      apiKey: overrides?.apiKey ?? "api-key",
+    },
   });
 }
 
