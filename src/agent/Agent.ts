@@ -1,6 +1,7 @@
 import type { FrameworkAdapter } from "../contracts/protocols";
 import type { AgentCredentials } from "../config";
 import { PlatformRuntime, type PlatformRuntimeOptions } from "../runtime/PlatformRuntime";
+import type { PlatformMessage } from "../runtime/types";
 import { GracefulShutdown } from "../runtime/shutdown";
 
 export interface AgentCreateOptions extends Omit<PlatformRuntimeOptions, "agentId" | "apiKey" | "wsUrl" | "restUrl"> {
@@ -107,6 +108,14 @@ export class Agent {
 
   public async runForever(): Promise<void> {
     await this.platformRuntime.runForever();
+  }
+
+  public async bootstrapRoomMessage(roomId: string, message: PlatformMessage): Promise<void> {
+    await this.platformRuntime.bootstrapRoomMessage(roomId, message);
+  }
+
+  public async resetRoomSession(roomId: string, timeoutMs?: number): Promise<boolean> {
+    return await this.platformRuntime.resetRoomSession(roomId, timeoutMs);
   }
 
   public async run(options?: {

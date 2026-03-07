@@ -16,3 +16,4 @@ Folders:
 - `a2a-bridge/`
 - `a2a-gateway/`
 - `linear-thenvoi/`
+- `dog-landing-page/`

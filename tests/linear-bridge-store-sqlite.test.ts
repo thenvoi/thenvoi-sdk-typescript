@@ -51,7 +51,7 @@ describe("sqlite session room store", () => {
     });
   });
 
-  it("returns the latest active room for an issue", async () => {
+  it("returns the latest reusable room for an issue", async () => {
     const { store, cleanup } = await createStore();
     cleanups.push(cleanup);
 
@@ -98,5 +98,61 @@ describe("sqlite session room store", () => {
     await expect(store.getBySessionId("session-1")).resolves.toMatchObject({
       status: "canceled",
     });
+  });
+
+  it("keeps completed rooms available for issue lookup", async () => {
+    const { store, cleanup } = await createStore();
+    cleanups.push(cleanup);
+
+    await store.upsert({
+      linearSessionId: "session-1",
+      linearIssueId: "issue-1",
+      thenvoiRoomId: "room-1",
+      status: "completed",
+      createdAt: "2026-03-03T00:00:00.000Z",
+      updatedAt: "2026-03-03T00:00:00.000Z",
+    });
+
+    await expect(store.getByIssueId("issue-1")).resolves.toMatchObject({
+      linearSessionId: "session-1",
+      thenvoiRoomId: "room-1",
+      status: "completed",
+    });
+    await expect(store.getBySessionId("session-1")).resolves.toMatchObject({
+      status: "completed",
+    });
+  });
+
+  it("stores, lists, and marks bootstrap requests processed", async () => {
+    const { store, cleanup } = await createStore();
+    cleanups.push(cleanup);
+
+    await store.enqueueBootstrapRequest({
+      eventKey: "event-1",
+      linearSessionId: "session-1",
+      thenvoiRoomId: "room-1",
+      expectedContent: "Bootstrap me",
+      messageType: "task",
+      metadata: { linear_bridge: "thenvoi" },
+      createdAt: "2026-03-03T00:00:00.000Z",
+      expiresAt: "2099-03-03T00:10:00.000Z",
+    });
+
+    await expect(store.listPendingBootstrapRequests()).resolves.toEqual([
+      {
+        eventKey: "event-1",
+        linearSessionId: "session-1",
+        thenvoiRoomId: "room-1",
+        expectedContent: "Bootstrap me",
+        messageType: "task",
+        metadata: { linear_bridge: "thenvoi" },
+        createdAt: "2026-03-03T00:00:00.000Z",
+        expiresAt: "2099-03-03T00:10:00.000Z",
+      },
+    ]);
+
+    await store.markBootstrapRequestProcessed("event-1");
+
+    await expect(store.listPendingBootstrapRequests()).resolves.toEqual([]);
   });
 });

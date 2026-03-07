@@ -280,7 +280,14 @@ export class AgentRestAdapter implements RestApi {
   // ── Identity ─────────────────────────────────────────────────────────
 
   public async getAgentMe(options?: RestRequestOptions): Promise<AgentIdentity> {
-    const json = await this.get<{ data?: { id?: string; name?: string; description?: string | null } }>(
+    const json = await this.get<{
+      data?: {
+        id?: string;
+        name?: string;
+        description?: string | null;
+        handle?: string | null;
+      };
+    }>(
       "/me",
       options,
     );
@@ -288,7 +295,12 @@ export class AgentRestAdapter implements RestApi {
     if (!data?.id || !data?.name) {
       throw new Error(`Unexpected /api/v1/agent/me response: ${JSON.stringify(json)}`);
     }
-    return { id: data.id, name: data.name, description: data.description ?? null };
+    return {
+      id: data.id,
+      name: data.name,
+      description: data.description ?? null,
+      ...(typeof data.handle === "string" ? { handle: data.handle } : {}),
+    };
   }
 
   // ── Chats ────────────────────────────────────────────────────────────
@@ -567,7 +579,15 @@ export class AgentRestAdapter implements RestApi {
     // Agent message endpoint only accepts `content` and `mentions`.
     const body: Record<string, unknown> = {
       content: message.content,
-      mentions: message.mentions ?? [],
+      mentions: (message.mentions ?? []).map((mention) => ({
+        id: mention.id,
+        ...(typeof mention.handle === "string" ? { handle: mention.handle } : {}),
+        ...(typeof mention.name === "string"
+          ? { name: mention.name }
+          : typeof mention.username === "string"
+            ? { name: mention.username }
+            : {}),
+      })),
     };
 
     return this.post<ToolOperationResult>(

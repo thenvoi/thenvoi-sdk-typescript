@@ -1,6 +1,9 @@
 export {
   DEFAULT_STATUS_MAPPING,
+  completeLinearSession,
   createLinearTools,
+  createInProcessLinearBridgeDispatcher,
+  createLinearWebhookHandler,
   createSqliteSessionRoomStore,
   dedupeHandles,
   handleAgentSessionEvent,
@@ -14,11 +17,15 @@ export {
   updatePlan,
 } from "../integrations/linear";
 export type {
+  CreateLinearWebhookHandlerOptions,
+  LinearBridgeDispatchJob,
+  LinearBridgeDispatcher,
   HandleAgentSessionEventInput,
   LinearActivityClient,
   LinearSessionStatus,
   LinearThenvoiBridgeConfig,
   LinearThenvoiBridgeDeps,
+  PendingBootstrapRequest,
   PlanStep,
   RoomStrategy,
   SessionRoomRecord,

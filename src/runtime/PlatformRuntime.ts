@@ -3,6 +3,7 @@ import type { ContactEvent, PlatformEvent } from "../platform/events";
 import { ThenvoiLink, type ThenvoiLinkOptions } from "../platform/ThenvoiLink";
 import { AgentRuntime } from "./AgentRuntime";
 import type { AgentConfig, ContactEventConfig, SessionConfig } from "./types";
+import type { PlatformMessage } from "./types";
 import { RuntimeStateError, ValidationError } from "../core/errors";
 import { DefaultPreprocessor } from "./preprocessing/DefaultPreprocessor";
 import { ContactEventHandler } from "./ContactEventHandler";
@@ -187,6 +188,22 @@ export class PlatformRuntime {
     }
 
     await this.runtime.waitUntilStopped();
+  }
+
+  public async bootstrapRoomMessage(roomId: string, message: PlatformMessage): Promise<void> {
+    if (!this.runtime) {
+      throw new RuntimeStateError("Runtime not started");
+    }
+
+    await this.runtime.bootstrapRoomMessage(roomId, message);
+  }
+
+  public async resetRoomSession(roomId: string, timeoutMs?: number): Promise<boolean> {
+    if (!this.runtime) {
+      throw new RuntimeStateError("Runtime not started");
+    }
+
+    return await this.runtime.resetRoomSession(roomId, timeoutMs);
   }
 
   private async executeAdapter(

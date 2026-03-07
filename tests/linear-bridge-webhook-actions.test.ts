@@ -4,6 +4,7 @@ import {
   handleAgentSessionEvent,
   type HandleAgentSessionEventInput,
   type LinearThenvoiBridgeConfig,
+  type PendingBootstrapRequest,
   type SessionRoomRecord,
   type SessionRoomStore,
 } from "../src/linear";
@@ -11,6 +12,7 @@ import { LinearThenvoiExampleRestApi } from "../examples/linear-thenvoi/linear-t
 
 class MemorySessionRoomStore implements SessionRoomStore {
   private readonly records = new Map<string, SessionRoomRecord>();
+  private readonly bootstrapRequests = new Map<string, PendingBootstrapRequest>();
 
   public async getBySessionId(sessionId: string): Promise<SessionRoomRecord | null> {
     return this.records.get(sessionId) ?? null;
@@ -18,7 +20,7 @@ class MemorySessionRoomStore implements SessionRoomStore {
 
   public async getByIssueId(issueId: string): Promise<SessionRoomRecord | null> {
     const values = [...this.records.values()]
-      .filter((record) => record.linearIssueId === issueId && record.status === "active")
+      .filter((record) => record.linearIssueId === issueId && record.status !== "canceled")
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 
     return values[0] ?? null;
@@ -37,8 +39,21 @@ class MemorySessionRoomStore implements SessionRoomStore {
     this.records.set(sessionId, {
       ...current,
       status: "canceled",
+      lastEventKey: current.lastEventKey ?? null,
       updatedAt: new Date().toISOString(),
     });
+  }
+
+  public async enqueueBootstrapRequest(request: PendingBootstrapRequest): Promise<void> {
+    this.bootstrapRequests.set(request.eventKey, request);
+  }
+
+  public async listPendingBootstrapRequests(): Promise<PendingBootstrapRequest[]> {
+    return [...this.bootstrapRequests.values()];
+  }
+
+  public async markBootstrapRequestProcessed(eventKey: string): Promise<void> {
+    this.bootstrapRequests.delete(eventKey);
   }
 }
 
@@ -46,12 +61,35 @@ const config: LinearThenvoiBridgeConfig = {
   linearAccessToken: "lin_api_test",
   linearWebhookSecret: "linear_webhook_secret",
   hostAgentHandle: "linear-host",
-  defaultSpecialistHandles: ["research-agent"],
   roomStrategy: "issue",
   writebackMode: "final_only",
 };
 
 function makePayload(action: "created" | "updated" | "canceled") {
+  const issue = {
+    id: "issue-1",
+    title: "Investigate bug",
+    description: "We need a concrete plan before implementation.",
+    identifier: "INT-1",
+    state: {
+      id: "state-1",
+      name: "In Progress",
+      type: "started",
+    },
+    assignee: {
+      id: "agent-1",
+      name: "Thenvoi",
+      displayName: "Thenvoi",
+    },
+    team: {
+      id: "team-1",
+      key: "INT",
+      name: "Integrations",
+    },
+    teamId: "team-1",
+    url: "https://linear.app/example/issue/INT-1",
+  } as unknown as HandleAgentSessionEventInput["payload"]["agentSession"]["issue"];
+
   const payload: HandleAgentSessionEventInput["payload"] = {
     action,
     type: "AgentSessionEvent",
@@ -71,18 +109,7 @@ function makePayload(action: "created" | "updated" | "canceled") {
       createdAt: new Date().toISOString(),
       organizationId: "org-1",
       updatedAt: new Date().toISOString(),
-      issue: {
-        id: "issue-1",
-        title: "Investigate bug",
-        identifier: "INT-1",
-        team: {
-          id: "team-1",
-          key: "INT",
-          name: "Integrations",
-        },
-        teamId: "team-1",
-        url: "https://linear.app/example/issue/INT-1",
-      },
+      issue,
       comment: {
         id: "comment-1",
         body: "Need a clear summary",
@@ -105,7 +132,16 @@ function makeLinearClient(): HandleAgentSessionEventInput["deps"]["linearClient"
 
 describe("linear bridge webhook actions", () => {
   it("forwards created/updated events to Thenvoi room messages", async () => {
-    const restApi = new LinearThenvoiExampleRestApi();
+    const restApi = new LinearThenvoiExampleRestApi({
+      agentId: "peer-transport",
+      agentName: "Transport Agent",
+      agentHandle: "transport-agent",
+      peers: [
+        { id: "peer-transport", name: "Transport Agent", handle: "transport-agent" },
+        { id: "peer-host", name: "Linear Bridge", handle: "linear-host" },
+        { id: "peer-research", name: "research-agent", handle: "research-agent" },
+      ],
+    });
     const store = new MemorySessionRoomStore();
 
     await handleAgentSessionEvent({
@@ -128,11 +164,126 @@ describe("linear bridge webhook actions", () => {
       },
     });
 
-    expect(restApi.roomMessages).toHaveLength(2);
-    expect(restApi.roomMessages[0]?.content).toContain("Agent session created");
-    expect(restApi.roomMessages[1]?.content).toContain("Agent session updated");
-    expect(restApi.roomMessages[0]?.metadata?.linear_session_id).toBe("session-1");
-    expect(restApi.roomMessages[0]?.metadata?.linear_bridge).toBe("thenvoi");
+    expect(restApi.roomEvents).toHaveLength(2);
+    expect(restApi.createChatCalls).toEqual([undefined]);
+    expect(restApi.roomEvents[0]?.content).toContain("Agent session created");
+    expect(restApi.roomEvents[1]?.content).toContain("Agent session updated");
+    expect(restApi.roomEvents[0]?.content).toContain("session_id: session-1");
+    expect(restApi.roomEvents[0]?.content).toContain("issue_state: In Progress");
+    expect(restApi.roomEvents[0]?.content).toContain("issue_state_type: started");
+    expect(restApi.roomEvents[0]?.content).toContain("issue_assignee: Thenvoi");
+    await expect(store.listPendingBootstrapRequests()).resolves.toEqual([]);
+    await expect(store.getBySessionId("session-1")).resolves.toMatchObject({
+      status: "active",
+      lastEventKey: expect.any(String),
+    });
+  });
+
+  it("prefetches a relevant implementation specialist into the room when available", async () => {
+    const restApi = new LinearThenvoiExampleRestApi({
+      agentId: "peer-host",
+      agentName: "Linear Bridge",
+      agentHandle: "linear-host",
+      peers: [
+        { id: "peer-host", name: "Linear Bridge", handle: "linear-host" },
+        { id: "peer-planner", name: "Ticket Planner", handle: "ticket-planner" },
+        { id: "peer-implementer", name: "Feature Implementer", handle: "feature-implementer" },
+      ],
+    });
+    const store = new MemorySessionRoomStore();
+
+    await handleAgentSessionEvent({
+      payload: makePayload("created"),
+      config,
+      deps: {
+        thenvoiRest: restApi,
+        linearClient: makeLinearClient(),
+        store,
+      },
+    });
+
+    const roomId = restApi.roomEvents[0]?.roomId;
+    expect(roomId).toBeTruthy();
+    await expect(restApi.listChatParticipants(roomId ?? "missing-room")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ handle: "linear-host" }),
+        expect.objectContaining({ handle: "feature-implementer" }),
+      ]),
+    );
+    expect(restApi.roomMessages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          roomId,
+          content: expect.stringContaining("implement the requested deliverable"),
+          mentions: expect.arrayContaining([
+            expect.objectContaining({ handle: "feature-implementer" }),
+          ]),
+        }),
+      ]),
+    );
+  });
+
+  it("keeps an unstarted feature request in planning mode until execution is explicitly requested", async () => {
+    const restApi = new LinearThenvoiExampleRestApi({
+      agentId: "peer-host",
+      agentName: "Linear Bridge",
+      agentHandle: "linear-host",
+      peers: [
+        { id: "peer-host", name: "Linear Bridge", handle: "linear-host" },
+        { id: "peer-planner", name: "Ticket Planner", handle: "ticket-planner" },
+        { id: "peer-implementer", name: "Feature Implementer", handle: "feature-implementer" },
+      ],
+    });
+    const store = new MemorySessionRoomStore();
+    const payload = makePayload("created");
+    payload.promptContext = "We want a landing page for the dog website.";
+    const issue = payload.agentSession.issue as (
+      HandleAgentSessionEventInput["payload"]["agentSession"]["issue"] & {
+        state?: { name?: string; type?: string };
+      }
+    ) | undefined;
+    if (issue) {
+      issue.state = {
+        ...(issue.state ?? {}),
+        name: "Backlog",
+        type: "unstarted",
+      };
+    }
+
+    await handleAgentSessionEvent({
+      payload,
+      config,
+      deps: {
+        thenvoiRest: restApi,
+        linearClient: makeLinearClient(),
+        store,
+      },
+    });
+
+    const roomId = restApi.roomEvents[0]?.roomId;
+    expect(roomId).toBeTruthy();
+    await expect(restApi.listChatParticipants(roomId ?? "missing-room")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ handle: "linear-host" }),
+        expect.objectContaining({ handle: "ticket-planner" }),
+      ]),
+    );
+    await expect(restApi.listChatParticipants(roomId ?? "missing-room")).resolves.not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ handle: "feature-implementer" }),
+      ]),
+    );
+    expect(restApi.roomMessages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          roomId,
+          content: expect.stringContaining("sharpen the ticket into execution-ready scope"),
+          mentions: expect.arrayContaining([
+            expect.objectContaining({ handle: "ticket-planner" }),
+          ]),
+        }),
+      ]),
+    );
   });
 
   it("marks session canceled and emits a cancellation event", async () => {
@@ -159,11 +310,12 @@ describe("linear bridge webhook actions", () => {
       },
     });
 
-    expect(restApi.roomEvents).toHaveLength(1);
-    expect(restApi.roomEvents[0]?.content).toContain("session canceled");
+    expect(restApi.roomEvents).toHaveLength(2);
+    expect(restApi.roomEvents[1]?.content).toContain("session canceled");
 
     await expect(store.getBySessionId("session-1")).resolves.toMatchObject({
       status: "canceled",
+      lastEventKey: expect.any(String),
     });
   });
 
@@ -276,9 +428,72 @@ describe("linear bridge webhook actions", () => {
       deps: { thenvoiRest: restApi, linearClient, store },
     });
 
-    expect(restApi.roomMessages).toHaveLength(2);
-    expect(restApi.roomMessages[1]?.content).toContain("[Linear User Response]");
-    expect(restApi.roomMessages[1]?.content).toContain("Yes, please proceed with option A");
-    expect(restApi.roomMessages[1]?.metadata?.linear_event_action).toBe("prompted");
+    expect(restApi.roomEvents).toHaveLength(2);
+    expect(restApi.roomEvents[1]?.content).toContain("[Linear User Response]");
+    expect(restApi.roomEvents[1]?.content).toContain("Yes, please proceed with option A");
+    await expect(store.listPendingBootstrapRequests()).resolves.toEqual([
+      expect.objectContaining({ messageType: "task" }),
+      expect.objectContaining({ messageType: "text" }),
+    ]);
+    await expect(store.getBySessionId("session-1")).resolves.toMatchObject({
+      status: "waiting",
+      lastEventKey: expect.any(String),
+    });
+  });
+
+  it("skips duplicate deliveries for the same event key", async () => {
+    const restApi = new LinearThenvoiExampleRestApi();
+    const store = new MemorySessionRoomStore();
+    const linearClient = makeLinearClient();
+    const payload = makePayload("created");
+
+    await handleAgentSessionEvent({
+      payload,
+      config,
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    await handleAgentSessionEvent({
+      payload,
+      config,
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    expect(restApi.roomEvents).toHaveLength(1);
+    expect(linearClient.createAgentActivity).toHaveBeenCalledTimes(1);
+    await expect(store.listPendingBootstrapRequests()).resolves.toEqual([
+      expect.objectContaining({ messageType: "task" }),
+    ]);
+  });
+
+  it("uses configured host handle when provided", async () => {
+    const restApi = new LinearThenvoiExampleRestApi({
+      agentId: "peer-actual-host",
+      agentName: "Actual Host",
+      agentHandle: "actual-host",
+      peers: [
+        { id: "peer-actual-host", name: "Actual Host", handle: "actual-host" },
+        { id: "peer-config-host", name: "Configured Host", handle: "linear-host" },
+        { id: "peer-research", name: "research-agent", handle: "research-agent" },
+      ],
+    });
+    const store = new MemorySessionRoomStore();
+
+    await handleAgentSessionEvent({
+      payload: makePayload("created"),
+      config: {
+        ...config,
+        hostAgentHandle: "linear-host",
+      },
+      deps: {
+        thenvoiRest: restApi,
+        linearClient: makeLinearClient(),
+        store,
+      },
+    });
+
+    expect(restApi.roomEvents).toHaveLength(1);
+    expect(restApi.roomEvents[0]?.content).toContain("@linear-host");
+    await expect(store.listPendingBootstrapRequests()).resolves.toEqual([]);
   });
 });

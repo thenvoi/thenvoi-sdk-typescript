@@ -59,7 +59,12 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "dev:linear": "bash scripts/dev-linear-stack.sh",
+    "dev:linear:tunnel": "bash scripts/run-linear-tunnel.sh",
+    "dev:linear:specialists": "npm exec tsx examples/linear-thenvoi/linear-thenvoi-demo-specialists.ts",
+    "dogfood:linear": "node scripts/linear-dogfood.mjs",
+    "validate:linear": "node scripts/linear-live-validate.mjs"
   },
   "engines": {
     "node": ">=20"

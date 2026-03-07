@@ -40,6 +40,9 @@ const expectedCoreExports = [
   "ParlantAdapter",
   "ClaudeSDKAdapter",
   "CodexAdapter",
+  "CODEX_REASONING_EFFORTS",
+  "CODEX_REASONING_SUMMARIES",
+  "CODEX_WEB_SEARCH_MODES",
   "SimpleAdapter",
 ];
 
@@ -81,5 +84,9 @@ describe("sdk public surface", () => {
     expect(linear).toHaveProperty("handleAgentSessionEvent");
     expect(testing).toHaveProperty("FakeAgentTools");
     expect(adapters).toHaveProperty("GeminiToolCallingModel");
+    expect(adapters).toHaveProperty("CodexAppServerStdioClient");
+    expect(adapters).toHaveProperty("CodexJsonRpcError");
+    expect(adapters).toHaveProperty("CODEX_REASONING_EFFORTS");
+    expect(adapters).toHaveProperty("CODEX_WEB_SEARCH_MODES");
   });
 });

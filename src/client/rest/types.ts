@@ -18,6 +18,7 @@ export interface AgentIdentity {
   id: string;
   name: string;
   description: string | null;
+  handle?: string | null;
 }
 
 export interface ChatParticipant extends MetadataMap {
@@ -30,6 +31,7 @@ export interface ChatParticipant extends MetadataMap {
 export interface ChatMessageMention {
   id: string;
   handle?: string;
+  name?: string;
   username?: string;
 }
 

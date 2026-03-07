@@ -6,6 +6,7 @@ import { NoopLogger } from "../core/logger";
 import { Execution } from "./Execution";
 import { ExecutionContext } from "./ExecutionContext";
 import type { AgentConfig, SessionConfig } from "./types";
+import type { PlatformMessage } from "./types";
 
 interface AgentRuntimeOptions {
   link: ThenvoiLink;
@@ -210,6 +211,40 @@ export class AgentRuntime {
 
   public async enqueueEvent(roomId: string, event: PlatformEvent): Promise<void> {
     await this.getOrCreateExecution(roomId).enqueue(event);
+  }
+
+  public async bootstrapRoomMessage(roomId: string, message: PlatformMessage): Promise<void> {
+    await this.link.subscribeRoom(roomId);
+    await this.getOrCreateExecution(roomId).enqueue({
+      type: "message_created",
+      roomId,
+      payload: {
+        id: message.id,
+        content: message.content,
+        sender_id: message.senderId,
+        sender_type: message.senderType,
+        sender_name: message.senderName ?? null,
+        message_type: message.messageType,
+        metadata: message.metadata,
+        inserted_at: message.createdAt.toISOString(),
+        updated_at: message.createdAt.toISOString(),
+      },
+    });
+  }
+
+  public async resetRoomSession(roomId: string, timeoutMs?: number): Promise<boolean> {
+    const execution = this.executions.get(roomId);
+    if (execution) {
+      const graceful = await execution.stop(timeoutMs);
+      if (!graceful) {
+        return false;
+      }
+    }
+
+    this.executions.delete(roomId);
+    this.contexts.delete(roomId);
+    await this.onSessionCleanup(roomId);
+    return true;
   }
 
   private getOrCreateExecution(roomId: string): Execution {

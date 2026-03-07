@@ -5,16 +5,15 @@ import type { RestApi } from "../../client/rest/types";
 import type { Logger } from "../../core/logger";
 
 export type RoomStrategy = "issue" | "session";
-export type WritebackMode = "final_only";
-export type SessionStatus = "active" | "canceled" | "completed";
+export type WritebackMode = "final_only" | "activity_stream";
+export type SessionStatus = "active" | "waiting" | "completed" | "canceled" | "errored";
 
 export interface LinearThenvoiBridgeConfig {
   linearAccessToken: string;
   linearWebhookSecret: string;
   roomStrategy?: RoomStrategy;
   writebackMode?: WritebackMode;
-  hostAgentHandle: string;
-  defaultSpecialistHandles?: string[];
+  hostAgentHandle?: string;
 }
 
 export interface SessionRoomRecord {
@@ -22,8 +21,20 @@ export interface SessionRoomRecord {
   linearIssueId: string | null;
   thenvoiRoomId: string;
   status: SessionStatus;
+  lastEventKey?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PendingBootstrapRequest {
+  eventKey: string;
+  linearSessionId: string;
+  thenvoiRoomId: string;
+  expectedContent: string;
+  messageType: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  expiresAt: string;
 }
 
 export interface SessionRoomStore {
@@ -31,6 +42,9 @@ export interface SessionRoomStore {
   getByIssueId(issueId: string): Promise<SessionRoomRecord | null>;
   upsert(record: SessionRoomRecord): Promise<void>;
   markCanceled(sessionId: string): Promise<void>;
+  enqueueBootstrapRequest(request: PendingBootstrapRequest): Promise<void>;
+  listPendingBootstrapRequests(limit?: number): Promise<PendingBootstrapRequest[]>;
+  markBootstrapRequestProcessed(eventKey: string): Promise<void>;
   close?(): Promise<void>;
 }
 
@@ -50,8 +64,4 @@ export interface HandleAgentSessionEventInput {
 export type { LinearActivityClient, PlanStep } from "./activities";
 
 export type LinearSessionStatus =
-  | "active"
-  | "canceled"
-  | "completed"
-  | "errored"
-  | "waiting";
+  SessionStatus;

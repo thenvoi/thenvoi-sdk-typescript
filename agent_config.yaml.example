@@ -54,6 +54,14 @@ custom_adapter_agent:
   agent_id: "your-custom-adapter-agent-id"
   api_key: "your-api-key"
 
-linear_thenvoi_orchestrator:
-  agent_id: "your-linear-orchestrator-agent-id"
+linear_thenvoi_bridge:
+  agent_id: "your-linear-bridge-agent-id"
+  api_key: "your-api-key"
+
+planner_agent:
+  agent_id: "your-planner-agent-id"
+  api_key: "your-api-key"
+
+linear_thenvoi_transport:
+  agent_id: "your-linear-transport-agent-id"
   api_key: "your-api-key"

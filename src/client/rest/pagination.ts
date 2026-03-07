@@ -69,7 +69,7 @@ export function normalizePaginationMetadata(
 
   const page = toPositiveInteger(pageRaw);
   const pageSize = toPositiveInteger(pageSizeRaw);
-  const totalPages = toPositiveInteger(totalPagesRaw);
+  const totalPages = toNonNegativeInteger(totalPagesRaw);
   const totalCount = toNonNegativeInteger(totalCountRaw);
 
   if (mode === "strict") {

@@ -8,6 +8,15 @@ export interface LinearActivityClient {
     agentSessionId: string;
     content: Record<string, unknown>;
   }): Promise<unknown>;
+  updateIssue?: (
+    issueId: string,
+    input: Record<string, unknown>,
+  ) => Promise<unknown>;
+  createComment?: (
+    input: { issueId: string; body: string },
+  ) => Promise<unknown>;
+  issue?: (issueId: string) => Promise<unknown>;
+  workflowStates?: (variables?: Record<string, unknown>) => Promise<unknown>;
 }
 
 export interface PlanStep {

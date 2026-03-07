@@ -253,6 +253,20 @@ describe("RestFacade pagination helpers", () => {
     expect(normalized.passthrough).toBe(true);
   });
 
+  it("accepts totalPages=0 metadata for empty result sets", () => {
+    const normalized = normalizePaginationMetadata({
+      page: 1,
+      pageSize: 20,
+      totalPages: 0,
+      totalCount: 0,
+    });
+
+    expect(normalized.page).toBe(1);
+    expect(normalized.pageSize).toBe(20);
+    expect(normalized.totalPages).toBe(0);
+    expect(normalized.totalCount).toBe(0);
+  });
+
   it("uses strategy-aware metadata validation by default", async () => {
     const rest = new RestFacade({
       api: new MalformedMetadataChatsApi(),

@@ -7,7 +7,7 @@ Connect your AI agents to the Thenvoi collaborative platform.
 - **Anthropic SDK** - Claude 4.6 Sonnet/Opus via `@anthropic-ai/sdk`
 - **Gemini SDK** - Gemini 3 via `@google/genai`
 - **Claude Agent SDK** - Streaming, MCP tools, room-scoped resume
-- **Codex SDK** - OpenAI Codex with thread mapping and local commands
+- **Codex SDK** - OpenAI Codex app-server with thread mapping, dynamic tools, and local commands
 - **LangGraph** - LangChain graph agents via `@langchain/langgraph`
 - **Parlant** - Guideline-based behavior engine
 - **A2A Adapter** - Call external A2A-compliant agents from Thenvoi
@@ -78,9 +78,14 @@ The root package intentionally focuses on the main runtime and adapter API. Lowe
 
 ```ts
 import { AgentRestAdapter, RestFacade } from "@thenvoi/sdk/rest";
+import {
+  CodexAppServerStdioClient,
+  CODEX_REASONING_EFFORTS,
+  GeminiToolCallingModel,
+  type CodexReasoningSummary,
+} from "@thenvoi/sdk/adapters";
 import { createLinearTools } from "@thenvoi/sdk/linear";
 import { FakeAgentTools } from "@thenvoi/sdk/testing";
-import { GeminiToolCallingModel } from "@thenvoi/sdk/adapters";
 ```
 
 ---
@@ -236,7 +241,14 @@ await agent.run();
 ### Codex
 
 ```ts
-import { Agent, CodexAdapter, loadAgentConfig } from "@thenvoi/sdk";
+import {
+  Agent,
+  CODEX_REASONING_EFFORTS,
+  CODEX_REASONING_SUMMARIES,
+  CodexAdapter,
+  loadAgentConfig,
+} from "@thenvoi/sdk";
+import { z } from "zod";
 
 const agent = Agent.create({
   adapter: new CodexAdapter({
@@ -244,14 +256,26 @@ const agent = Agent.create({
       model: "gpt-5.3-codex",
       approvalPolicy: "never",
       sandboxMode: "workspace-write",
+      reasoningEffort: CODEX_REASONING_EFFORTS[1],
+      reasoningSummary: CODEX_REASONING_SUMMARIES[1],
       enableExecutionReporting: true,
     },
+    customTools: [
+      {
+        name: "post_action",
+        description: "Record a structured progress update.",
+        schema: z.object({ text: z.string() }),
+        handler: async ({ text }) => `posted:${text}`,
+      },
+    ],
   }),
   config: loadAgentConfig("my_agent"),
 });
 
 await agent.run();
 ```
+
+`CodexAdapter` talks to `codex app-server` directly so Thenvoi can register real dynamic tools and consume typed app-server events. The current `@openai/codex-sdk` thread API is still useful for basic embedded flows, but it does not expose app-server custom tool registration.
 
 ### LangGraph
 
@@ -330,7 +354,7 @@ Each example lives in its own folder so you can copy it out and iterate independ
 | `examples/parlant/` | Parlant | Guideline-based behavior |
 | `examples/a2a-bridge/` | A2A | Bridge to external A2A agents |
 | `examples/a2a-gateway/` | A2A Gateway | Expose Thenvoi peers as A2A |
-| `examples/linear-thenvoi/` | Linear | Bridge server + orchestrator |
+| `examples/linear-thenvoi/` | Linear | Embedded bridge server + self-initiating bridge agent |
 
 ### Running Examples
 
@@ -343,6 +367,12 @@ cp agent_config.yaml.example agent_config.yaml
 npx tsx examples/basic/basic-agent.ts
 npx tsx examples/openai/openai-agent.ts
 npx tsx examples/anthropic/anthropic-agent.ts
+
+# Linear bridge stack (embedded bridge + tunnel)
+pnpm dev:linear
+
+# Live Linear validation (creates a test issue/session)
+pnpm validate:linear
 ```
 
 ---

@@ -1,5 +1,5 @@
 import type { PaginatedResponse, RestApi } from "../../src/rest";
-import type { ChatParticipant } from "../../src/client/rest/types";
+import type { ChatParticipant, PlatformChatMessage } from "../../src/client/rest/types";
 
 interface ExamplePeer {
   id: string;
@@ -8,35 +8,61 @@ interface ExamplePeer {
 }
 
 interface CapturedRoomMessage {
+  id?: string;
   roomId: string;
   content: string;
+  senderId?: string;
+  senderType?: string;
+  senderName?: string;
+  insertedAt?: string;
   messageType?: string;
   metadata?: Record<string, unknown>;
+  mentions?: Array<{ id: string; handle?: string; name?: string; username?: string }>;
 }
 
 export class LinearThenvoiExampleRestApi implements RestApi {
   public readonly peers: ExamplePeer[];
   public readonly roomMessages: CapturedRoomMessage[] = [];
   public readonly roomEvents: CapturedRoomMessage[] = [];
+  public readonly createChatCalls: Array<string | undefined> = [];
+  private readonly agentIdentity: {
+    id: string;
+    name: string;
+    handle: string;
+    description: string | null;
+  };
 
   private readonly rooms = new Set<string>();
   private readonly roomParticipants = new Map<string, ChatParticipant[]>();
+  private readonly roomMessagesByRoom = new Map<string, PlatformChatMessage[]>();
   private roomCounter = 0;
+  private messageCounter = 0;
 
-  public constructor(options?: { peers?: ExamplePeer[] }) {
+  public constructor(options?: {
+    peers?: ExamplePeer[];
+    agentId?: string;
+    agentName?: string;
+    agentHandle?: string;
+  }) {
+    const agentHandle = options?.agentHandle ?? "linear-host";
+    const agentId = options?.agentId ?? "agent-linear-thenvoi";
+    const agentName = options?.agentName ?? "Linear Thenvoi Host";
+
     this.peers = options?.peers ?? [
-      { id: "peer-host", name: "linear-host", handle: "linear-host" },
+      { id: agentId, name: agentName, handle: agentHandle },
       { id: "peer-research", name: "research-agent", handle: "research-agent" },
       { id: "peer-synth", name: "synthesis-agent", handle: "synthesis-agent" },
     ];
+    this.agentIdentity = {
+      id: agentId,
+      name: agentName,
+      handle: agentHandle,
+      description: "Example host agent for Linear + Thenvoi",
+    };
   }
 
   public async getAgentMe() {
-    return {
-      id: "agent-linear-thenvoi",
-      name: "Linear Thenvoi Host",
-      description: "Example host agent for Linear + Thenvoi",
-    };
+    return this.agentIdentity;
   }
 
   public async createChatMessage(
@@ -45,15 +71,38 @@ export class LinearThenvoiExampleRestApi implements RestApi {
       content: string;
       messageType?: string;
       metadata?: Record<string, unknown>;
+      mentions?: Array<{ id: string; handle?: string; name?: string; username?: string }>;
     },
   ): Promise<Record<string, unknown>> {
     this.ensureRoom(chatId);
+    const insertedAt = new Date().toISOString();
+    const persisted: PlatformChatMessage = {
+      id: `msg-${++this.messageCounter}`,
+      content: message.content,
+      sender_id: this.agentIdentity.id,
+      sender_type: "Agent",
+      sender_name: this.agentIdentity.name,
+      message_type: message.messageType ?? "text",
+      metadata: message.metadata ?? {},
+      inserted_at: insertedAt,
+      updated_at: insertedAt,
+    };
+
     this.roomMessages.push({
+      id: persisted.id,
       roomId: chatId,
       content: message.content,
+      senderId: persisted.sender_id,
+      senderType: persisted.sender_type,
+      senderName: persisted.sender_name ?? this.agentIdentity.name,
+      insertedAt,
       messageType: message.messageType,
       metadata: message.metadata,
+      mentions: message.mentions,
     });
+    const existing = this.roomMessagesByRoom.get(chatId) ?? [];
+    existing.push(persisted);
+    this.roomMessagesByRoom.set(chatId, existing);
     return { ok: true };
   }
 
@@ -75,7 +124,8 @@ export class LinearThenvoiExampleRestApi implements RestApi {
     return { ok: true };
   }
 
-  public async createChat(_taskId?: string): Promise<{ id: string }> {
+  public async createChat(taskId?: string): Promise<{ id: string }> {
+    this.createChatCalls.push(taskId);
     this.roomCounter += 1;
     const roomId = `room-${this.roomCounter}`;
     this.ensureRoom(roomId);
@@ -164,6 +214,29 @@ export class LinearThenvoiExampleRestApi implements RestApi {
     };
   }
 
+  public async getChatContext(request: {
+    chatId: string;
+    page?: number;
+    pageSize?: number;
+  }): Promise<PaginatedResponse<PlatformChatMessage>> {
+    this.ensureRoom(request.chatId);
+    const page = Math.max(1, request.page ?? 1);
+    const pageSize = Math.max(1, request.pageSize ?? 100);
+    const messages = this.roomMessagesByRoom.get(request.chatId) ?? [];
+    const start = (page - 1) * pageSize;
+    const end = start + pageSize;
+
+    return {
+      data: messages.slice(start, end),
+      metadata: {
+        page,
+        pageSize,
+        totalCount: messages.length,
+        totalPages: Math.max(1, Math.ceil(messages.length / pageSize)),
+      },
+    };
+  }
+
   private ensureRoom(roomId: string): void {
     if (this.rooms.has(roomId)) {
       return;
@@ -171,5 +244,6 @@ export class LinearThenvoiExampleRestApi implements RestApi {
 
     this.rooms.add(roomId);
     this.roomParticipants.set(roomId, []);
+    this.roomMessagesByRoom.set(roomId, []);
   }
 }

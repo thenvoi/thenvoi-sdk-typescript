@@ -10,6 +10,7 @@ export interface ToolOperationResult extends MetadataMap {
 export interface MentionReference {
   id: string;
   handle?: string;
+  name?: string;
   username?: string;
 }
 

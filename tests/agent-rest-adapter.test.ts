@@ -259,4 +259,50 @@ describe("AgentRestAdapter", () => {
       "https://example.thenvoi.test/api/v1/agent/chats/room-1/messages/next",
     );
   });
+
+  it("returns handle from getAgentMe and maps mention username to name", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        data: {
+          id: "agent-3",
+          name: "Agent Three",
+          handle: "darvell.long/agent-three",
+        },
+      }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock as typeof fetch);
+
+    const adapter = createAdapter();
+
+    await expect(adapter.getAgentMe()).resolves.toEqual({
+      id: "agent-3",
+      name: "Agent Three",
+      description: null,
+      handle: "darvell.long/agent-three",
+    });
+
+    await expect(adapter.createChatMessage("room-1", {
+      content: "@darvell.long/agent-three please respond",
+      mentions: [
+        {
+          id: "agent-3",
+          handle: "darvell.long/agent-three",
+          username: "Agent Three",
+        },
+      ],
+    })).resolves.toEqual({ ok: true });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      message: {
+        content: "@darvell.long/agent-three please respond",
+        mentions: [
+          {
+            id: "agent-3",
+            handle: "darvell.long/agent-three",
+            name: "Agent Three",
+          },
+        ],
+      },
+    });
+  });
 });

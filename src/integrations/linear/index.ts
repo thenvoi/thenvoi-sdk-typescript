@@ -1,4 +1,5 @@
 export {
+  completeLinearSession,
   handleAgentSessionEvent,
   postFinalResponseToLinearSession,
 } from "./bridge";
@@ -13,11 +14,16 @@ export {
   updatePlan,
 } from "./activities";
 export { createLinearTools } from "./tools";
+export {
+  createInProcessLinearBridgeDispatcher,
+  createLinearWebhookHandler,
+} from "./webhook";
 export type {
   RoomStrategy,
   WritebackMode,
   SessionStatus,
   LinearThenvoiBridgeConfig,
+  PendingBootstrapRequest,
   SessionRoomRecord,
   SessionRoomStore,
   LinearThenvoiBridgeDeps,
@@ -26,4 +32,9 @@ export type {
   PlanStep,
   LinearSessionStatus,
 } from "./types";
+export type {
+  CreateLinearWebhookHandlerOptions,
+  LinearBridgeDispatchJob,
+  LinearBridgeDispatcher,
+} from "./webhook";
 export { DEFAULT_STATUS_MAPPING } from "./constants";

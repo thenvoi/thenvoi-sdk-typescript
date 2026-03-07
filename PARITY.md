@@ -13,7 +13,7 @@ Validated against `thenvoi-sdk-python` core modules (agent/platform/runtime/core
 - SDK-backed tool-calling parity: `OpenAIAdapter` now defaults to official `openai` Chat Completions tool-calling and `AnthropicAdapter` now defaults to official `@anthropic-ai/sdk` Messages API tool-use/tool-result loops (with optional model override support)
 - Additional TS-native provider adapter: `GeminiAdapter` using official `@google/genai` function-calling (`models.generateContent`) with Thenvoi tool loop bridging
 - Framework adapter parity: `LangGraphAdapter` using official LangGraph JS (`createReactAgent`) and LangChain tool wrappers, with bootstrap system-prompt/history injection and tool start/end stream event forwarding
-- Native SDK adapters: `ClaudeSDKAdapter` (stable Claude Agent SDK TypeScript API with Thenvoi MCP bridge and room-scoped session resume metadata) and `CodexAdapter` (`@openai/codex-sdk` with room-scoped thread resume metadata + local slash commands)
+- Native SDK adapters: `ClaudeSDKAdapter` (stable Claude Agent SDK TypeScript API with Thenvoi MCP bridge and room-scoped session resume metadata) and `CodexAdapter` (Codex CLI app-server transport with room-scoped thread resume metadata, dynamic tool registration, typed custom tools, and local slash commands)
 - Execution reporting parity: `ToolCallingAdapter` can emit `tool_call` and `tool_result` events for OpenAI/Anthropic/Gemini tool loops (`enableExecutionReporting`)
 - A2A bridge adapter: `A2AAdapter` with session rehydration support from task-event metadata (`a2a_context_id`, `a2a_task_id`, `a2a_task_state`)
 - A2A gateway adapter: `A2AGatewayAdapter` exposing Thenvoi peers as A2A endpoints (`@a2a-js/sdk/server` + Express middleware) with room/context correlation and streaming status events
@@ -31,7 +31,7 @@ Validated against `thenvoi-sdk-python` core modules (agent/platform/runtime/core
 ## Adapter integration readiness
 
 - OpenAI/Anthropic adapters are SDK-backed by default and can still be overridden with a custom `ToolCallingModel`.
-- Claude/Codex adapters now call official SDK packages directly and are covered by adapter contract tests.
+- Claude adapter calls the official SDK package directly. Codex uses the official CLI app-server protocol directly because the current `@openai/codex-sdk` TypeScript surface does not expose dynamic tool registration/custom app-server primitives. Both are covered by adapter contract tests.
 - Tool schema generation and tool execution loop are stable and tested.
 - `A2AAdapter` supports optional `@a2a-js/sdk` lazy loading and task resubscription on room bootstrap.
 - `A2AGatewayAdapter` supports optional `@a2a-js/sdk/server` lazy loading and mounts peer-specific JSON-RPC + REST A2A routes.

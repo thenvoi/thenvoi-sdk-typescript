@@ -87,6 +87,9 @@ export {
   ValidationError,
 } from "./core/errors";
 export {
+  CODEX_REASONING_EFFORTS,
+  CODEX_REASONING_SUMMARIES,
+  CODEX_WEB_SEARCH_MODES,
   GenericAdapter,
   OpenAIAdapter,
   AnthropicAdapter,
@@ -115,6 +118,8 @@ export type {
   CodexApprovalPolicy,
   CodexSandboxMode,
   CodexReasoningEffort,
+  CodexReasoningSummary,
+  CodexWebSearchMode,
   ToolCallingModel,
 } from "./adapters";
 export type {
