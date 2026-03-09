@@ -15,13 +15,14 @@ import type { SessionRoomStore } from "./types";
 export interface CreateLinearToolsOptions {
   client: LinearActivityClient;
   store?: SessionRoomStore;
+  enableElicitation?: boolean;
 }
 
 /**
  * Create Linear activity tools usable by any adapter via `customTools`.
  */
 export function createLinearTools(options: CreateLinearToolsOptions): CustomToolDef[] {
-  const { client, store } = options;
+  const { client, store, enableElicitation = true } = options;
 
   const sessionBodySchema = z.object({
     session_id: z.string().describe("The Linear agent session ID"),
@@ -93,22 +94,24 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     },
   );
 
-  addSessionBodyTool(
-    "post_elicitation",
-    "Ask the Linear user a question via an elicitation activity.",
-    async (args) => {
-      await postElicitation(client, args.session_id as string, args.body as string);
-      return { ok: true };
-    },
-  );
-  addSessionBodyTool(
-    "linear_ask_user",
-    "Alias for post_elicitation.",
-    async (args) => {
-      await postElicitation(client, args.session_id as string, args.body as string);
-      return { ok: true };
-    },
-  );
+  if (enableElicitation) {
+    addSessionBodyTool(
+      "post_elicitation",
+      "Ask the Linear user a question via an elicitation activity.",
+      async (args) => {
+        await postElicitation(client, args.session_id as string, args.body as string);
+        return { ok: true };
+      },
+    );
+    addSessionBodyTool(
+      "linear_ask_user",
+      "Alias for post_elicitation.",
+      async (args) => {
+        await postElicitation(client, args.session_id as string, args.body as string);
+        return { ok: true };
+      },
+    );
+  }
 
   addSessionBodyTool(
     "complete_session",

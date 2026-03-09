@@ -226,6 +226,10 @@ async function runDispatchAttempt(
     sessionId: string;
   },
 ): Promise<void> {
+  const retryLimit = Number(process.env.LINEAR_THENVOI_DISPATCH_RETRY_LIMIT ?? String(DISPATCH_RETRY_LIMIT));
+  const retryBaseDelayMs = Number(
+    process.env.LINEAR_THENVOI_DISPATCH_RETRY_BASE_DELAY_MS ?? String(DISPATCH_RETRY_BASE_DELAY_MS),
+  );
   let attempt = 0;
 
   while (true) {
@@ -233,11 +237,11 @@ async function runDispatchAttempt(
       await task();
       return;
     } catch (error) {
-      if (!isRetryableDispatchError(error) || attempt >= DISPATCH_RETRY_LIMIT) {
+      if (!isRetryableDispatchError(error) || attempt >= retryLimit) {
         context.logger.error(context.failureEvent, {
           eventKey: context.eventKey,
           sessionId: context.sessionId,
-          error,
+          error: serializeError(error),
         });
         return;
       }
@@ -247,10 +251,10 @@ async function runDispatchAttempt(
         eventKey: context.eventKey,
         sessionId: context.sessionId,
         attempt,
-        delayMs: DISPATCH_RETRY_BASE_DELAY_MS * attempt,
-        error,
+        delayMs: retryBaseDelayMs * attempt,
+        error: serializeError(error),
       });
-      await sleep(DISPATCH_RETRY_BASE_DELAY_MS * attempt);
+      await sleep(retryBaseDelayMs * attempt);
     }
   }
 }
@@ -261,4 +265,21 @@ function isRetryableDispatchError(error: unknown): error is { retryable: true } 
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
+}
+
+function serializeError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+      ...(typeof (error as { retryable?: unknown }).retryable !== "undefined"
+        ? { retryable: (error as { retryable?: unknown }).retryable }
+        : {}),
+    };
+  }
+
+  return {
+    message: String(error),
+  };
 }

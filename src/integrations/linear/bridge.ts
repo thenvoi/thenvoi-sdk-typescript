@@ -698,6 +698,14 @@ function isRetryableRecoveredRoomEventError(error: unknown): boolean {
   return /\/api\/v1\/agent\/chats\/.+\/events failed \((403|404|429)/.test(error.message);
 }
 
+function isRetryableRateLimitError(error: unknown): boolean {
+  if (typeof error === "object" && error !== null && "retryable" in error) {
+    return (error as { retryable?: boolean }).retryable === true;
+  }
+
+  return error instanceof Error && /\b429\b/.test(error.message);
+}
+
 async function createFreshRoomRecord(input: {
   thenvoiRest: RestApi;
   store: SessionRoomStore;
@@ -795,7 +803,19 @@ async function ensureRoomParticipants(input: {
     return;
   }
 
-  const existingParticipants = await input.thenvoiRest.listChatParticipants(input.roomId);
+  let existingParticipants;
+  try {
+    existingParticipants = await input.thenvoiRest.listChatParticipants(input.roomId);
+  } catch (error) {
+    if (isRetryableRateLimitError(error)) {
+      input.logger.warn("linear_thenvoi_bridge.participant_list_rate_limited", {
+        roomId: input.roomId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+    throw error;
+  }
   const existingHandles = new Set(
     existingParticipants
       .map((participant) => stripHandlePrefix(participant.handle ?? participant.name))
@@ -826,11 +846,11 @@ async function ensureRoomParticipants(input: {
   for (const handle of missingHandles) {
     const participantId = peersByHandle.get(handle);
     if (!participantId) {
-      input.logger.error("linear_thenvoi_bridge.required_peer_not_found", {
+      input.logger.warn("linear_thenvoi_bridge.peer_not_found", {
         roomId: input.roomId,
         handle,
       });
-      throw new Error(`Linear bridge could not add required room participant @${handle}.`);
+      continue;
     }
 
     try {
@@ -842,12 +862,14 @@ async function ensureRoomParticipants(input: {
         },
       );
     } catch (error) {
-      input.logger.error("linear_thenvoi_bridge.add_participant_failed", {
+      input.logger.warn("linear_thenvoi_bridge.add_participant_failed", {
         roomId: input.roomId,
         handle,
         error: error instanceof Error ? error.message : String(error),
       });
-      throw error;
+      if (!isRetryableRateLimitError(error)) {
+        throw error;
+      }
     }
   }
 }
@@ -863,7 +885,19 @@ async function notifySuggestedPeers(input: {
     return;
   }
 
-  const participants = await input.thenvoiRest.listChatParticipants(input.roomId);
+  let participants;
+  try {
+    participants = await input.thenvoiRest.listChatParticipants(input.roomId);
+  } catch (error) {
+    if (isRetryableRateLimitError(error)) {
+      input.logger.warn("linear_thenvoi_bridge.peer_bootstrap_skipped_rate_limited", {
+        roomId: input.roomId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+    throw error;
+  }
   const participantMentions: Array<{ id: string; handle?: string; name?: string }> = [];
   for (const participant of participants) {
     const normalizedHandle = normalizeOptionalHandle(participant.handle ?? participant.name);

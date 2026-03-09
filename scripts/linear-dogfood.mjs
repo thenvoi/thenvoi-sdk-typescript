@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile } from "node:fs/promises";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -55,6 +55,15 @@ process.on("SIGTERM", () => {
 });
 
 try {
+  const port = Number(process.env.PORT ?? "8787");
+  const preflight = ensureBridgePortReady(port);
+  if (preflight.killedPids.length > 0) {
+    summary.preflight = {
+      port,
+      killedPids: preflight.killedPids,
+    };
+  }
+
   const bridgeProcess = startLoggedProcess({
     name: "bridge-stack",
     command: "pnpm",
@@ -63,6 +72,9 @@ try {
     extraEnv: {
       BRIDGE_LOG: join(logsDir, "bridge.log"),
       TUNNEL_LOG: join(logsDir, "tunnel.log"),
+      LINEAR_THENVOI_ROOM_RESET_TIMEOUT_MS: process.env.LINEAR_THENVOI_ROOM_RESET_TIMEOUT_MS ?? "60000",
+      LINEAR_THENVOI_DISPATCH_RETRY_LIMIT: process.env.LINEAR_THENVOI_DISPATCH_RETRY_LIMIT ?? "8",
+      LINEAR_THENVOI_DISPATCH_RETRY_BASE_DELAY_MS: process.env.LINEAR_THENVOI_DISPATCH_RETRY_BASE_DELAY_MS ?? "2000",
     },
   });
   shutdownCallbacks.push(() => stopChildProcess(bridgeProcess.child, "SIGTERM"));
@@ -82,8 +94,7 @@ try {
   });
   shutdownCallbacks.push(() => stopChildProcess(specialistsProcess.child, "SIGTERM"));
 
-  const port = Number(process.env.PORT ?? "8787");
-  await waitForBridgeHealth(port);
+  await waitForBridgeHealth(port, bridgeProcess);
   const specialistsReadyMatch = await waitForLoggedPattern(
     specialistsProcess,
     /linear_thenvoi_demo_specialists\.started/,
@@ -141,8 +152,10 @@ try {
   const initialSnapshot = await getIssueSnapshot(linear, issue.id);
 
   const enrichmentSession = await createIssueSession(linear, issue.id);
+  const enrichmentTracePath = join(logsDir, `session-enrich_issue-${enrichmentSession.id}.jsonl`);
   const enrichmentResult = await waitForSessionOutcome(linear, enrichmentSession.id, {
     timeoutMs: ENRICHMENT_TIMEOUT_MS,
+    tracePath: enrichmentTracePath,
   });
   const afterEnrichment = await getIssueSnapshot(linear, issue.id);
   const enrichmentChecks = evaluateEnrichment(initialSnapshot, afterEnrichment, enrichmentResult);
@@ -153,6 +166,10 @@ try {
     checks: enrichmentChecks,
     responsePreview: firstLine(enrichmentResult.responses[0] ?? null),
   });
+  summary.sessionTraces = {
+    ...(summary.sessionTraces ?? {}),
+    enrich_issue: enrichmentTracePath,
+  };
   assertScenarioPassed("enrich_issue", enrichmentChecks);
 
   const workflowStates = await listWorkflowStates(linear, issue.teamId);
@@ -180,8 +197,10 @@ try {
   );
 
   const implementationSession = await createCommentSession(linear, implementationPrompt.id);
+  const implementationTracePath = join(logsDir, `session-implement_from_comment-${implementationSession.id}.jsonl`);
   const implementationResult = await waitForSessionOutcome(linear, implementationSession.id, {
     timeoutMs: IMPLEMENTATION_TIMEOUT_MS,
+    tracePath: implementationTracePath,
   });
   const afterImplementation = await getIssueSnapshot(linear, issue.id);
   summary.workspaces = summarizeWorkspaces(specialistsTmpRoot);
@@ -198,6 +217,10 @@ try {
     checks: implementationChecks,
     responsePreview: firstLine(implementationResult.responses[0] ?? null),
   });
+  summary.sessionTraces = {
+    ...(summary.sessionTraces ?? {}),
+    implement_from_comment: implementationTracePath,
+  };
   assertScenarioPassed("implement_from_comment", implementationChecks);
 
   const followUpPrompt = await createIssueComment(
@@ -210,8 +233,10 @@ try {
   );
 
   const followUpSession = await createCommentSession(linear, followUpPrompt.id);
+  const followUpTracePath = join(logsDir, `session-follow_up_comment-${followUpSession.id}.jsonl`);
   const followUpResult = await waitForSessionOutcome(linear, followUpSession.id, {
     timeoutMs: FOLLOW_UP_TIMEOUT_MS,
+    tracePath: followUpTracePath,
   });
   const afterFollowUp = await getIssueSnapshot(linear, issue.id);
   const workspaceSummary = summarizeWorkspaces(specialistsTmpRoot);
@@ -224,6 +249,10 @@ try {
     checks: followUpChecks,
     responsePreview: firstLine(followUpResult.responses[0] ?? null),
   });
+  summary.sessionTraces = {
+    ...(summary.sessionTraces ?? {}),
+    follow_up_comment: followUpTracePath,
+  };
   assertScenarioPassed("follow_up_comment", followUpChecks);
 
   summary.finishedAt = new Date().toISOString();
@@ -326,7 +355,7 @@ async function stopChildProcess(child, signal) {
   }
 }
 
-async function waitForBridgeHealth(port) {
+async function waitForBridgeHealth(port, bridgeProcess) {
   const deadline = Date.now() + STACK_READY_TIMEOUT_MS;
   const url = `http://127.0.0.1:${port}/healthz`;
 
@@ -343,7 +372,15 @@ async function waitForBridgeHealth(port) {
     await sleep(1_000);
   }
 
-  throw new Error(`Bridge did not become healthy on ${url}.`);
+  const excerpt = bridgeProcess?.getBuffer
+    ? tailLines(bridgeProcess.getBuffer(), 40)
+    : "";
+  throw new Error(
+    [
+      `Bridge did not become healthy on ${url}.`,
+      excerpt ? `Recent bridge-stack log lines:\n${excerpt}` : "",
+    ].filter(Boolean).join("\n"),
+  );
 }
 
 async function waitForLoggedPattern(processHandle, pattern, timeoutMs) {
@@ -516,6 +553,7 @@ async function createCommentSession(client, commentId) {
 async function waitForSessionOutcome(client, sessionId, options) {
   const deadline = Date.now() + options.timeoutMs;
   let lastSeen = null;
+  let pollCount = 0;
 
   while (Date.now() < deadline) {
     const session = await client.agentSession(sessionId);
@@ -555,6 +593,31 @@ async function waitForSessionOutcome(client, sessionId, options) {
       errors,
       elicitations,
     };
+    pollCount += 1;
+    if (options.tracePath) {
+      writeFileSync(
+        options.tracePath,
+        `${JSON.stringify({
+          timestamp: new Date().toISOString(),
+          sessionId,
+          pollCount,
+          status: session.status,
+          counts: {
+            thoughts: thoughts.length,
+            responses: responses.length,
+            errors: errors.length,
+            elicitations: elicitations.length,
+          },
+          latest: {
+            thought: thoughts[0] ?? null,
+            response: responses[0] ?? null,
+            error: errors[0] ?? null,
+            elicitation: elicitations[0] ?? null,
+          },
+        })}\n`,
+        { flag: "a" },
+      );
+    }
 
     const bridgeError = errors.find((entry) => entry.includes("Bridge error:"));
     if (bridgeError) {
@@ -809,6 +872,58 @@ function writeSummary(root, data) {
 
 async function sleep(ms) {
   await new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
+}
+
+function tailLines(text, count) {
+  const lines = String(text ?? "").split("\n").filter((line) => line.trim().length > 0);
+  return lines.slice(-count).join("\n");
+}
+
+function ensureBridgePortReady(port) {
+  const lsof = spawnSync(
+    "lsof",
+    ["-t", `-iTCP:${port}`, "-sTCP:LISTEN"],
+    { encoding: "utf8" },
+  );
+  const pidLines = lsof.stdout?.trim().split("\n").filter(Boolean) ?? [];
+  const pids = [...new Set(pidLines.map((line) => Number(line)).filter((pid) => Number.isInteger(pid) && pid > 0))];
+  if (pids.length === 0) {
+    return { killedPids: [] };
+  }
+
+  const autoKill = process.env.LINEAR_DOGFOOD_AUTO_KILL_PORT !== "0";
+  if (!autoKill) {
+    throw new Error(
+      `Port ${port} is already in use by PIDs: ${pids.join(", ")}. Set LINEAR_DOGFOOD_AUTO_KILL_PORT=1 to auto-clean.`,
+    );
+  }
+
+  for (const pid of pids) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      // best effort
+    }
+  }
+
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const check = spawnSync("lsof", ["-t", `-iTCP:${port}`, "-sTCP:LISTEN"], { encoding: "utf8" });
+    const still = check.stdout?.trim().split("\n").filter(Boolean) ?? [];
+    if (still.length === 0) {
+      return { killedPids: pids };
+    }
+  }
+
+  for (const pid of pids) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // best effort
+    }
+  }
+
+  return { killedPids: pids };
 }
 
 async function shutdown(reason, exitCode) {

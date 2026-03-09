@@ -1,4 +1,5 @@
 import { LinearClient } from "@linear/sdk";
+import type { FrameworkAdapter, FrameworkAdapterInput } from "../../src/contracts/protocols";
 
 import {
   Agent,
@@ -38,19 +39,24 @@ function createLinearThenvoiBridgeAgentWithStore(
 
   const adapterMode = resolveBridgeAdapterMode();
   const adapter = adapterMode === "codex"
-    ? new CodexAdapter({
-      config: {
-        model: options?.codexModel ?? process.env.CODEX_MODEL ?? "gpt-5.3-codex",
-        approvalPolicy: "never",
-        sandboxMode: "workspace-write",
-        enableExecutionReporting: true,
-        emitThoughtEvents: true,
-        customSection: buildLinearThenvoiBridgePrompt(),
-      },
-      customTools: createLinearTools({
-        client: linearClient,
-        store: options.store,
+    ? createCodexBridgeAdapterWithTimeoutFallback({
+      codexAdapter: new CodexAdapter({
+        config: {
+          model: options?.codexModel ?? process.env.CODEX_MODEL ?? "gpt-5.3-codex",
+          approvalPolicy: "never",
+          sandboxMode: "workspace-write",
+          enableExecutionReporting: true,
+          emitThoughtEvents: true,
+          customSection: buildLinearThenvoiBridgePrompt(),
+        },
+        customTools: createLinearTools({
+          client: linearClient,
+          store: options.store,
+          enableElicitation: resolveBridgeElicitationEnabled(),
+        }),
       }),
+      linearClient,
+      store: options.store,
     })
     : createScriptedBridgeAdapter({
       linearClient,
@@ -79,6 +85,90 @@ function resolveBridgeAdapterMode(): "codex" | "scripted" {
   }
 
   return process.env.LINEAR_THENVOI_FORCE_CODEX === "1" ? "codex" : "scripted";
+}
+
+function resolveBridgeElicitationEnabled(): boolean {
+  return process.env.LINEAR_THENVOI_ALLOW_ELICITATION === "1";
+}
+
+function resolveBridgeCodexSessionTimeoutMs(): number | null {
+  const raw = process.env.LINEAR_THENVOI_CODEX_SESSION_TIMEOUT_MS?.trim();
+  if (!raw) {
+    return null;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 5_000) {
+    return null;
+  }
+  return parsed;
+}
+
+function createCodexBridgeAdapterWithTimeoutFallback(input: {
+  codexAdapter: CodexAdapter;
+  linearClient: LinearClient;
+  store: SessionRoomStore;
+}): FrameworkAdapter {
+  const timeoutMs = resolveBridgeCodexSessionTimeoutMs();
+
+  return {
+    onStarted: async (agentName: string, agentDescription: string): Promise<void> => {
+      await input.codexAdapter.onStarted(agentName, agentDescription);
+    },
+    onCleanup: async (roomId: string): Promise<void> => {
+      await input.codexAdapter.onCleanup(roomId);
+    },
+    onEvent: async (event: FrameworkAdapterInput): Promise<void> => {
+      const sessionId = asString(event.message.metadata?.linear_session_id);
+      if (!sessionId) {
+        await input.codexAdapter.onEvent(event);
+        return;
+      }
+
+      const issueId = asNullableString(event.message.metadata?.linear_issue_id);
+      const issueTitle = parseLineValue(event.message.content, "issue_title:");
+      const issueTeamId = parseLineValue(event.message.content, "issue_team_id:");
+      const intent = parseIntentFromBridgePayload(event.message.content);
+
+      if (timeoutMs === null) {
+        await input.codexAdapter.onEvent(event);
+        return;
+      }
+
+      let timer: NodeJS.Timeout | null = null;
+      try {
+        await Promise.race([
+          input.codexAdapter.onEvent(event),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              reject(new Error("linear_thenvoi_bridge.codex_timeout"));
+            }, timeoutMs);
+          }),
+        ]);
+      } catch (error) {
+        if (!(error instanceof Error) || error.message !== "linear_thenvoi_bridge.codex_timeout") {
+          throw error;
+        }
+
+        const body = intent === "implementation"
+          ? buildImplementationTimeoutSummary(issueTitle)
+          : buildPlanningTimeoutSummary(issueTitle);
+        await finalizeSession({
+          linearClient: input.linearClient,
+          store: input.store,
+          sessionId,
+          issueId,
+          issueTeamId,
+          intent,
+          body,
+        });
+      } finally {
+        if (timer) {
+          clearTimeout(timer);
+        }
+      }
+    },
+  };
 }
 
 function createScriptedBridgeAdapter(input: {
@@ -344,6 +434,24 @@ function buildImplementationFollowUpSummary(issueTitle: string | null): string {
     "- Existing implementation remains valid and review-ready.",
     "- No additional file changes were required for this follow-up prompt.",
     "- If requested, next iteration can tighten hero copy and CTA in a new implementation pass.",
+  ].join("\n");
+}
+
+function buildPlanningTimeoutSummary(issueTitle: string | null): string {
+  return [
+    `Planning fallback${issueTitle ? ` for ${issueTitle}` : ""}:`,
+    "- The bridge timed out waiting for extended collaborator interaction.",
+    "- Posted a conservative execution-ready baseline so work can continue asynchronously.",
+    "- You can rerun enrichment for deeper detail after collaborators are responsive.",
+  ].join("\n");
+}
+
+function buildImplementationTimeoutSummary(issueTitle: string | null): string {
+  return [
+    `Implementation fallback${issueTitle ? ` for ${issueTitle}` : ""}:`,
+    "- The bridge timed out waiting for collaborator output in this session window.",
+    "- Preserved issue continuity and completed the session with a fallback handoff summary.",
+    "- Re-run implementation session when collaborator capacity is available for concrete file output.",
   ].join("\n");
 }
 

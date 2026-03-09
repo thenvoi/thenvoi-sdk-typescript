@@ -234,17 +234,15 @@ export class AgentRuntime {
 
   public async resetRoomSession(roomId: string, timeoutMs?: number): Promise<boolean> {
     const execution = this.executions.get(roomId);
+    let graceful = true;
     if (execution) {
-      const graceful = await execution.stop(timeoutMs);
-      if (!graceful) {
-        return false;
-      }
+      graceful = await execution.stop(timeoutMs);
     }
 
     this.executions.delete(roomId);
     this.contexts.delete(roomId);
     await this.onSessionCleanup(roomId);
-    return true;
+    return graceful;
   }
 
   private getOrCreateExecution(roomId: string): Execution {

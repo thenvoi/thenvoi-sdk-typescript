@@ -128,6 +128,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
   private readonly includeMemoryTools: boolean;
   private readonly factoryOverride?: CodexFactory;
   private readonly logger: Logger;
+  private readonly debugEnabled: boolean;
   private client: CodexClientLike | null = null;
   private clientPromise: Promise<CodexClientLike> | null = null;
   private lastInitFailure = 0;
@@ -159,6 +160,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
     this.includeMemoryTools = options?.includeMemoryTools ?? false;
     this.factoryOverride = options?.factory;
     this.logger = options?.logger ?? new NoopLogger();
+    this.debugEnabled = process.env.LINEAR_THENVOI_CODEX_DEBUG === "1";
   }
 
   public override async onStarted(agentName: string, agentDescription: string): Promise<void> {
@@ -175,6 +177,12 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
     contactsMessage: string | null,
     context: { isSessionBootstrap: boolean; roomId: string },
   ): Promise<void> {
+    this.debug("codex_adapter.on_message.start", {
+      roomId: context.roomId,
+      isSessionBootstrap: context.isSessionBootstrap,
+      metadataSessionId: message.metadata?.linear_session_id ?? null,
+      metadataIssueId: message.metadata?.linear_issue_id ?? null,
+    });
     this.ensureSystemPrompt();
 
     const config = this.getConfig(context.roomId);
@@ -195,7 +203,9 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
       }
     }
 
+    this.debug("codex_adapter.client.ensure.start", { roomId: context.roomId });
     const client = await this.ensureClient();
+    this.debug("codex_adapter.client.ensure.done", { roomId: context.roomId });
     const threadId = await this.getOrCreateThread(
       context.roomId,
       tools,
@@ -204,6 +214,10 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
       message.metadata?.linear_reset_room_session !== true,
       config,
     );
+    this.debug("codex_adapter.thread.ready", {
+      roomId: context.roomId,
+      threadId,
+    });
 
     const input = this.buildTurnInput({
       message,
@@ -224,10 +238,19 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
       summary: config.reasoningSummary ?? null,
     };
 
+    this.debug("codex_adapter.turn.start", {
+      roomId: context.roomId,
+      threadId,
+    });
     const turnStarted = await client.request<TurnStartResponse>(
       "turn/start",
       turnParams as unknown as Record<string, unknown>,
     );
+    this.debug("codex_adapter.turn.started", {
+      roomId: context.roomId,
+      threadId,
+      turnId: turnStarted.turn.id,
+    });
 
     const turnId = turnStarted.turn.id;
     let finalText = "";
@@ -347,6 +370,13 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
       sawSendMessageTool,
       fallbackSendAgentText: config.fallbackSendAgentText ?? true,
     });
+    this.debug("codex_adapter.turn.completed", {
+      roomId: context.roomId,
+      threadId,
+      turnId,
+      turnStatus,
+      turnError,
+    });
   }
 
   public override async onCleanup(roomId: string): Promise<void> {
@@ -354,10 +384,10 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
     this.roomThreadInitPromises.delete(roomId);
     this.roomConfigOverrides.delete(roomId);
     this.needsHistoryInjection.delete(roomId);
+  }
 
-    if (this.roomThreadIds.size === 0) {
-      await this.resetClient();
-    }
+  public async onRuntimeStop(): Promise<void> {
+    await this.resetClient();
   }
 
   private getConfig(roomId: string): CodexAdapterConfig {
@@ -449,6 +479,13 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
         });
       }
     }
+  }
+
+  private debug(message: string, context: Record<string, unknown>): void {
+    if (!this.debugEnabled) {
+      return;
+    }
+    this.logger.info(message, context);
   }
 
   private async getOrCreateThread(
