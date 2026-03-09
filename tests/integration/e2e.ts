@@ -11,11 +11,12 @@
 import {
   Agent,
   GenericAdapter,
-  AgentRestAdapter,
   loadAgentConfig,
   ConsoleLogger,
 } from "../../src/index";
 import type { AgentInput } from "../../src/index";
+import { ThenvoiClient } from "@thenvoi/rest-client";
+import { FernRestAdapter } from "../../src/rest";
 
 const DEFAULT_REST_URL = "https://app.thenvoi.com/";
 
@@ -38,8 +39,8 @@ async function main() {
   const restUrl = implConfig.restUrl ?? DEFAULT_REST_URL;
   const logger = new ConsoleLogger();
 
-  const implRest = new AgentRestAdapter({ baseUrl: restUrl, apiKey: implConfig.apiKey });
-  const planRest = new AgentRestAdapter({ baseUrl: restUrl, apiKey: planConfig.apiKey });
+  const implRest = new FernRestAdapter(new ThenvoiClient({ baseUrl: restUrl, apiKey: implConfig.apiKey }));
+  const planRest = new FernRestAdapter(new ThenvoiClient({ baseUrl: restUrl, apiKey: planConfig.apiKey }));
 
   // ── Step 1: Verify both agent identities ─────────────────────────
   console.log("\n[e2e] === Agent Identities ===");

@@ -77,7 +77,8 @@ cp agent_config.yaml.example agent_config.yaml  # Edit with your agent credentia
 The root package intentionally focuses on the main runtime and adapter API. Lower-level helpers live under subpaths:
 
 ```ts
-import { AgentRestAdapter, RestFacade } from "@thenvoi/sdk/rest";
+import { FernRestAdapter, RestFacade } from "@thenvoi/sdk/rest";
+import { ThenvoiClient } from "@thenvoi/rest-client";
 import {
   CodexAppServerStdioClient,
   CODEX_REASONING_EFFORTS,
@@ -86,6 +87,10 @@ import {
 } from "@thenvoi/sdk/adapters";
 import { createLinearTools } from "@thenvoi/sdk/linear";
 import { FakeAgentTools } from "@thenvoi/sdk/testing";
+
+const rest = new RestFacade({
+  api: new FernRestAdapter(new ThenvoiClient({ apiKey: process.env.THENVOI_API_KEY })),
+});
 ```
 
 ---

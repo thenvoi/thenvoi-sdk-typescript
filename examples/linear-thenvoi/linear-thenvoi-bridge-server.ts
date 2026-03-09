@@ -1,5 +1,6 @@
 import express, { type NextFunction, type Request, type Response } from "express";
 import { LinearClient } from "@linear/sdk";
+import { ThenvoiClient } from "@thenvoi/rest-client";
 
 import {
   Agent,
@@ -20,7 +21,7 @@ import {
   type SessionRoomStore,
   type WritebackMode,
 } from "../../src/linear";
-import { AgentRestAdapter, type RestApi } from "../../src/rest";
+import { FernRestAdapter, type RestApi } from "../../src/rest";
 import { createLinearThenvoiBridgeAgent } from "./linear-thenvoi-bridge-agent";
 
 interface LinearThenvoiBridgeServerOptions {
@@ -40,6 +41,7 @@ const VALID_ROOM_STRATEGIES: ReadonlySet<RoomStrategy> = new Set(["issue", "sess
 const VALID_WRITEBACK_MODES: ReadonlySet<WritebackMode> = new Set(["final_only", "activity_stream"]);
 const DISPATCH_RETRY_LIMIT = 2;
 const DISPATCH_RETRY_BASE_DELAY_MS = 1_000;
+const DEFAULT_ROOM_RESET_TIMEOUT_MS = 5_000;
 
 export function createLinearThenvoiBridgeApp(options: LinearThenvoiBridgeServerOptions): express.Express {
   const logger = options.logger ?? new ConsoleLogger();
@@ -101,10 +103,14 @@ export function createLinearThenvoiBridgeApp(options: LinearThenvoiBridgeServerO
 export function createEmbeddedLinearBridgeDispatcher(options: {
   agent: Agent;
   store: SessionRoomStore;
+  ensureAgentStarted?: () => Promise<void>;
   logger?: Logger;
 }): LinearBridgeDispatcher {
   const logger = options.logger ?? new ConsoleLogger();
   const queued = new Set<string>();
+  const roomResetTimeoutMs = Number(
+    process.env.LINEAR_THENVOI_ROOM_RESET_TIMEOUT_MS ?? String(DEFAULT_ROOM_RESET_TIMEOUT_MS),
+  );
 
   return {
     isQueued: (eventKey: string) => queued.has(eventKey),
@@ -116,6 +122,9 @@ export function createEmbeddedLinearBridgeDispatcher(options: {
       queued.add(job.eventKey);
       queueMicrotask(() => {
         void runDispatchAttempt(async () => {
+          if (options.ensureAgentStarted) {
+            await options.ensureAgentStarted();
+          }
           await handleAgentSessionEvent(job.input, {
             skipAcknowledgment: true,
             expectedEventKey: job.eventKey,
@@ -130,19 +139,41 @@ export function createEmbeddedLinearBridgeDispatcher(options: {
 
           try {
             if (bootstrap.metadata?.linear_reset_room_session === true) {
-              const resetGraceful = await options.agent.resetRoomSession(bootstrap.thenvoiRoomId, 5_000);
+              const resetGraceful = await options.agent.resetRoomSession(
+                bootstrap.thenvoiRoomId,
+                roomResetTimeoutMs,
+              );
               if (!resetGraceful) {
-                throw new Error(`Timed out resetting room session for room ${bootstrap.thenvoiRoomId}.`);
+                logger.warn("linear_thenvoi_bridge.room_reset_timed_out_continuing", {
+                  roomId: bootstrap.thenvoiRoomId,
+                  timeoutMs: roomResetTimeoutMs,
+                  eventKey: job.eventKey,
+                });
               }
             }
+            logger.info("linear_thenvoi_bridge.embedded_bootstrap_start", {
+              roomId: bootstrap.thenvoiRoomId,
+              eventKey: job.eventKey,
+              sessionId: job.input.payload.agentSession.id,
+            });
             await options.agent.bootstrapRoomMessage(
               bootstrap.thenvoiRoomId,
               buildBootstrapMessage(bootstrap),
             );
+            logger.info("linear_thenvoi_bridge.embedded_bootstrap_success", {
+              roomId: bootstrap.thenvoiRoomId,
+              eventKey: job.eventKey,
+              sessionId: job.input.payload.agentSession.id,
+            });
           } catch (error) {
             throw markRetryableRoomEventError(error);
           }
           await options.store.markBootstrapRequestProcessed(job.eventKey);
+          logger.info("linear_thenvoi_bridge.embedded_bootstrap_marked_processed", {
+            roomId: bootstrap.thenvoiRoomId,
+            eventKey: job.eventKey,
+            sessionId: job.input.payload.agentSession.id,
+          });
         }, {
           logger,
           failureEvent: "linear_thenvoi_bridge.embedded_dispatch_failed",
@@ -309,6 +340,10 @@ async function runDispatchAttempt(
     sessionId: string;
   },
 ): Promise<void> {
+  const retryLimit = Number(process.env.LINEAR_THENVOI_DISPATCH_RETRY_LIMIT ?? String(DISPATCH_RETRY_LIMIT));
+  const retryBaseDelayMs = Number(
+    process.env.LINEAR_THENVOI_DISPATCH_RETRY_BASE_DELAY_MS ?? String(DISPATCH_RETRY_BASE_DELAY_MS),
+  );
   let attempt = 0;
 
   while (true) {
@@ -316,11 +351,11 @@ async function runDispatchAttempt(
       await task();
       return;
     } catch (error) {
-      if (!isRetryableDispatchError(error) || attempt >= DISPATCH_RETRY_LIMIT) {
+      if (!isRetryableDispatchError(error) || attempt >= retryLimit) {
         context.logger.error(context.failureEvent, {
           eventKey: context.eventKey,
           sessionId: context.sessionId,
-          error,
+          error: serializeError(error),
         });
         return;
       }
@@ -330,10 +365,10 @@ async function runDispatchAttempt(
         eventKey: context.eventKey,
         sessionId: context.sessionId,
         attempt,
-        delayMs: DISPATCH_RETRY_BASE_DELAY_MS * attempt,
-        error,
+        delayMs: retryBaseDelayMs * attempt,
+        error: serializeError(error),
       });
-      await sleep(DISPATCH_RETRY_BASE_DELAY_MS * attempt);
+      await sleep(retryBaseDelayMs * attempt);
     }
   }
 }
@@ -354,6 +389,23 @@ function markRetryableRoomEventError(error: unknown): unknown {
   return Object.assign(error, { retryable: true as const });
 }
 
+function serializeError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+      ...(typeof (error as { retryable?: unknown }).retryable !== "undefined"
+        ? { retryable: (error as { retryable?: unknown }).retryable }
+        : {}),
+    };
+  }
+
+  return {
+    message: String(error),
+  };
+}
+
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 }
@@ -372,10 +424,10 @@ async function runLinearThenvoiBridgeServer(): Promise<void> {
     embeddedBridgeConfig,
   });
   const stateDbPath = process.env.LINEAR_THENVOI_STATE_DB ?? ".linear-thenvoi-example.sqlite";
-  const restApi = new AgentRestAdapter({
+  const restApi = new FernRestAdapter(new ThenvoiClient({
     apiKey: bridgeApiKey,
     baseUrl: process.env.THENVOI_REST_URL ?? "https://app.thenvoi.com",
-  });
+  }));
   const store = createSqliteSessionRoomStore(stateDbPath);
   const linearAccessToken = getRequiredEnv("LINEAR_ACCESS_TOKEN");
   const linearWebhookSecret = getRequiredEnv("LINEAR_WEBHOOK_SECRET");
@@ -385,6 +437,7 @@ async function runLinearThenvoiBridgeServer(): Promise<void> {
 
   let embeddedAgent: Agent | null = null;
   let dispatcher: LinearBridgeDispatcher | undefined;
+  let embeddedAgentStartPromise: Promise<void> | null = null;
 
   if (embedBridgeAgent) {
     const bridgeConfig = embeddedBridgeConfig ?? loadAgentConfig(embeddedBridgeRuntimeConfigKey);
@@ -393,11 +446,20 @@ async function runLinearThenvoiBridgeServer(): Promise<void> {
       linearAccessToken,
       stateDbPath,
     });
-    await embeddedAgent.start();
 
     dispatcher = createEmbeddedLinearBridgeDispatcher({
       agent: embeddedAgent,
       store,
+      ensureAgentStarted: async () => {
+        if (!embeddedAgent) {
+          return;
+        }
+
+        if (!embeddedAgentStartPromise) {
+          embeddedAgentStartPromise = embeddedAgent.start();
+        }
+        await embeddedAgentStartPromise;
+      },
       logger,
     });
   }

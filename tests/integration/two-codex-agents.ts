@@ -12,10 +12,11 @@ import {
   Agent,
   CodexAdapter,
   GenericAdapter,
-  AgentRestAdapter,
   loadAgentConfig,
   ConsoleLogger,
 } from "../../src/index";
+import { ThenvoiClient } from "@thenvoi/rest-client";
+import { FernRestAdapter } from "../../src/rest";
 
 const REST_URL = "https://app.thenvoi.com/";
 
@@ -27,8 +28,8 @@ async function main() {
   const implConfig = loadAgentConfig("basic_agent");
   const planConfig = loadAgentConfig("planner_agent");
 
-  const implRest = new AgentRestAdapter({ baseUrl: REST_URL, apiKey: implConfig.apiKey });
-  const planRest = new AgentRestAdapter({ baseUrl: REST_URL, apiKey: planConfig.apiKey });
+  const implRest = new FernRestAdapter(new ThenvoiClient({ baseUrl: REST_URL, apiKey: implConfig.apiKey }));
+  const planRest = new FernRestAdapter(new ThenvoiClient({ baseUrl: REST_URL, apiKey: planConfig.apiKey }));
   const logger = new ConsoleLogger();
 
   const implMe = await implRest.getAgentMe();

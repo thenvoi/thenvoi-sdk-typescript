@@ -4,7 +4,10 @@
  *
  * Run:  npx tsx tests/integration/smoke.ts
  */
-import { Agent, GenericAdapter, loadAgentConfig, AgentRestAdapter } from "../../src/index";
+import { ThenvoiClient } from "@thenvoi/rest-client";
+
+import { Agent, GenericAdapter, loadAgentConfig } from "../../src/index";
+import { FernRestAdapter } from "../../src/rest";
 
 const DEFAULT_REST_URL = "https://app.thenvoi.com/";
 
@@ -14,7 +17,7 @@ async function main() {
 
   console.log("[smoke] Agent ID:", config.agentId);
 
-  const restApi = new AgentRestAdapter({ baseUrl: restUrl, apiKey: config.apiKey });
+  const restApi = new FernRestAdapter(new ThenvoiClient({ baseUrl: restUrl, apiKey: config.apiKey }));
 
   // --- Step 1: Test REST identity ---
   console.log("[smoke] Fetching agent identity...");

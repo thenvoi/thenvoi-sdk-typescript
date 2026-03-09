@@ -1,8 +1,7 @@
 import { ValidationError } from "../core/errors";
 import type { Logger } from "../core/logger";
 import { NoopLogger } from "../core/logger";
-import { RestFacade, type RestFacadeOptions } from "../client/rest/RestFacade";
-import { AgentRestAdapter } from "../client/rest/AgentRestAdapter";
+import { FernRestAdapter, RestFacade, type RestFacadeOptions } from "../client/rest/RestFacade";
 import type { PlatformChatMessage, ThenvoiLinkRestApi } from "../client/rest/types";
 import type { PlatformEvent } from "./events";
 import { assertCapability } from "../runtime/capabilities";
@@ -17,6 +16,7 @@ import {
   DEFAULT_AGENT_TOOLS_CAPABILITIES,
   type AgentToolsCapabilities,
 } from "../contracts/protocols";
+import { ThenvoiClient } from "@thenvoi/rest-client";
 
 export interface ThenvoiLinkOptions {
   agentId: string;
@@ -82,10 +82,12 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
       ...options.capabilities,
     };
 
-    const restApi = options.restApi ?? new AgentRestAdapter({
-      baseUrl: this.restUrl,
-      apiKey: this.apiKey,
-    });
+    const restApi = options.restApi ?? new FernRestAdapter(
+      new ThenvoiClient({
+        apiKey: this.apiKey,
+        baseUrl: this.restUrl,
+      }),
+    );
 
     this.rest = new RestFacade({
       api: restApi,

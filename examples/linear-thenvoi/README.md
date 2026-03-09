@@ -63,7 +63,7 @@ export THENVOI_API_KEY=thenvoi_api_xxx
 export THENVOI_BRIDGE_API_KEY=thenvoi_api_bridge_xxx
 ```
 
-The direct bridge server example uses `AgentRestAdapter` and the agent-scoped `/api/v1/agent/*` endpoints, matching the Python SDK implementation instead of the human `/api/v1/chats` surface.
+The direct bridge server example now uses `FernRestAdapter` backed by `@thenvoi/rest-client`, while still targeting the agent-scoped `/api/v1/agent/*` endpoints.
 The bridge creates agent chats without `task_id` unless you have a real Thenvoi task UUID. Linear issue IDs and session IDs are not valid substitutes for the `chat.task_id` field accepted by the agent API.
 `THENVOI_HOST_AGENT_HANDLE` is optional for the bridge; when omitted, the bridge resolves the host handle from `/api/v1/agent/me` so it always matches the authenticated agent in `agent_config.yaml`.
 If `THENVOI_REST_URL` is omitted, the example defaults to `https://app.thenvoi.com`.
@@ -133,6 +133,14 @@ export LINEAR_THENVOI_BRIDGE_AGENT_MODE=scripted   # default
 export LINEAR_THENVOI_SPECIALIST_MODE=scripted     # default
 # export LINEAR_THENVOI_SPECIALIST_MODE=codex
 
+# Bridge elicitation policy in Codex mode
+# Default is disabled so unattended runs won't stall on questions.
+# export LINEAR_THENVOI_ALLOW_ELICITATION=1
+
+# Optional hard timeout for a single Codex bridge session (ms).
+# Unset by default; only set if you want forced fallback behavior.
+# export LINEAR_THENVOI_CODEX_SESSION_TIMEOUT_MS=120000
+
 # Legacy convenience override
 # export LINEAR_THENVOI_FORCE_CODEX=1
 ```
@@ -163,6 +171,7 @@ What it does:
 - moves the issue to an in-progress state
 - runs implementation and follow-up sessions from real issue comments
 - verifies the issue reaches a review state and writes a report under `/tmp/thenvoi-linear-dogfood-*`
+- writes per-session activity traces to `logs/session-*.jsonl` for local observability
 
 Notes:
 - This depends on your Linear agent-session webhook already pointing at the tunnel or public URL used by the bridge stack.

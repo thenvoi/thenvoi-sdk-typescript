@@ -127,27 +127,32 @@ describe("PlatformRuntime", () => {
 
   it("exposes fern adapter for duck-typed client", async () => {
     const adapter = new FernRestAdapter({
-      myProfile: {
-        getMyProfile: async () => ({ id: "a1", name: "Agent" }),
+      agentApiIdentity: {
+        getAgentMe: async () => ({ data: { id: "a1", name: "Agent", description: null } }),
       },
-      chatMessages: {
-        createChatMessage: async () => ({ ok: true }),
-        markMessageProcessing: async () => ({ ok: true }),
-        markMessageProcessed: async () => ({ ok: true }),
-        markMessageFailed: async () => ({ ok: true }),
+      agentApiMessages: {
+        createAgentChatMessage: async () => ({ ok: true }),
+        markAgentMessageProcessing: async () => ({ ok: true }),
+        markAgentMessageProcessed: async () => ({ ok: true }),
+        markAgentMessageFailed: async () => ({ ok: true }),
       },
-      chatRooms: {
-        createChat: async () => ({ id: "room-1" }),
+      agentApiChats: {
+        createAgentChat: async () => ({ data: { id: "room-1" } }),
       },
-      chatParticipants: {
-        listChatParticipants: async () => ({ data: [] }),
-        addChatParticipant: async () => ({ ok: true }),
-        removeChatParticipant: async () => ({ ok: true }),
+      agentApiParticipants: {
+        listAgentChatParticipants: async () => ({ data: [] }),
+        addAgentChatParticipant: async () => ({ ok: true }),
+        removeAgentChatParticipant: async () => ({ ok: true }),
       },
     });
 
     const rest = new RestFacade({ api: adapter });
-    await expect(rest.getAgentMe()).resolves.toEqual({ id: "a1", name: "Agent", description: null });
+    await expect(rest.getAgentMe()).resolves.toEqual({
+      id: "a1",
+      name: "Agent",
+      description: null,
+      handle: null,
+    });
   });
 
   it("auto-subscribes existing rooms and unsubscribes on room_deleted", async () => {

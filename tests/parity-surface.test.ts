@@ -47,7 +47,6 @@ const expectedCoreExports = [
 ];
 
 const movedToSubpaths = [
-  "AgentRestAdapter",
   "FakeAgentTools",
   "FernRestAdapter",
   "RestFacade",
@@ -79,7 +78,7 @@ describe("sdk public surface", () => {
   it("exposes advanced helper modules via subpaths", () => {
     expect(rest).toHaveProperty("RestFacade");
     expect(rest).toHaveProperty("FernRestAdapter");
-    expect(rest).toHaveProperty("AgentRestAdapter");
+    expect(rest).not.toHaveProperty("AgentRestAdapter");
     expect(linear).toHaveProperty("createLinearTools");
     expect(linear).toHaveProperty("handleAgentSessionEvent");
     expect(testing).toHaveProperty("FakeAgentTools");

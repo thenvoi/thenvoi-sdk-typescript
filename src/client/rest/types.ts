@@ -226,10 +226,22 @@ export interface FernUserProfile {
 // Method syntax (not property-function syntax) is used intentionally so that
 // TypeScript checks parameter types bivariantly.
 export interface FernThenvoiClientLike {
+  agentApiIdentity?: {
+    getAgentMe(options?: RestRequestOptions): Promise<unknown>;
+  };
   myProfile?: {
     getMyProfile(options?: RestRequestOptions): Promise<FernUserProfile>;
   };
+  humanApiProfile?: {
+    getMyProfile(options?: RestRequestOptions): Promise<FernUserProfile>;
+  };
   agentPeers?: {
+    listAgentPeers?(
+      request?: { page?: number; page_size?: number; not_in_chat?: string },
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+  };
+  agentApiPeers?: {
     listAgentPeers?(
       request?: { page?: number; page_size?: number; not_in_chat?: string },
       options?: RestRequestOptions,
@@ -246,6 +258,28 @@ export interface FernThenvoiClientLike {
     ): Promise<unknown>;
     removeAgentContact?(
       request: { handle?: string; contact_id?: string },
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+    listAgentContactRequests?(
+      request?: { page?: number; page_size?: number; sent_status?: string },
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+    respondToAgentContactRequest?(
+      request: { action: ContactRequestAction; handle?: string; request_id?: string },
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+  };
+  agentApiContacts?: {
+    listAgentContacts?(
+      request?: { page?: number; page_size?: number },
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+    addAgentContact?(
+      request: { handle: string; message?: string },
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+    removeAgentContact?(
+      request?: { handle?: string; contact_id?: string },
       options?: RestRequestOptions,
     ): Promise<unknown>;
     listAgentContactRequests?(
@@ -279,7 +313,34 @@ export interface FernThenvoiClientLike {
       options?: RestRequestOptions,
     ): Promise<unknown>;
   };
+  agentApiMemories?: {
+    listAgentMemories?(
+      request?: ListMemoriesArgs,
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+    createAgentMemory?(
+      request: { memory: StoreMemoryArgs },
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+    getAgentMemory?(
+      memoryId: string,
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+    supersedeAgentMemory?(
+      memoryId: string,
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+    archiveAgentMemory?(
+      memoryId: string,
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+  };
   chatMessages?: {
+    listMessages?(
+      chatId: string,
+      request?: { page?: number; page_size?: number; status?: string },
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
     createChatMessage(
       chatId: string,
       request: {
@@ -313,6 +374,58 @@ export interface FernThenvoiClientLike {
       options?: RestRequestOptions,
     ): Promise<unknown>;
   };
+  agentApiMessages?: {
+    listAgentMessages?(
+      chatId: string,
+      request?: { page?: number; page_size?: number; status?: string },
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+    createAgentChatMessage?(
+      chatId: string,
+      request: {
+        message: {
+          content: string;
+          message_type?: string;
+          metadata?: MetadataMap;
+          mentions?: MentionReference[];
+        };
+      },
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+    markAgentMessageProcessing?(
+      chatId: string,
+      id: string,
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+    markAgentMessageProcessed?(
+      chatId: string,
+      id: string,
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+    markAgentMessageFailed?(
+      chatId: string,
+      id: string,
+      request: { error: string },
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+    getAgentNextMessage?(
+      chatId: string,
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+  };
+  agentApiEvents?: {
+    createAgentChatEvent?(
+      chatId: string,
+      request: {
+        event: {
+          content: string;
+          message_type: string;
+          metadata?: MetadataMap;
+        };
+      },
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+  };
   myChatMessages?: {
     createMyChatMessage(
       chatId: string,
@@ -337,6 +450,16 @@ export interface FernThenvoiClientLike {
       options?: RestRequestOptions,
     ): Promise<unknown>;
   };
+  agentApiChats?: {
+    createAgentChat?(
+      request: { chat: { task_id?: string } },
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+    listAgentChats?(
+      request?: { page?: number; page_size?: number },
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+  };
   chatParticipants?: {
     listChatParticipants(
       chatId: string,
@@ -351,6 +474,36 @@ export interface FernThenvoiClientLike {
     removeChatParticipant(
       chatId: string,
       participantId: string,
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+  };
+  chatContext?: {
+    getChatContext?(
+      chatId: string,
+      request?: { page?: number; page_size?: number },
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+  };
+  agentApiParticipants?: {
+    listAgentChatParticipants?(
+      chatId: string,
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+    addAgentChatParticipant?(
+      chatId: string,
+      request: { participant: { participant_id: string; role: string } },
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+    removeAgentChatParticipant?(
+      chatId: string,
+      participantId: string,
+      options?: RestRequestOptions,
+    ): Promise<unknown>;
+  };
+  agentApiContext?: {
+    getAgentChatContext?(
+      chatId: string,
+      request?: { page?: number; page_size?: number },
       options?: RestRequestOptions,
     ): Promise<unknown>;
   };
