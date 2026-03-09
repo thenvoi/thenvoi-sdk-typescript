@@ -10,7 +10,7 @@ interface ExecutionOptions {
   link: ThenvoiLink;
   context: ExecutionContext;
   onExecute: (context: ExecutionContext, event: PlatformEvent) => Promise<void>;
-  onFailure?: (error: unknown, event: PlatformEvent) => void;
+  onFailure?: (error: unknown, event: PlatformEvent) => void | Promise<void>;
   logger?: Logger;
 }
 
@@ -112,6 +112,10 @@ export class Execution {
     return graceful;
   }
 
+  public async waitUntilStopped(): Promise<void> {
+    await this.processTask;
+  }
+
   private async processLoop(): Promise<void> {
     await this.synchronizeWithNext();
 
@@ -160,7 +164,7 @@ export class Execution {
       await this.onExecute(this.context, event);
     } catch (error: unknown) {
       if (this.onFailure) {
-        this.onFailure(error, event);
+        await this.onFailure(error, event);
       } else {
         this.logger.error("Execution queue task failed", {
           roomId: this.roomId,
@@ -168,6 +172,10 @@ export class Execution {
           error,
         });
       }
+      this.running = false;
+      this.eventQueue.splice(0, this.eventQueue.length);
+      this.resolveEventWaiters(null);
+      throw error;
     } finally {
       this.inFlight -= 1;
       this.context.setState("idle");

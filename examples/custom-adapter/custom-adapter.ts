@@ -1,4 +1,5 @@
-import { Agent, SimpleAdapter, type AdapterToolsProtocol, type HistoryProvider, type PlatformMessage, loadAgentConfig, isDirectExecution } from "../../src/index";
+import { Agent, SimpleAdapter, type HistoryProvider, type PlatformMessage, loadAgentConfig, isDirectExecution } from "../../src/index";
+import type { AdapterToolsProtocol } from "../../src/core";
 
 class EchoAdapter extends SimpleAdapter<HistoryProvider> {
   public async onMessage(

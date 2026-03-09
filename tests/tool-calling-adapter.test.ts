@@ -3,11 +3,11 @@ import { z } from "zod";
 
 import {
   OpenAIAdapter,
-  type AgentToolsProtocol,
   type CustomToolDef,
   type HistoryProvider,
   type PlatformMessage,
 } from "../src/index";
+import type { AgentToolsProtocol } from "../src/core";
 import type { ToolCallingModel } from "../src/adapters";
 import type {
   ContactRequestsResult,

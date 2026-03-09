@@ -75,6 +75,11 @@ interface RuntimeA2AServerModules {
   createExpressApp: ExpressFactory;
 }
 
+interface AuthenticatedGatewayUser {
+  id: string;
+  authType: "bearer" | "none";
+}
+
 class GatewayPeerExecutor {
   private readonly peer: GatewayPeer;
   private readonly onRequest: GatewayServerOptions["onRequest"];
@@ -171,7 +176,11 @@ export class GatewayServer implements GatewayServerLike {
       return;
     }
 
-    assertGatewayAuthPolicy(this.options.host, this.options.authToken);
+    assertGatewayAuthPolicy(
+      this.options.host,
+      this.options.authToken,
+      this.options.allowUnauthenticatedLoopback ?? false,
+    );
 
     const modulesLoader = this.options.loadModules as (() => Promise<RuntimeA2AServerModules>) | undefined;
     const modules = await (modulesLoader ? modulesLoader() : loadA2AServerModules());
@@ -206,7 +215,13 @@ export class GatewayServer implements GatewayServerLike {
         }),
       );
 
-      const userBuilder = modules.UserBuilder.noAuthentication;
+      const userBuilder = createUserBuilder(
+        {
+          authToken: this.options.authToken,
+          allowUnauthenticatedLoopback: this.options.allowUnauthenticatedLoopback ?? false,
+        },
+        modules,
+      );
       const peerBasePath = `/agents/${slug}`;
 
       app.get(
@@ -440,13 +455,21 @@ function listen(
   });
 }
 
-function assertGatewayAuthPolicy(host: string, authToken?: string): void {
-  if (authToken || isLoopbackHost(host)) {
+function assertGatewayAuthPolicy(
+  host: string,
+  authToken?: string,
+  allowUnauthenticatedLoopback = false,
+): void {
+  if (authToken) {
+    return;
+  }
+
+  if (allowUnauthenticatedLoopback && isLoopbackHost(host)) {
     return;
   }
 
   throw new Error(
-    "A2A gateway authToken is required when binding to a non-loopback host.",
+    "A2A gateway authToken is required unless allowUnauthenticatedLoopback is explicitly enabled on a loopback host.",
   );
 }
 
@@ -495,6 +518,43 @@ function createGatewayAuthMiddleware(
     response.status(401).json({
       error: "Unauthorized",
     });
+  };
+}
+
+function createUserBuilder(
+  options: {
+    authToken?: string;
+    allowUnauthenticatedLoopback: boolean;
+  },
+  modules: RuntimeA2AServerModules,
+): (request: ExpressRequestLike) => Promise<AuthenticatedGatewayUser> {
+  if (!options.authToken) {
+    if (!options.allowUnauthenticatedLoopback) {
+      throw new Error(
+        "A2A gateway authToken is required unless allowUnauthenticatedLoopback is explicitly enabled on a loopback host.",
+      );
+    }
+
+    return async (request) => {
+      const user = await modules.UserBuilder.noAuthentication(request);
+      return {
+        id: asNonEmptyString((user as { id?: string } | null | undefined)?.id) ?? "loopback-anonymous",
+        authType: "none",
+      };
+    };
+  }
+
+  return async (request) => {
+    const authorization = getAuthorizationHeader(request.headers);
+    const expected = `Bearer ${options.authToken}`;
+    if (!authorization || !safeHeaderEquals(authorization, expected)) {
+      throw new Error("Unauthorized");
+    }
+
+    return {
+      id: "gateway-bearer",
+      authType: "bearer",
+    };
   };
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { AgentToolsProtocol } from "../src/index";
+import type { AgentToolsProtocol } from "../src/core";
 import { createThenvoiMcpBridge } from "../src/adapters/claude-sdk/mcp";
 
 describe("createThenvoiMcpBridge", () => {

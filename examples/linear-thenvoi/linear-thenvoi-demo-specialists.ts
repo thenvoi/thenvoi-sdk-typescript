@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 
 import {
   Agent,
-  ConsoleLogger,
   isDirectExecution,
   loadAgentConfig,
 } from "../../src/index";
+import { ConsoleLogger } from "../../src/core";
 import { createLinearThenvoiSpecialistAgent } from "./linear-thenvoi-specialist-agent";
 
 interface RoleAgentInstance {

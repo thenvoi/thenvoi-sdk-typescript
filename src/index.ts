@@ -72,20 +72,7 @@ export {
   type AgentCredentials,
   type LoadAgentConfigFromEnvOptions,
 } from "./config";
-export type { StreamingTransport } from "./platform/streaming/transport";
-export {
-  ConsoleLogger,
-  NoopLogger,
-  type Logger,
-} from "./core/logger";
 export { isDirectExecution } from "./core/isDirectExecution";
-export {
-  ThenvoiSdkError,
-  RuntimeStateError,
-  TransportError,
-  UnsupportedFeatureError,
-  ValidationError,
-} from "./core/errors";
 export {
   CODEX_REASONING_EFFORTS,
   CODEX_REASONING_SUMMARIES,
@@ -122,19 +109,4 @@ export type {
   CodexWebSearchMode,
   ToolCallingModel,
 } from "./adapters";
-export type {
-  FrameworkAdapter,
-  HistoryConverter,
-  MessagingTools,
-  RoomParticipantTools,
-  PeerLookupTools,
-  ParticipantTools,
-  ToolSchemaProvider,
-  ContactTools,
-  MemoryTools,
-  ToolExecutor,
-  Preprocessor,
-  AdapterToolsProtocol,
-  AgentToolsProtocol,
-} from "./contracts/protocols";
 export { SimpleAdapter } from "./core/simpleAdapter";

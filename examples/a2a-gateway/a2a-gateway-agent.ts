@@ -3,7 +3,7 @@ import { FernRestAdapter } from "../../src/rest";
 import { ThenvoiClient } from "@thenvoi/rest-client";
 
 export function createA2AGatewayAgent(
-  options?: { port?: number; gatewayUrl?: string },
+  options?: { port?: number; gatewayUrl?: string; authToken?: string },
   overrides?: { agentId?: string; apiKey?: string },
 ): Agent {
   const thenvoiApiKey = overrides?.apiKey ?? "api-key";
@@ -15,6 +15,7 @@ export function createA2AGatewayAgent(
     thenvoiRest: restApi,
     port: options?.port,
     gatewayUrl: options?.gatewayUrl,
+    authToken: options?.authToken ?? thenvoiApiKey,
   });
 
   return Agent.create({

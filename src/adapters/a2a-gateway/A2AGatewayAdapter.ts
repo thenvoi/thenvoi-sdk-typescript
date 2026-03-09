@@ -40,6 +40,7 @@ export class A2AGatewayAdapter
   private readonly host: string;
   private readonly port: number;
   private readonly authToken?: string;
+  private readonly allowUnauthenticatedLoopback: boolean;
   private readonly responseTimeoutMs: number;
   private readonly peerPageSize: number;
   private readonly maxPeerPages: number;
@@ -64,6 +65,7 @@ export class A2AGatewayAdapter
     this.host = options.host ?? DEFAULT_HOST;
     this.port = options.port ?? DEFAULT_PORT;
     this.authToken = options.authToken;
+    this.allowUnauthenticatedLoopback = options.allowUnauthenticatedLoopback ?? false;
     this.responseTimeoutMs = options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS;
     this.peerPageSize = options.peerPageSize ?? DEFAULT_PEER_PAGE_SIZE;
     this.maxPeerPages = options.maxPeerPages ?? DEFAULT_MAX_PEER_PAGES;
@@ -84,6 +86,7 @@ export class A2AGatewayAdapter
       host: this.host,
       port: this.port,
       authToken: this.authToken,
+      allowUnauthenticatedLoopback: this.allowUnauthenticatedLoopback,
       onRequest: (request) => this.handleGatewayRequest(request),
       onCancel: async (request) => {
         this.cancelPendingTask(request.taskId, request.peerId);

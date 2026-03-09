@@ -12,7 +12,8 @@ import {
   resolveSpecialistWorkspace,
 } from "../examples/linear-thenvoi/linear-thenvoi-specialist-agent";
 import { LinearThenvoiExampleRestApi } from "../examples/linear-thenvoi/linear-thenvoi-rest-stub";
-import type { Agent, Logger } from "../src/index";
+import type { Agent } from "../src/index";
+import type { Logger } from "../src/core";
 import type {
   HandleAgentSessionEventInput,
   PendingBootstrapRequest,

@@ -1,8 +1,8 @@
 import {
-  ConsoleLogger,
   isDirectExecution,
   loadAgentConfig,
 } from "../../src/index";
+import { ConsoleLogger } from "../../src/core";
 import {
   createLinearThenvoiCoderAgent,
   createLinearThenvoiPlannerAgent,

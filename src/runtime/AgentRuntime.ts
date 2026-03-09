@@ -31,11 +31,13 @@ export class AgentRuntime {
   private readonly autoSubscribeExistingRooms: boolean;
   private readonly contexts = new Map<string, ExecutionContext>();
   private readonly executions = new Map<string, Execution>();
+  private readonly executionWatchers = new Map<string, Promise<void>>();
   private readonly logger: Logger;
   private running = false;
   private stopping = false;
   private stopController = new AbortController();
   private consumeTask: Promise<void> | null = null;
+  private fatalError: unknown = null;
 
   public constructor(options: AgentRuntimeOptions) {
     this.link = options.link;
@@ -70,6 +72,7 @@ export class AgentRuntime {
 
     this.running = true;
     this.stopping = false;
+    this.fatalError = null;
     if (!this.stopController.signal.aborted) {
       this.stopController.abort();
     }
@@ -106,12 +109,16 @@ export class AgentRuntime {
 
     this.contexts.clear();
     this.executions.clear();
+    this.executionWatchers.clear();
 
     if (this.link.capabilities.contacts) {
       await this.link.unsubscribeAgentContacts();
     }
 
     await this.link.disconnect();
+    if (this.fatalError) {
+      throw this.fatalError;
+    }
     return graceful;
   }
 
@@ -120,7 +127,15 @@ export class AgentRuntime {
   }
 
   public async waitUntilStopped(): Promise<void> {
-    await this.link.runForever(this.stopController.signal);
+    if (this.consumeTask) {
+      await this.consumeTask;
+    } else {
+      await this.link.runForever(this.stopController.signal);
+    }
+
+    if (this.fatalError) {
+      throw this.fatalError;
+    }
   }
 
   public contextsList(): ExecutionContext[] {
@@ -136,22 +151,8 @@ export class AgentRuntime {
       try {
         await this.handleEvent(event);
       } catch (error: unknown) {
-        this.logger.error("Error handling platform event", {
-          eventType: event.type,
-          roomId: event.roomId,
-          error,
-        });
-        if (this.onError) {
-          try {
-            this.onError(error, event);
-          } catch (observerError: unknown) {
-            this.logger.error("Error in runtime onError callback", {
-              eventType: event.type,
-              roomId: event.roomId,
-              error: observerError,
-            });
-          }
-        }
+        await this.failRuntime(error, event);
+        return;
       }
     }
   }
@@ -256,27 +257,34 @@ export class AgentRuntime {
       link: this.link,
       context: this.getOrCreateContext(roomId),
       onExecute: this.onExecute,
-      onFailure: (error, event) => {
-        this.logger.error("Execution queue task failed", {
-          roomId,
-          eventType: event.type,
-          error,
-        });
-        if (this.onError) {
-          try {
-            this.onError(error, event);
-          } catch (observerError: unknown) {
-            this.logger.error("Error in runtime onError callback", {
-              eventType: event.type,
-              roomId,
-              error: observerError,
-            });
-          }
-        }
+      onFailure: async (error, event) => {
+        await this.failRuntime(error, event);
       },
       logger: this.logger,
     });
     this.executions.set(roomId, execution);
+    const watcher = execution.waitUntilStopped()
+      .catch(async (error: unknown) => {
+        await this.failRuntime(error, {
+          type: "message_created",
+          roomId,
+          payload: {
+            id: "execution-failed",
+            content: "",
+            sender_id: this.agentId,
+            sender_type: "Agent",
+            sender_name: null,
+            message_type: "text",
+            metadata: {},
+            inserted_at: new Date(0).toISOString(),
+            updated_at: new Date(0).toISOString(),
+          },
+        });
+      })
+      .finally(() => {
+        this.executionWatchers.delete(roomId);
+      });
+    this.executionWatchers.set(roomId, watcher);
     return execution;
   }
 
@@ -325,6 +333,39 @@ export class AgentRuntime {
       }
 
       throw error;
+    }
+  }
+
+  private async failRuntime(error: unknown, event: PlatformEvent): Promise<void> {
+    if (!this.fatalError) {
+      this.fatalError = error;
+      this.running = false;
+      this.logger.error("Fatal runtime error handling platform event", {
+        eventType: event.type,
+        roomId: event.roomId,
+        error,
+      });
+      this.notifyOnError(error, event);
+    }
+
+    if (!this.stopController.signal.aborted) {
+      this.stopController.abort();
+    }
+  }
+
+  private notifyOnError(error: unknown, event: PlatformEvent): void {
+    if (!this.onError) {
+      return;
+    }
+
+    try {
+      this.onError(error, event);
+    } catch (observerError: unknown) {
+      this.logger.error("Error in runtime onError callback", {
+        eventType: event.type,
+        roomId: event.roomId,
+        error: observerError,
+      });
     }
   }
 }

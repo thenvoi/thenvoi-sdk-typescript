@@ -53,6 +53,17 @@ const movedToSubpaths = [
   "createLinearTools",
   "createSqliteSessionRoomStore",
   "handleAgentSessionEvent",
+  "ConsoleLogger",
+  "NoopLogger",
+  "ValidationError",
+  "UnsupportedFeatureError",
+  "TransportError",
+  "RuntimeStateError",
+  "ThenvoiSdkError",
+  "AdapterToolsProtocol",
+  "AgentToolsProtocol",
+  "FrameworkAdapter",
+  "HistoryConverter",
 ];
 
 describe("sdk public surface", () => {

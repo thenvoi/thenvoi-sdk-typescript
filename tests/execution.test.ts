@@ -76,7 +76,7 @@ describe("Execution", () => {
     vi.restoreAllMocks();
   });
 
-  it("continues processing later events after a handler failure", async () => {
+  it("stops processing and surfaces handler failures", async () => {
     let failFirst = true;
     const { execution, processed } = createExecution({
       onExecute: async () => {
@@ -89,9 +89,9 @@ describe("Execution", () => {
 
     await execution.enqueue(makeEvent("m1"));
     await execution.enqueue(makeEvent("m2"));
-    await expect(execution.waitForIdle()).resolves.toBe(true);
-    expect(processed).toEqual(["m1", "m2"]);
-    await execution.stop();
+    await expect(execution.waitUntilStopped()).rejects.toThrow("boom");
+    expect(processed).toEqual(["m1"]);
+    await expect(execution.stop()).rejects.toThrow("boom");
   });
 
   it("sets state to processing then idle around execution", async () => {

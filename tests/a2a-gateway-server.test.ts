@@ -82,9 +82,9 @@ function createModulesRecorder() {
     UserBuilder: {
       noAuthentication: async () => ({ id: "anon" }),
     },
-    agentCardHandler: () => "agent-card-handler",
-    jsonRpcHandler: () => "jsonrpc-handler",
-    restHandler: () => "rest-handler",
+    agentCardHandler: (options: Record<string, unknown>) => ({ kind: "agent-card-handler", options }),
+    jsonRpcHandler: (options: Record<string, unknown>) => ({ kind: "jsonrpc-handler", options }),
+    restHandler: (options: Record<string, unknown>) => ({ kind: "rest-handler", options }),
     createExpressApp,
   };
 
@@ -95,6 +95,17 @@ function createModulesRecorder() {
 }
 
 describe("GatewayServer", () => {
+  it("requires auth by default, even on loopback", async () => {
+    const { loadModules } = createModulesRecorder();
+    const server = createGatewayServer(makeServerOptions({
+      loadModules,
+    }));
+
+    await expect(server.start()).rejects.toThrow(
+      "A2A gateway authToken is required unless allowUnauthenticatedLoopback is explicitly enabled on a loopback host.",
+    );
+  });
+
   it("requires auth when binding to a non-loopback host", async () => {
     const { loadModules } = createModulesRecorder();
     const server = createGatewayServer(makeServerOptions({
@@ -103,8 +114,48 @@ describe("GatewayServer", () => {
     }));
 
     await expect(server.start()).rejects.toThrow(
-      "A2A gateway authToken is required when binding to a non-loopback host.",
+      "A2A gateway authToken is required unless allowUnauthenticatedLoopback is explicitly enabled on a loopback host.",
     );
+  });
+
+  it("allows explicit unauthenticated loopback mode", async () => {
+    const { loadModules } = createModulesRecorder();
+    const server = createGatewayServer(makeServerOptions({
+      allowUnauthenticatedLoopback: true,
+      loadModules,
+    }));
+
+    await expect(server.start()).resolves.toBeUndefined();
+    await server.stop();
+  });
+
+  it("uses an authenticated user builder when bearer auth is configured", async () => {
+    const { recordedUses, loadModules } = createModulesRecorder();
+    const server = createGatewayServer(makeServerOptions({
+      authToken: "secret-token",
+      loadModules,
+    }));
+
+    await server.start();
+    await server.stop();
+
+    const handlerConfig = recordedUses.find(
+      (entry) =>
+        entry.args[0] === "/agents/weather/v1"
+        && typeof entry.args[2] === "object"
+        && (entry.args[2] as { kind?: string }).kind === "rest-handler",
+    );
+    const options = (handlerConfig?.args[2] as { options?: { userBuilder?: (request: { headers?: Record<string, string> }) => Promise<unknown> } } | undefined)?.options;
+
+    expect(typeof options?.userBuilder).toBe("function");
+    await expect(options?.userBuilder?.({
+      headers: {
+        authorization: "Bearer secret-token",
+      },
+    })).resolves.toEqual({
+      id: "gateway-bearer",
+      authType: "bearer",
+    });
   });
 
   it("applies security headers and bearer auth middleware when configured", async () => {

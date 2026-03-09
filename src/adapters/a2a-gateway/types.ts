@@ -93,6 +93,7 @@ export interface GatewayServerOptions {
   host: string;
   port: number;
   authToken?: string;
+  allowUnauthenticatedLoopback?: boolean;
   onRequest: (
     request: GatewayRequest,
   ) => AsyncIterable<GatewayA2AStatusUpdateEvent>;
@@ -110,6 +111,7 @@ export interface A2AGatewayAdapterOptions {
   host?: string;
   port?: number;
   authToken?: string;
+  allowUnauthenticatedLoopback?: boolean;
   responseTimeoutMs?: number;
   peerPageSize?: number;
   maxPeerPages?: number;

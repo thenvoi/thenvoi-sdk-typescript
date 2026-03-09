@@ -5,12 +5,11 @@ import { ThenvoiClient } from "@thenvoi/rest-client";
 import {
   Agent,
   type AgentConfigResult,
-  ConsoleLogger,
-  type Logger,
   type PlatformMessage,
   isDirectExecution,
   loadAgentConfig,
 } from "../../src/index";
+import { ConsoleLogger, type Logger } from "../../src/core";
 import {
   createSqliteSessionRoomStore,
   createLinearWebhookHandler,

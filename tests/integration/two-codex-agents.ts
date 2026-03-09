@@ -13,8 +13,8 @@ import {
   CodexAdapter,
   GenericAdapter,
   loadAgentConfig,
-  ConsoleLogger,
 } from "../../src/index";
+import { ConsoleLogger } from "../../src/core";
 import { ThenvoiClient } from "@thenvoi/rest-client";
 import { FernRestAdapter } from "../../src/rest";
 

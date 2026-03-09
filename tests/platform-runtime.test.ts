@@ -212,6 +212,47 @@ describe("PlatformRuntime", () => {
     await runtime.stop();
   });
 
+  it("propagates fatal adapter failures through runForever", async () => {
+    const transport = new FakeTransport();
+    const adapter = new GenericAdapter(async () => {
+      throw new Error("adapter exploded");
+    });
+
+    const runtime = new PlatformRuntime({
+      agentId: "a1",
+      apiKey: "k",
+      link: new ThenvoiLink({
+        agentId: "a1",
+        apiKey: "k",
+        transport,
+        restApi: new FakeRestApi(),
+      }),
+    });
+
+    await runtime.start(adapter);
+    const runPromise = runtime.runForever();
+
+    await transport.emit("agent_rooms:a1", "room_added", {
+      id: "room-1",
+      status: "active",
+      type: "direct",
+      title: "Room",
+      removed_at: "",
+    });
+    await transport.emit("chat_room:room-1", "message_created", {
+      id: "m-fail",
+      content: "explode",
+      message_type: "text",
+      sender_id: "u1",
+      sender_type: "User",
+      sender_name: "Jane",
+      inserted_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    await expect(runPromise).rejects.toThrow("adapter exploded");
+  });
+
   it("synchronizes existing rooms via /messages/next and skips the sync-point websocket duplicate", async () => {
     const transport = new FakeTransport();
     let releaseSync!: () => void;
