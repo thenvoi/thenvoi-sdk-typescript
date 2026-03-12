@@ -104,6 +104,44 @@ class FlakyRecoveredRoomRestApi extends LinearThenvoiExampleRestApi {
   }
 }
 
+class RateLimitedRecoveredRoomRestApi extends LinearThenvoiExampleRestApi {
+  private readonly failedRooms = new Set<string>();
+  private readonly retriedRecoveredRooms = new Set<string>();
+
+  public override async createChatEvent(
+    chatId: string,
+    event: {
+      content: string;
+      messageType: string;
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<Record<string, unknown>> {
+    const existingEventCount = this.roomEvents.filter((entry) => entry.roomId === chatId).length;
+    if (existingEventCount >= 1 && !this.failedRooms.has(chatId)) {
+      this.failedRooms.add(chatId);
+      throw new Error(`POST /api/v1/agent/chats/${chatId}/events failed (403; response body omitted; content-type=text/html)`);
+    }
+
+    if (chatId !== "room-1" && existingEventCount === 0 && !this.retriedRecoveredRooms.has(chatId)) {
+      this.retriedRecoveredRooms.add(chatId);
+      throw new Error(`POST /api/v1/agent/chats/${chatId}/events failed (429; response body omitted; content-type=text/html)`);
+    }
+
+    return super.createChatEvent(chatId, event);
+  }
+}
+
+class RateLimitedParticipantsRestApi extends LinearThenvoiExampleRestApi {
+  public override async listChatParticipants(): Promise<Array<{
+    id: string;
+    name: string;
+    type: string;
+    handle?: string | null;
+  }>> {
+    throw Object.assign(new Error("429 Too Many Requests"), { retryable: true });
+  }
+}
+
 function makeConfig(roomStrategy: "issue" | "session"): LinearThenvoiBridgeConfig {
   return {
     linearAccessToken: "lin_api_test",
@@ -338,5 +376,69 @@ describe("linear bridge room strategy", () => {
         process.env.LINEAR_THENVOI_RECOVERED_ROOM_RETRY_BASE_DELAY_MS = previousDelay;
       }
     }
+  });
+
+  it("retries recreated-room forwarding when the first post is rate limited", async () => {
+    const previousDelay = process.env.LINEAR_THENVOI_RECOVERED_ROOM_RETRY_BASE_DELAY_MS;
+    process.env.LINEAR_THENVOI_RECOVERED_ROOM_RETRY_BASE_DELAY_MS = "0";
+    try {
+      const restApi = new RateLimitedRecoveredRoomRestApi();
+      const store = new MemorySessionRoomStore();
+
+      await handleAgentSessionEvent({
+        payload: makePayload("session-1", "issue-1"),
+        config: makeConfig("issue"),
+        deps: {
+          thenvoiRest: restApi,
+          linearClient: makeLinearClient(),
+          store,
+        },
+      });
+
+      await handleAgentSessionEvent({
+        payload: makePayload("session-2", "issue-1"),
+        config: makeConfig("issue"),
+        deps: {
+          thenvoiRest: restApi,
+          linearClient: makeLinearClient(),
+          store,
+        },
+      });
+
+      expect(restApi.roomEvents).toHaveLength(2);
+      expect(restApi.roomEvents[0]?.roomId).not.toBe(restApi.roomEvents[1]?.roomId);
+      await expect(store.getBySessionId("session-2")).resolves.toMatchObject({
+        thenvoiRoomId: restApi.roomEvents[1]?.roomId,
+        status: "active",
+      });
+    } finally {
+      if (previousDelay === undefined) {
+        delete process.env.LINEAR_THENVOI_RECOVERED_ROOM_RETRY_BASE_DELAY_MS;
+      } else {
+        process.env.LINEAR_THENVOI_RECOVERED_ROOM_RETRY_BASE_DELAY_MS = previousDelay;
+      }
+    }
+  });
+
+  it("continues bridging when participant lookups are rate limited", async () => {
+    const restApi = new RateLimitedParticipantsRestApi();
+    const store = new MemorySessionRoomStore();
+
+    await expect(
+      handleAgentSessionEvent({
+        payload: makePayload("session-rate-limit", "issue-1"),
+        config: makeConfig("issue"),
+        deps: {
+          thenvoiRest: restApi,
+          linearClient: makeLinearClient(),
+          store,
+        },
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(restApi.roomEvents).toHaveLength(1);
+    await expect(store.getBySessionId("session-rate-limit")).resolves.toMatchObject({
+      status: "active",
+    });
   });
 });
