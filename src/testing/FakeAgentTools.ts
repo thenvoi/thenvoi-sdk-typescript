@@ -7,9 +7,11 @@ import type {
 } from "../contracts/protocols";
 import { DEFAULT_AGENT_TOOLS_CAPABILITIES } from "../contracts/protocols";
 import type {
-  ContactRequestAction,
+  AddContactArgs,
   ContactRecord,
   ContactRequestsResult,
+  ListContactRequestsArgs,
+  ListContactsArgs,
   ListMemoriesArgs,
   MemoryRecord,
   MentionInput,
@@ -17,6 +19,8 @@ import type {
   PaginatedList,
   ParticipantRecord,
   PeerRecord,
+  RemoveContactArgs,
+  RespondContactRequestArgs,
   StoreMemoryArgs,
   ToolOperationResult,
   ToolSchemaRecord,
@@ -164,42 +168,35 @@ export class FakeAgentTools
 
   // Contact stubs
   public async listContacts(
-    _page?: number,
-    _pageSize?: number,
+    _request?: ListContactsArgs,
   ): Promise<PaginatedList<ContactRecord>> {
     this.maybeFail("listContacts");
     return { data: [] };
   }
 
   public async addContact(
-    _handle: string,
-    _message?: string,
+    _request: AddContactArgs,
   ): Promise<ToolOperationResult> {
     this.maybeFail("addContact");
     return { status: "ok" };
   }
 
   public async removeContact(
-    _handle?: string,
-    _contactId?: string,
+    _request: RemoveContactArgs,
   ): Promise<ToolOperationResult> {
     this.maybeFail("removeContact");
     return { status: "ok" };
   }
 
   public async listContactRequests(
-    _page?: number,
-    _pageSize?: number,
-    _sentStatus?: string,
+    _request?: ListContactRequestsArgs,
   ): Promise<ContactRequestsResult> {
     this.maybeFail("listContactRequests");
     return { received: [], sent: [] };
   }
 
   public async respondContactRequest(
-    _action: ContactRequestAction,
-    _handle?: string,
-    _requestId?: string,
+    _request: RespondContactRequestArgs,
   ): Promise<ToolOperationResult> {
     this.maybeFail("respondContactRequest");
     return { status: "ok" };

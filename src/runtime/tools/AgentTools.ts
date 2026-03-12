@@ -3,9 +3,11 @@ import type { AgentToolsRestApi } from "../../client/rest/types";
 import { DEFAULT_REQUEST_OPTIONS } from "../../client/rest/requestOptions";
 import { assertCapability } from "../capabilities";
 import type {
-  ContactRequestAction,
+  AddContactArgs,
   ContactRecord,
   ContactRequestsResult,
+  ListContactRequestsArgs,
+  ListContactsArgs,
   ListMemoriesArgs,
   MemoryRecord,
   MentionInput,
@@ -14,6 +16,8 @@ import type {
   PaginatedList,
   ParticipantRecord,
   PeerRecord,
+  RemoveContactArgs,
+  RespondContactRequestArgs,
   StoreMemoryArgs,
   ToolOperationResult,
   ToolSchemaRecord,
@@ -38,6 +42,8 @@ interface AgentToolsOptions {
   participants?: ParticipantRecord[];
   capabilities?: Partial<AgentToolsCapabilities>;
 }
+
+type ToolHandler = (arguments_: MetadataMap) => Promise<unknown>;
 
 type AdapterToolMethodName =
   | "sendMessage"
@@ -99,6 +105,7 @@ export class AgentTools implements AgentToolsProtocol {
   private readonly rest: AgentToolsRestApi;
   private participants: ParticipantRecord[];
   private readonly adapterTools: AdapterToolsProtocol;
+  private readonly toolHandlers: Record<string, ToolHandler>;
 
   public constructor(options: AgentToolsOptions) {
     this.roomId = options.roomId;
@@ -108,6 +115,7 @@ export class AgentTools implements AgentToolsProtocol {
       ...DEFAULT_AGENT_TOOLS_CAPABILITIES,
       ...options.capabilities,
     };
+    this.toolHandlers = this.buildToolHandlers();
     this.adapterTools = this.buildAdapterTools();
   }
 
@@ -119,6 +127,10 @@ export class AgentTools implements AgentToolsProtocol {
     content: string,
     mentions: MentionInput = [],
   ): Promise<ToolOperationResult> {
+    if (mentions.length > 0 && typeof mentions[0] === "string" && this.participants.length === 0) {
+      await this.refreshParticipants();
+    }
+
     const resolvedMentions = this.resolveMentions(mentions);
 
     return this.rest.createChatMessage(
@@ -154,7 +166,7 @@ export class AgentTools implements AgentToolsProtocol {
   }
 
   public async addParticipant(name: string, role = "member"): Promise<ToolOperationResult> {
-    const existing = await this.getParticipants();
+    const existing = await this.refreshParticipants();
     const alreadyInRoom = existing.find(
       (participant) => String(participant.name ?? "").toLowerCase() === name.toLowerCase(),
     );
@@ -198,7 +210,7 @@ export class AgentTools implements AgentToolsProtocol {
   }
 
   public async removeParticipant(name: string): Promise<ToolOperationResult> {
-    const participants = await this.getParticipants();
+    const participants = await this.refreshParticipants();
     const participant = participants.find(
       (entry) => String(entry.name ?? "").toLowerCase() === name.toLowerCase(),
     );
@@ -236,6 +248,10 @@ export class AgentTools implements AgentToolsProtocol {
   }
 
   public async getParticipants(): Promise<ParticipantRecord[]> {
+    return [...this.participants];
+  }
+
+  private async refreshParticipants(): Promise<ParticipantRecord[]> {
     const participants = await this.rest.listChatParticipants(this.roomId, DEFAULT_REQUEST_OPTIONS);
     const normalized = participants.map((participant) => ({
       id: participant.id,
@@ -244,7 +260,7 @@ export class AgentTools implements AgentToolsProtocol {
       handle: participant.handle ?? null,
     }));
     this.replaceParticipants(normalized);
-    return normalized;
+    return [...this.participants];
   }
 
   public async executeToolCall(toolName: string, arguments_: MetadataMap): Promise<unknown> {
@@ -253,60 +269,13 @@ export class AgentTools implements AgentToolsProtocol {
       return validationError;
     }
 
-    const handlers: Record<string, () => Promise<unknown>> = {
-      thenvoi_send_message: () =>
-        this.sendMessage(
-          String(arguments_.content ?? ""),
-          (arguments_.mentions as string[] | Array<{ id: string; handle?: string }>) ?? [],
-        ),
-      thenvoi_send_event: () =>
-        this.sendEvent(
-          String(arguments_.content ?? ""),
-          String(arguments_.message_type ?? "task"),
-          (arguments_.metadata as MetadataMap | undefined) ?? undefined,
-        ),
-      thenvoi_add_participant: () =>
-        this.addParticipant(String(arguments_.name ?? ""), String(arguments_.role ?? "member")),
-      thenvoi_remove_participant: () => this.removeParticipant(String(arguments_.name ?? "")),
-      thenvoi_lookup_peers: () =>
-        this.lookupPeers(Number(arguments_.page ?? 1), Number(arguments_.page_size ?? 50)),
-      thenvoi_get_participants: () => this.getParticipants(),
-      thenvoi_create_chatroom: () => this.createChatroom(arguments_.task_id as string | undefined),
-      thenvoi_list_contacts: () =>
-        this.listContacts(Number(arguments_.page ?? 1), Number(arguments_.page_size ?? 50)),
-      thenvoi_add_contact: () =>
-        this.addContact(String(arguments_.handle ?? ""), arguments_.message as string | undefined),
-      thenvoi_remove_contact: () =>
-        this.removeContact(
-          arguments_.handle as string | undefined,
-          arguments_.contact_id as string | undefined,
-        ),
-      thenvoi_list_contact_requests: () =>
-        this.listContactRequests(
-          Number(arguments_.page ?? 1),
-          Number(arguments_.page_size ?? 50),
-          String(arguments_.sent_status ?? "pending"),
-        ),
-      thenvoi_respond_contact_request: () =>
-        this.respondContactRequest(
-          String(arguments_.action ?? "") as ContactRequestAction,
-          arguments_.handle as string | undefined,
-          arguments_.request_id as string | undefined,
-        ),
-      thenvoi_list_memories: () => this.listMemories(arguments_ as unknown as ListMemoriesArgs),
-      thenvoi_store_memory: () => this.storeMemory(arguments_ as unknown as StoreMemoryArgs),
-      thenvoi_get_memory: () => this.getMemory(String(arguments_.memory_id ?? "")),
-      thenvoi_supersede_memory: () => this.supersedeMemory(String(arguments_.memory_id ?? "")),
-      thenvoi_archive_memory: () => this.archiveMemory(String(arguments_.memory_id ?? "")),
-    };
-
-    const handler = handlers[toolName];
+    const handler = this.toolHandlers[toolName];
     if (!handler) {
       return `Unknown tool: ${toolName}`;
     }
 
     try {
-      return await handler();
+      return await handler(arguments_);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return `Error executing ${toolName}: ${message}`;
@@ -370,11 +339,14 @@ export class AgentTools implements AgentToolsProtocol {
     return this.getToolSchemas("openai", options);
   }
 
-  public async listContacts(page = 1, pageSize = 50): Promise<PaginatedList<ContactRecord>> {
+  public async listContacts(request: ListContactsArgs = {}): Promise<PaginatedList<ContactRecord>> {
     assertCapability(this.capabilities, "contacts");
     if (!this.rest.listContacts) {
       throw new UnsupportedFeatureError("Contact listing is not available in current REST adapter");
     }
+
+    const page = request.page ?? 1;
+    const pageSize = request.pageSize ?? 50;
 
     return this.rest.listContacts(
       {
@@ -385,50 +357,72 @@ export class AgentTools implements AgentToolsProtocol {
     );
   }
 
-  public async addContact(handle: string, message?: string): Promise<ToolOperationResult> {
+  public async addContact(request: AddContactArgs): Promise<ToolOperationResult> {
     assertCapability(this.capabilities, "contacts");
     if (!this.rest.addContact) {
       throw new UnsupportedFeatureError("Contact creation is not available in current REST adapter");
     }
 
-    const normalizedHandle = handle.trim();
+    const normalizedHandle = request.handle.trim();
     if (normalizedHandle.length === 0) {
       throw new ValidationError("handle is required");
     }
 
-    return this.rest.addContact(normalizedHandle, message, DEFAULT_REQUEST_OPTIONS);
+    return this.rest.addContact(
+      {
+        handle: normalizedHandle,
+        ...(request.message ? { message: request.message } : {}),
+      },
+      DEFAULT_REQUEST_OPTIONS,
+    );
   }
 
-  public async removeContact(handle?: string, contactId?: string): Promise<ToolOperationResult> {
+  public async removeContact(request: RemoveContactArgs): Promise<ToolOperationResult> {
     assertCapability(this.capabilities, "contacts");
     if (!this.rest.removeContact) {
       throw new UnsupportedFeatureError("Contact removal is not available in current REST adapter");
     }
 
-    const normalizedHandle = handle?.trim();
-    const normalizedContactId = contactId?.trim();
-    if (!normalizedHandle && !normalizedContactId) {
-      throw new ValidationError("Either handle or contactId must be provided");
+    if (request.target === "handle") {
+      const handle = request.handle.trim();
+      if (handle.length === 0) {
+        throw new ValidationError("handle is required");
+      }
+
+      return this.rest.removeContact(
+        {
+          target: "handle",
+          handle,
+        },
+        DEFAULT_REQUEST_OPTIONS,
+      );
+    }
+
+    const contactId = request.contactId.trim();
+    if (contactId.length === 0) {
+      throw new ValidationError("contactId is required");
     }
 
     return this.rest.removeContact(
       {
-        handle: normalizedHandle,
-        contactId: normalizedContactId,
+        target: "contactId",
+        contactId,
       },
       DEFAULT_REQUEST_OPTIONS,
     );
   }
 
   public async listContactRequests(
-    page = 1,
-    pageSize = 50,
-    sentStatus = "pending",
+    request: ListContactRequestsArgs = {},
   ): Promise<ContactRequestsResult> {
     assertCapability(this.capabilities, "contacts");
     if (!this.rest.listContactRequests) {
       throw new UnsupportedFeatureError("Contact request listing is not available in current REST adapter");
     }
+
+    const page = request.page ?? 1;
+    const pageSize = request.pageSize ?? 50;
+    const sentStatus = request.sentStatus ?? "pending";
 
     return this.rest.listContactRequests(
       {
@@ -440,27 +434,38 @@ export class AgentTools implements AgentToolsProtocol {
     );
   }
 
-  public async respondContactRequest(
-    action: ContactRequestAction,
-    handle?: string,
-    requestId?: string,
-  ): Promise<ToolOperationResult> {
+  public async respondContactRequest(request: RespondContactRequestArgs): Promise<ToolOperationResult> {
     assertCapability(this.capabilities, "contacts");
     if (!this.rest.respondContactRequest) {
       throw new UnsupportedFeatureError("Contact request responses are not available in current REST adapter");
     }
 
-    const normalizedHandle = handle?.trim();
-    const normalizedRequestId = requestId?.trim();
-    if (!normalizedHandle && !normalizedRequestId) {
-      throw new ValidationError("Either handle or requestId must be provided");
+    if (request.target === "handle") {
+      const handle = request.handle.trim();
+      if (handle.length === 0) {
+        throw new ValidationError("handle is required");
+      }
+
+      return this.rest.respondContactRequest(
+        {
+          action: request.action,
+          target: "handle",
+          handle,
+        },
+        DEFAULT_REQUEST_OPTIONS,
+      );
+    }
+
+    const requestId = request.requestId.trim();
+    if (requestId.length === 0) {
+      throw new ValidationError("requestId is required");
     }
 
     return this.rest.respondContactRequest(
       {
-        action,
-        handle: normalizedHandle,
-        requestId: normalizedRequestId,
+        action: request.action,
+        target: "requestId",
+        requestId,
       },
       DEFAULT_REQUEST_OPTIONS,
     );
@@ -637,6 +642,131 @@ export class AgentTools implements AgentToolsProtocol {
   private bindAdapterToolMethod<K extends AdapterToolMethodName>(methodName: K): AdapterToolsProtocol[K] {
     const method = this[methodName] as unknown as (...args: unknown[]) => unknown;
     return method.bind(this) as AdapterToolsProtocol[K];
+  }
+
+  private buildToolHandlers(): Record<string, ToolHandler> {
+    return {
+      ...this.buildMessagingToolHandlers(),
+      ...this.buildContactToolHandlers(),
+      ...this.buildMemoryToolHandlers(),
+    };
+  }
+
+  private buildMessagingToolHandlers(): Record<string, ToolHandler> {
+    return {
+      thenvoi_send_message: async (arguments_) =>
+        this.sendMessage(
+          String(arguments_.content ?? ""),
+          (arguments_.mentions as string[] | Array<{ id: string; handle?: string }>) ?? [],
+        ),
+      thenvoi_send_event: async (arguments_) =>
+        this.sendEvent(
+          String(arguments_.content ?? ""),
+          String(arguments_.message_type ?? "task"),
+          (arguments_.metadata as MetadataMap | undefined) ?? undefined,
+        ),
+      thenvoi_add_participant: async (arguments_) =>
+        this.addParticipant(String(arguments_.name ?? ""), String(arguments_.role ?? "member")),
+      thenvoi_remove_participant: async (arguments_) =>
+        this.removeParticipant(String(arguments_.name ?? "")),
+      thenvoi_lookup_peers: async (arguments_) =>
+        this.lookupPeers(Number(arguments_.page ?? 1), Number(arguments_.page_size ?? 50)),
+      thenvoi_get_participants: async () => this.refreshParticipants(),
+      thenvoi_create_chatroom: async (arguments_) =>
+        this.createChatroom(arguments_.task_id as string | undefined),
+    };
+  }
+
+  private buildContactToolHandlers(): Record<string, ToolHandler> {
+    return {
+      thenvoi_list_contacts: async (arguments_) =>
+        this.listContacts({
+          page: Number(arguments_.page ?? 1),
+          pageSize: Number(arguments_.page_size ?? 50),
+        }),
+      thenvoi_add_contact: async (arguments_) =>
+        this.addContact({
+          handle: String(arguments_.handle ?? ""),
+          ...(typeof arguments_.message === "string" ? { message: arguments_.message } : {}),
+        }),
+      thenvoi_remove_contact: async (arguments_) =>
+        this.removeContact(this.toRemoveContactArgs(arguments_)),
+      thenvoi_list_contact_requests: async (arguments_) =>
+        this.listContactRequests({
+          page: Number(arguments_.page ?? 1),
+          pageSize: Number(arguments_.page_size ?? 50),
+          sentStatus: String(arguments_.sent_status ?? "pending"),
+        }),
+      thenvoi_respond_contact_request: async (arguments_) =>
+        this.respondContactRequest(this.toRespondContactRequestArgs(arguments_)),
+    };
+  }
+
+  private buildMemoryToolHandlers(): Record<string, ToolHandler> {
+    return {
+      thenvoi_list_memories: async (arguments_) =>
+        this.listMemories(arguments_ as unknown as ListMemoriesArgs),
+      thenvoi_store_memory: async (arguments_) =>
+        this.storeMemory(arguments_ as unknown as StoreMemoryArgs),
+      thenvoi_get_memory: async (arguments_) =>
+        this.getMemory(String(arguments_.memory_id ?? "")),
+      thenvoi_supersede_memory: async (arguments_) =>
+        this.supersedeMemory(String(arguments_.memory_id ?? "")),
+      thenvoi_archive_memory: async (arguments_) =>
+        this.archiveMemory(String(arguments_.memory_id ?? "")),
+    };
+  }
+
+  private toRemoveContactArgs(arguments_: MetadataMap): RemoveContactArgs {
+    const handle = this.normalizeOptionalString(arguments_.handle);
+    const contactId = this.normalizeOptionalString(arguments_.contact_id);
+    if ((handle && contactId) || (!handle && !contactId)) {
+      throw new ValidationError("Provide exactly one of handle or contact_id");
+    }
+
+    if (handle) {
+      return {
+        target: "handle",
+        handle,
+      };
+    }
+
+    return {
+      target: "contactId",
+      contactId: contactId as string,
+    };
+  }
+
+  private toRespondContactRequestArgs(arguments_: MetadataMap): RespondContactRequestArgs {
+    const action = String(arguments_.action ?? "") as RespondContactRequestArgs["action"];
+    const handle = this.normalizeOptionalString(arguments_.handle);
+    const requestId = this.normalizeOptionalString(arguments_.request_id);
+    if ((handle && requestId) || (!handle && !requestId)) {
+      throw new ValidationError("Provide exactly one of handle or request_id");
+    }
+
+    if (handle) {
+      return {
+        action,
+        target: "handle",
+        handle,
+      };
+    }
+
+    return {
+      action,
+      target: "requestId",
+      requestId: requestId as string,
+    };
+  }
+
+  private normalizeOptionalString(value: unknown): string | undefined {
+    if (typeof value !== "string") {
+      return undefined;
+    }
+
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : undefined;
   }
 }
 

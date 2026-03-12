@@ -2,7 +2,6 @@ import type { FrameworkAdapter } from "../contracts/protocols";
 import type { AgentCredentials } from "../config";
 import { PlatformRuntime, type PlatformRuntimeOptions } from "../runtime/PlatformRuntime";
 import type { PlatformMessage } from "../runtime/types";
-import { GracefulShutdown } from "../runtime/shutdown";
 
 export interface AgentCreateOptions extends Omit<PlatformRuntimeOptions, "agentId" | "apiKey" | "wsUrl" | "restUrl"> {
   adapter: FrameworkAdapter;
@@ -121,10 +120,17 @@ export class Agent {
     const useSignals = options?.signals ?? true;
 
     if (useSignals) {
-      const shutdown = new GracefulShutdown(this, {
-        timeoutMs: this.shutdownTimeoutMs ?? 30_000,
-      });
-      await shutdown.withSignals(async () => {
+      await withProcessSignals({
+        onSignal: async () => {
+          await this.stop(this.shutdownTimeoutMs);
+        },
+        onSignalFailure: () => {
+          process.exit(1);
+        },
+        secondSignal: () => {
+          process.exit(1);
+        },
+      }, async () => {
         await this.start();
         try {
           await this.platformRuntime.runForever();
@@ -148,6 +154,45 @@ export class Agent {
       return await handler(this);
     } finally {
       await this.stop(this.shutdownTimeoutMs);
+    }
+  }
+}
+
+interface ProcessSignalHandlers {
+  onSignal: () => Promise<void>;
+  onSignalFailure: () => void;
+  secondSignal: () => void;
+}
+
+async function withProcessSignals<T>(
+  handlers: ProcessSignalHandlers,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
+  const installed = new Map<NodeJS.Signals, () => void>();
+  let handlingSignal = false;
+
+  for (const signal of signals) {
+    const handler = () => {
+      if (handlingSignal) {
+        handlers.secondSignal();
+        return;
+      }
+
+      handlingSignal = true;
+      void handlers.onSignal().catch(() => {
+        handlers.onSignalFailure();
+      });
+    };
+    process.on(signal, handler);
+    installed.set(signal, handler);
+  }
+
+  try {
+    return await fn();
+  } finally {
+    for (const [signal, handler] of installed.entries()) {
+      process.off(signal, handler);
     }
   }
 }

@@ -6,9 +6,9 @@ import { fetchPaginated, type PaginationOptions } from "../client/rest/paginatio
 import type { PlatformChatMessage, ThenvoiLinkRestApi } from "../client/rest/types";
 import type { PlatformEvent } from "./events";
 import { UnsupportedFeatureError } from "../core/errors";
-import { assertCapability } from "../runtime/capabilities";
+import { assertCapability } from "../contracts/capabilities";
 import type { MetadataMap } from "../contracts/dtos";
-import type { PlatformMessage } from "../runtime/types";
+import type { PlatformMessageLike as PlatformMessage } from "../contracts/protocols";
 import {
   type SupportedSocketEvent,
   payloadSchemas,

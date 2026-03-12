@@ -1,8 +1,13 @@
 import type { RestRequestOptions } from "./requestOptions";
 import type {
+  AddContactArgs,
   ContactRecord,
   ContactRequestAction,
   ContactRequestsResult,
+  ListContactRequestsArgs,
+  ListContactsArgs,
+  RemoveContactArgs,
+  RespondContactRequestArgs,
   ListMemoriesArgs,
   MemoryRecord,
   MentionReference,
@@ -133,24 +138,23 @@ export interface ChatListingRestApi {
 
 export interface ContactRestApi {
   listContacts?(
-    _request: { page: number; pageSize: number },
+    _request: ListContactsArgs,
     _options?: RestRequestOptions,
   ): Promise<PaginatedResponse<ContactRecord>>;
   addContact?(
-    _handle: string,
-    _message?: string,
+    _request: AddContactArgs,
     _options?: RestRequestOptions,
   ): Promise<ToolOperationResult>;
   removeContact?(
-    _request: { handle?: string; contactId?: string },
+    _request: RemoveContactArgs,
     _options?: RestRequestOptions,
   ): Promise<ToolOperationResult>;
   listContactRequests?(
-    _request: { page: number; pageSize: number; sentStatus: string },
+    _request: ListContactRequestsArgs,
     _options?: RestRequestOptions,
   ): Promise<ContactRequestsResult>;
   respondContactRequest?(
-    _request: { action: ContactRequestAction; handle?: string; requestId?: string },
+    _request: RespondContactRequestArgs,
     _options?: RestRequestOptions,
   ): Promise<ToolOperationResult>;
 }

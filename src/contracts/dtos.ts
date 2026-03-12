@@ -81,6 +81,30 @@ export interface ContactRequestsResult {
 
 export type ContactRequestAction = "approve" | "reject" | "cancel";
 
+export interface ListContactsArgs {
+  page?: number;
+  pageSize?: number;
+}
+
+export interface AddContactArgs {
+  handle: string;
+  message?: string;
+}
+
+export type RemoveContactArgs =
+  | { target: "handle"; handle: string }
+  | { target: "contactId"; contactId: string };
+
+export interface ListContactRequestsArgs {
+  page?: number;
+  pageSize?: number;
+  sentStatus?: string;
+}
+
+export type RespondContactRequestArgs =
+  | { action: ContactRequestAction; target: "handle"; handle: string }
+  | { action: ContactRequestAction; target: "requestId"; requestId: string };
+
 export type MemoryScope = "subject" | "organization" | "all";
 export type MemoryVisibility = Exclude<MemoryScope, "all">;
 export type MemorySystem = "sensory" | "working" | "long_term";

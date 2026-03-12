@@ -2,14 +2,18 @@ import { UnsupportedFeatureError } from "../../core/errors";
 import type { Logger } from "../../core/logger";
 import { NoopLogger } from "../../core/logger";
 import type {
+  AddContactArgs,
   ContactRecord,
-  ContactRequestAction,
   ContactRequestsResult,
+  ListContactRequestsArgs,
+  ListContactsArgs,
   ListMemoriesArgs,
   MemoryRecord,
   MentionReference,
   MetadataMap,
   PeerRecord,
+  RemoveContactArgs,
+  RespondContactRequestArgs,
   StoreMemoryArgs,
   ToolOperationResult,
 } from "../../contracts/dtos";
@@ -225,7 +229,7 @@ export class FernRestAdapter implements RestApi {
       throw new UnsupportedFeatureError("Fern client missing chat message creation endpoint");
     }
 
-    return api(
+    const response = await api(
       chatId,
       {
         message: {
@@ -236,7 +240,8 @@ export class FernRestAdapter implements RestApi {
         },
       },
       mergeOptions(options),
-    ) as Promise<ToolOperationResult>;
+    );
+    return normalizeToolOperationResult(response);
   }
 
   public async createChatEvent(
@@ -249,7 +254,7 @@ export class FernRestAdapter implements RestApi {
     options?: RestRequestOptions,
   ): Promise<ToolOperationResult> {
     if (this.client.agentApiEvents?.createAgentChatEvent) {
-      return this.client.agentApiEvents.createAgentChatEvent(
+      const response = await this.client.agentApiEvents.createAgentChatEvent(
         chatId,
         {
           event: {
@@ -259,7 +264,8 @@ export class FernRestAdapter implements RestApi {
           },
         },
         mergeOptions(options),
-      ) as Promise<ToolOperationResult>;
+      );
+      return normalizeToolOperationResult(response);
     }
 
     return this.createChatMessage(chatId, event, options);
@@ -315,7 +321,7 @@ export class FernRestAdapter implements RestApi {
       throw new UnsupportedFeatureError("Fern client missing chat participant add endpoint");
     }
 
-    return api(
+    const response = await api(
       chatId,
       {
         participant: {
@@ -324,7 +330,8 @@ export class FernRestAdapter implements RestApi {
         },
       },
       mergeOptions(options),
-    ) as Promise<ToolOperationResult>;
+    );
+    return normalizeToolOperationResult(response);
   }
 
   public async removeChatParticipant(
@@ -338,7 +345,8 @@ export class FernRestAdapter implements RestApi {
       throw new UnsupportedFeatureError("Fern client missing chat participant remove endpoint");
     }
 
-    return api(chatId, participantId, mergeOptions(options)) as Promise<ToolOperationResult>;
+    const response = await api(chatId, participantId, mergeOptions(options));
+    return normalizeToolOperationResult(response);
   }
 
   public async markMessageProcessing(
@@ -352,7 +360,8 @@ export class FernRestAdapter implements RestApi {
       throw new UnsupportedFeatureError("Fern client missing mark message processing endpoint");
     }
 
-    return api(chatId, messageId, mergeOptions(options)) as Promise<ToolOperationResult>;
+    const response = await api(chatId, messageId, mergeOptions(options));
+    return normalizeToolOperationResult(response);
   }
 
   public async markMessageProcessed(
@@ -366,7 +375,8 @@ export class FernRestAdapter implements RestApi {
       throw new UnsupportedFeatureError("Fern client missing mark message processed endpoint");
     }
 
-    return api(chatId, messageId, mergeOptions(options)) as Promise<ToolOperationResult>;
+    const response = await api(chatId, messageId, mergeOptions(options));
+    return normalizeToolOperationResult(response);
   }
 
   public async markMessageFailed(
@@ -381,12 +391,13 @@ export class FernRestAdapter implements RestApi {
       throw new UnsupportedFeatureError("Fern client missing mark message failed endpoint");
     }
 
-    return api(
+    const response = await api(
       chatId,
       messageId,
       { error },
       mergeOptions(options),
-    ) as Promise<ToolOperationResult>;
+    );
+    return normalizeToolOperationResult(response);
   }
 
   public async getNextMessage(
@@ -449,7 +460,7 @@ export class FernRestAdapter implements RestApi {
   }
 
   public async listContacts(
-    request: { page: number; pageSize: number },
+    request: ListContactsArgs,
     options?: RestRequestOptions,
   ): Promise<PaginatedResponse<ContactRecord>> {
     const api = this.client.agentContacts?.listAgentContacts ?? this.client.agentApiContacts?.listAgentContacts;
@@ -457,10 +468,13 @@ export class FernRestAdapter implements RestApi {
       throw new UnsupportedFeatureError("Fern client missing contact list endpoint");
     }
 
+    const page = request.page ?? 1;
+    const pageSize = request.pageSize ?? 50;
+
     const response = await api(
       {
-        page: request.page,
-        page_size: request.pageSize,
+        page,
+        page_size: pageSize,
       },
       mergeOptions(options),
     );
@@ -469,8 +483,7 @@ export class FernRestAdapter implements RestApi {
   }
 
   public async addContact(
-    handle: string,
-    message?: string,
+    request: AddContactArgs,
     options?: RestRequestOptions,
   ): Promise<ToolOperationResult> {
     const api = this.client.agentContacts?.addAgentContact ?? this.client.agentApiContacts?.addAgentContact;
@@ -480,14 +493,14 @@ export class FernRestAdapter implements RestApi {
 
     return normalizeToolOperationResult(
       await api(
-        { handle, ...(message ? { message } : {}) },
+        { handle: request.handle, ...(request.message ? { message: request.message } : {}) },
         mergeOptions(options),
       ),
     );
   }
 
   public async removeContact(
-    request: { handle?: string; contactId?: string },
+    request: RemoveContactArgs,
     options?: RestRequestOptions,
   ): Promise<ToolOperationResult> {
     const api = this.client.agentContacts?.removeAgentContact ?? this.client.agentApiContacts?.removeAgentContact;
@@ -497,17 +510,16 @@ export class FernRestAdapter implements RestApi {
 
     return normalizeToolOperationResult(
       await api(
-        {
-          ...(request.handle ? { handle: request.handle } : {}),
-          ...(request.contactId ? { contact_id: request.contactId } : {}),
-        },
+        request.target === "handle"
+          ? { handle: request.handle }
+          : { contact_id: request.contactId },
         mergeOptions(options),
       ),
     );
   }
 
   public async listContactRequests(
-    request: { page: number; pageSize: number; sentStatus: string },
+    request: ListContactRequestsArgs,
     options?: RestRequestOptions,
   ): Promise<ContactRequestsResult> {
     const api = this.client.agentContacts?.listAgentContactRequests
@@ -516,11 +528,15 @@ export class FernRestAdapter implements RestApi {
       throw new UnsupportedFeatureError("Fern client missing contact request list endpoint");
     }
 
+    const page = request.page ?? 1;
+    const pageSize = request.pageSize ?? 50;
+    const sentStatus = request.sentStatus ?? "pending";
+
     const response = await api(
       {
-        page: request.page,
-        page_size: request.pageSize,
-        sent_status: request.sentStatus,
+        page,
+        page_size: pageSize,
+        sent_status: sentStatus,
       },
       mergeOptions(options),
     );
@@ -529,7 +545,7 @@ export class FernRestAdapter implements RestApi {
   }
 
   public async respondContactRequest(
-    request: { action: ContactRequestAction; handle?: string; requestId?: string },
+    request: RespondContactRequestArgs,
     options?: RestRequestOptions,
   ): Promise<ToolOperationResult> {
     const api = this.client.agentContacts?.respondToAgentContactRequest
@@ -540,11 +556,9 @@ export class FernRestAdapter implements RestApi {
 
     return normalizeToolOperationResult(
       await api(
-        {
-          action: request.action,
-          ...(request.handle ? { handle: request.handle } : {}),
-          ...(request.requestId ? { request_id: request.requestId } : {}),
-        },
+        request.target === "handle"
+          ? { action: request.action, handle: request.handle }
+          : { action: request.action, request_id: request.requestId },
         mergeOptions(options),
       ),
     );
@@ -850,7 +864,7 @@ export class RestFacade implements RestApi {
   }
 
   public listContacts(
-    request: { page: number; pageSize: number },
+    request: ListContactsArgs,
     options?: RestRequestOptions,
   ): Promise<PaginatedResponse<ContactRecord>> {
     return this.forward("listContacts", async () => {
@@ -867,8 +881,7 @@ export class RestFacade implements RestApi {
   }
 
   public addContact(
-    handle: string,
-    message?: string,
+    request: AddContactArgs,
     options?: RestRequestOptions,
   ): Promise<ToolOperationResult> {
     return this.forward("addContact", async () => {
@@ -876,12 +889,12 @@ export class RestFacade implements RestApi {
         throw new UnsupportedFeatureError("Contact creation is not available in current REST adapter");
       }
 
-      return this.api.addContact(handle, message, options);
-    }, { handle });
+      return this.api.addContact(request, options);
+    }, request);
   }
 
   public removeContact(
-    request: { handle?: string; contactId?: string },
+    request: RemoveContactArgs,
     options?: RestRequestOptions,
   ): Promise<ToolOperationResult> {
     return this.forward("removeContact", async () => {
@@ -894,7 +907,7 @@ export class RestFacade implements RestApi {
   }
 
   public listContactRequests(
-    request: { page: number; pageSize: number; sentStatus: string },
+    request: ListContactRequestsArgs,
     options?: RestRequestOptions,
   ): Promise<ContactRequestsResult> {
     return this.forward("listContactRequests", async () => {
@@ -908,7 +921,7 @@ export class RestFacade implements RestApi {
   }
 
   public respondContactRequest(
-    request: { action: ContactRequestAction; handle?: string; requestId?: string },
+    request: RespondContactRequestArgs,
     options?: RestRequestOptions,
   ): Promise<ToolOperationResult> {
     return this.forward("respondContactRequest", async () => {

@@ -158,8 +158,8 @@ export class PhoenixChannelsTransport implements StreamingTransport {
     this.logger.debug("Left topic", { topic });
   }
 
-  public async runForever(signal?: AbortSignal): Promise<void> {
-    if (!signal || signal.aborted) {
+  public async runForever(signal: AbortSignal): Promise<void> {
+    if (signal.aborted) {
       return;
     }
 

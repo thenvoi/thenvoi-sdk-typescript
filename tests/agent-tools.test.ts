@@ -2,19 +2,21 @@ import { describe, expect, it } from "vitest";
 
 import { RestFacade } from "../src/client/rest/RestFacade";
 import type { RestApi } from "../src/client/rest/types";
-import type { ContactRequestAction, ListMemoriesArgs, StoreMemoryArgs } from "../src/contracts/dtos";
+import type {
+  ContactRequestAction,
+  ListMemoriesArgs,
+  RemoveContactArgs,
+  RespondContactRequestArgs,
+  StoreMemoryArgs,
+} from "../src/contracts/dtos";
 import { UnsupportedFeatureError, ValidationError } from "../src/core/errors";
 import { AgentTools } from "../src/runtime/tools/AgentTools";
 
 class FakeRestApi implements RestApi {
   public readonly addedParticipants: Array<{ chatId: string; participantId: string; role: string }> = [];
   public readonly addedContacts: Array<{ handle: string; message?: string }> = [];
-  public readonly removedContacts: Array<{ handle?: string; contactId?: string }> = [];
-  public readonly contactRequestResponses: Array<{
-    action: ContactRequestAction;
-    handle?: string;
-    requestId?: string;
-  }> = [];
+  public readonly removedContacts: RemoveContactArgs[] = [];
+  public readonly contactRequestResponses: RespondContactRequestArgs[] = [];
   public readonly memoryQueries: ListMemoriesArgs[] = [];
   public readonly storedMemories: StoreMemoryArgs[] = [];
 
@@ -90,12 +92,12 @@ class FakeRestApi implements RestApi {
     };
   }
 
-  public async addContact(handle: string, message?: string) {
-    this.addedContacts.push({ handle, message });
+  public async addContact(request: { handle: string; message?: string }) {
+    this.addedContacts.push({ handle: request.handle, message: request.message });
     return { id: "contact-request-1", status: "pending" };
   }
 
-  public async removeContact(request: { handle?: string; contactId?: string }) {
+  public async removeContact(request: RemoveContactArgs) {
     this.removedContacts.push(request);
     return { status: "removed" };
   }
@@ -127,16 +129,15 @@ class FakeRestApi implements RestApi {
     };
   }
 
-  public async respondContactRequest(
-    request: { action: ContactRequestAction; handle?: string; requestId?: string },
-  ) {
+  public async respondContactRequest(request: RespondContactRequestArgs) {
     this.contactRequestResponses.push(request);
     const statusByAction: Record<ContactRequestAction, string> = {
       approve: "approved",
       reject: "rejected",
       cancel: "cancelled",
     };
-    return { id: request.requestId ?? "req-1", status: statusByAction[request.action] };
+    const id = request.target === "requestId" ? request.requestId : "req-1";
+    return { id, status: statusByAction[request.action] };
   }
 
   public async listMemories(
@@ -325,28 +326,34 @@ describe("AgentTools", () => {
       capabilities: { contacts: true },
     });
 
-    await expect(tools.listContacts(2, 25)).resolves.toEqual({
+    await expect(tools.listContacts({ page: 2, pageSize: 25 })).resolves.toEqual({
       data: [{ id: "c1", handle: "jane", name: "Jane", type: "User" }],
       metadata: { page: 2, pageSize: 25, totalCount: 1, totalPages: 1 },
     });
-    await expect(tools.addContact(" @jane ", "hello")).resolves.toEqual({
+    await expect(tools.addContact({ handle: " @jane ", message: "hello" })).resolves.toEqual({
       id: "contact-request-1",
       status: "pending",
     });
-    await expect(tools.removeContact(undefined, " contact-1 ")).resolves.toEqual({ status: "removed" });
-    await expect(tools.listContactRequests(1, 10, "approved")).resolves.toMatchObject({
+    await expect(tools.removeContact({ target: "contactId", contactId: " contact-1 " })).resolves.toEqual({
+      status: "removed",
+    });
+    await expect(tools.listContactRequests({ page: 1, pageSize: 10, sentStatus: "approved" })).resolves.toMatchObject({
       received: [{ id: "req-received-1", from_handle: "jane" }],
       sent: [{ id: "req-sent-1", status: "approved" }],
     });
-    await expect(tools.respondContactRequest("approve", undefined, " req-received-1 ")).resolves.toEqual({
+    await expect(tools.respondContactRequest({
+      action: "approve",
+      target: "requestId",
+      requestId: " req-received-1 ",
+    })).resolves.toEqual({
       id: "req-received-1",
       status: "approved",
     });
 
     expect(api.addedContacts).toEqual([{ handle: "@jane", message: "hello" }]);
-    expect(api.removedContacts).toEqual([{ contactId: "contact-1", handle: undefined }]);
+    expect(api.removedContacts).toEqual([{ target: "contactId", contactId: "contact-1" }]);
     expect(api.contactRequestResponses).toEqual([
-      { action: "approve", handle: undefined, requestId: "req-received-1" },
+      { action: "approve", target: "requestId", requestId: "req-received-1" },
     ]);
   });
 
@@ -408,10 +415,14 @@ describe("AgentTools", () => {
       capabilities: { contacts: true, memory: true },
     });
 
-    await expect(tools.removeContact()).rejects.toThrow("Either handle or contactId must be provided");
-    await expect(tools.respondContactRequest("approve")).rejects.toThrow(
-      "Either handle or requestId must be provided",
+    await expect(tools.removeContact({ target: "contactId", contactId: "   " })).rejects.toThrow(
+      "contactId is required",
     );
+    await expect(tools.respondContactRequest({
+      action: "approve",
+      target: "requestId",
+      requestId: "   ",
+    })).rejects.toThrow("requestId is required");
     await expect(tools.getMemory("   ")).rejects.toThrow("memoryId is required");
   });
 });

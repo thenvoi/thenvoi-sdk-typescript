@@ -16,12 +16,12 @@ export {
 export {
   GeminiAdapter,
   type GeminiAdapterOptions,
-} from "./gemini/GeminiAdapter";
+} from "./gemini";
 export {
   GeminiToolCallingModel,
   type GeminiToolCallingModelOptions,
   type GeminiClientFactory,
-} from "./gemini/model";
+} from "./gemini";
 export {
   LangGraphAdapter,
   type LangGraphAdapterOptions,

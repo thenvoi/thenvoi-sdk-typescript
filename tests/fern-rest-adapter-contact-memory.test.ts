@@ -224,11 +224,11 @@ describe("FernRestAdapter contact and memory parity", () => {
       data: [{ id: "contact-1", handle: "@jane", name: "Jane", type: "User" }],
       metadata: { page: 2, pageSize: 25, totalCount: 1, totalPages: 1 },
     });
-    await expect(rest.addContact("@jane", "hello")).resolves.toEqual({
+    await expect(rest.addContact({ handle: "@jane", message: "hello" })).resolves.toEqual({
       id: "request-1",
       status: "pending",
     });
-    await expect(rest.removeContact({ contactId: "contact-1" })).resolves.toEqual({
+    await expect(rest.removeContact({ target: "contactId", contactId: "contact-1" })).resolves.toEqual({
       status: "removed",
     });
     await expect(rest.listContactRequests({ page: 1, pageSize: 10, sentStatus: "approved" })).resolves.toMatchObject({
@@ -241,7 +241,9 @@ describe("FernRestAdapter contact and memory parity", () => {
         sent: { total: 1, totalPages: 1 },
       },
     });
-    await expect(rest.respondContactRequest({ action: "approve", requestId: "request-1" })).resolves.toEqual({
+    await expect(
+      rest.respondContactRequest({ action: "approve", target: "requestId", requestId: "request-1" }),
+    ).resolves.toEqual({
       id: "request-1",
       status: "approved",
     });

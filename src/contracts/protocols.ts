@@ -1,8 +1,9 @@
 import type {
-  ContactRequestAction,
-  ContactRecord,
-  ContactRequestRecord,
+  AddContactArgs,
   ContactRequestsResult,
+  ContactRecord,
+  ListContactRequestsArgs,
+  ListContactsArgs,
   ListMemoriesArgs,
   MemoryRecord,
   MentionInput,
@@ -10,6 +11,8 @@ import type {
   PaginatedList,
   ParticipantRecord,
   PeerRecord,
+  RemoveContactArgs,
+  RespondContactRequestArgs,
   StoreMemoryArgs,
   ToolOperationResult,
   ToolSchemaRecord,
@@ -70,19 +73,13 @@ export interface ToolSchemaProvider {
 }
 
 export interface ContactTools {
-  listContacts(page?: number, pageSize?: number): Promise<PaginatedList<ContactRecord>>;
-  addContact(handle: string, message?: string): Promise<ToolOperationResult>;
-  removeContact(handle: string | undefined, contactId: string | undefined): Promise<ToolOperationResult>;
+  listContacts(request?: ListContactsArgs): Promise<PaginatedList<ContactRecord>>;
+  addContact(request: AddContactArgs): Promise<ToolOperationResult>;
+  removeContact(request: RemoveContactArgs): Promise<ToolOperationResult>;
   listContactRequests(
-    page?: number,
-    pageSize?: number,
-    sentStatus?: string,
+    request?: ListContactRequestsArgs,
   ): Promise<ContactRequestsResult>;
-  respondContactRequest(
-    action: ContactRequestAction,
-    handle?: string,
-    requestId?: string,
-  ): Promise<ToolOperationResult>;
+  respondContactRequest(request: RespondContactRequestArgs): Promise<ToolOperationResult>;
 }
 
 export interface MemoryTools {

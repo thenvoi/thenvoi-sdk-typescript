@@ -177,16 +177,16 @@ export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
     this.bootstrappedRooms.delete(roomId);
   }
 
-  private async resolveGraph(
+  private resolveGraph(
     sdk: LangGraphSdk | undefined,
     langGraphTools: unknown[],
   ): Promise<LangGraphGraph> {
     if (this.graphFactory) {
-      return this.graphFactory(langGraphTools);
+      return Promise.resolve(this.graphFactory(langGraphTools));
     }
 
     if (this.graph) {
-      return this.graph;
+      return Promise.resolve(this.graph);
     }
 
     if (this.llm === undefined) {
@@ -196,12 +196,12 @@ export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
       throw new RuntimeStateError("LangGraphAdapter SDK failed to initialize.");
     }
 
-    return sdk.createReactAgent({
+    return Promise.resolve(sdk.createReactAgent({
       llm: this.llm,
       tools: langGraphTools,
       checkpointer: this.checkpointer,
       prompt: this.renderedSystemPrompt,
-    });
+    }));
   }
 
   private buildMessages(

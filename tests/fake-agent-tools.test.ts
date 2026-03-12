@@ -53,10 +53,12 @@ describe("FakeAgentTools", () => {
     const tools = new FakeAgentTools();
 
     expect(await tools.listContacts()).toEqual({ data: [] });
-    expect(await tools.addContact("alice")).toEqual({ status: "ok" });
-    expect(await tools.removeContact("alice")).toEqual({ status: "ok" });
+    expect(await tools.addContact({ handle: "alice" })).toEqual({ status: "ok" });
+    expect(await tools.removeContact({ target: "handle", handle: "alice" })).toEqual({ status: "ok" });
     expect(await tools.listContactRequests()).toEqual({ received: [], sent: [] });
-    expect(await tools.respondContactRequest("approve")).toEqual({ status: "ok" });
+    expect(await tools.respondContactRequest({ action: "approve", target: "handle", handle: "alice" })).toEqual({
+      status: "ok",
+    });
   });
 
   it("returns empty lists for memory stubs", async () => {
