@@ -184,80 +184,10 @@ export class GatewayServer implements GatewayServerLike {
       this.options.allowUnauthenticatedLoopback ?? false,
     );
 
-    const modulesLoader = this.options.loadModules as (() => Promise<RuntimeA2AServerModules>) | undefined;
-    const modules = await (modulesLoader ? modulesLoader() : loadA2AServerModules());
-    const app = modules.createExpressApp();
+    const modules = await this.loadModules();
     const gatewayAuthMiddleware = createGatewayAuthMiddleware(this.options.authToken);
-    app.use(createSecurityHeadersMiddleware());
-    app.use(modules.createExpressApp.json({ limit: "1mb" }));
-    app.use("/peers", gatewayAuthMiddleware);
-
-    app.get("/peers", (_request: unknown, response: { json: (body: unknown) => void }) => {
-      const peers = [...this.options.peersBySlug.values()].map((peer) => ({
-        slug: peer.slug,
-        id: peer.id,
-        name: peer.name,
-        description: peer.description,
-      }));
-
-      response.json({
-        peers,
-        count: peers.length,
-      });
-    });
-
-    for (const [slug, peer] of this.options.peersBySlug.entries()) {
-      const requestHandler = new modules.DefaultRequestHandler(
-        buildAgentCard(peer, this.options.gatewayUrl),
-        new modules.InMemoryTaskStore(),
-        new GatewayPeerExecutor({
-          peer,
-          onRequest: this.options.onRequest,
-          onCancel: this.options.onCancel,
-        }),
-      );
-
-      const userBuilder = createUserBuilder(
-        {
-          authToken: this.options.authToken,
-          allowUnauthenticatedLoopback: this.options.allowUnauthenticatedLoopback ?? false,
-        },
-        modules,
-      );
-      const peerBasePath = `/agents/${slug}`;
-
-      app.get(
-        `${peerBasePath}/.well-known/agent.json`,
-        async (_request: unknown, response: { json: (body: unknown) => void }) => {
-          response.json(await requestHandler.getAgentCard());
-        },
-      );
-
-      app.use(
-        `${peerBasePath}/${modules.AGENT_CARD_PATH}`,
-        modules.agentCardHandler({
-          agentCardProvider: requestHandler,
-        }),
-      );
-
-      app.use(
-        `${peerBasePath}/v1`,
-        gatewayAuthMiddleware,
-        modules.restHandler({
-          requestHandler,
-          userBuilder,
-        }),
-      );
-
-      app.use(
-        peerBasePath,
-        gatewayAuthMiddleware,
-        modules.jsonRpcHandler({
-          requestHandler,
-          userBuilder,
-        }),
-      );
-    }
+    const app = this.createApp(modules, gatewayAuthMiddleware);
+    this.registerPeerRoutes(app, modules, gatewayAuthMiddleware);
 
     this.server = await listen(app, this.options.port, this.options.host);
     this.started = true;
@@ -282,6 +212,105 @@ export class GatewayServer implements GatewayServerLike {
         resolve();
       });
     });
+  }
+
+  private async loadModules(): Promise<RuntimeA2AServerModules> {
+    const modulesLoader = this.options.loadModules as (() => Promise<RuntimeA2AServerModules>) | undefined;
+    return modulesLoader ? modulesLoader() : loadA2AServerModules();
+  }
+
+  private createApp(
+    modules: RuntimeA2AServerModules,
+    gatewayAuthMiddleware: ReturnType<typeof createGatewayAuthMiddleware>,
+  ): ExpressAppLike {
+    const app = modules.createExpressApp();
+    app.use(createSecurityHeadersMiddleware());
+    app.use(modules.createExpressApp.json({ limit: "1mb" }));
+    app.use("/peers", gatewayAuthMiddleware);
+    app.get("/peers", (_request: unknown, response: { json: (body: unknown) => void }) => {
+      const peers = [...this.options.peersBySlug.values()].map((peer) => ({
+        slug: peer.slug,
+        id: peer.id,
+        name: peer.name,
+        description: peer.description,
+      }));
+
+      response.json({
+        peers,
+        count: peers.length,
+      });
+    });
+
+    return app;
+  }
+
+  private registerPeerRoutes(
+    app: ExpressAppLike,
+    modules: RuntimeA2AServerModules,
+    gatewayAuthMiddleware: ReturnType<typeof createGatewayAuthMiddleware>,
+  ): void {
+    for (const [slug, peer] of this.options.peersBySlug.entries()) {
+      this.registerPeerRoute(app, modules, gatewayAuthMiddleware, slug, peer);
+    }
+  }
+
+  private registerPeerRoute(
+    app: ExpressAppLike,
+    modules: RuntimeA2AServerModules,
+    gatewayAuthMiddleware: ReturnType<typeof createGatewayAuthMiddleware>,
+    slug: string,
+    peer: GatewayPeer,
+  ): void {
+    const requestHandler = new modules.DefaultRequestHandler(
+      buildAgentCard(peer, this.options.gatewayUrl),
+      new modules.InMemoryTaskStore(),
+      new GatewayPeerExecutor({
+        peer,
+        onRequest: this.options.onRequest,
+        onCancel: this.options.onCancel,
+      }),
+    );
+
+    const userBuilder = createUserBuilder(
+      {
+        authToken: this.options.authToken,
+        allowUnauthenticatedLoopback: this.options.allowUnauthenticatedLoopback ?? false,
+      },
+      modules,
+    );
+    const peerBasePath = `/agents/${slug}`;
+
+    app.get(
+      `${peerBasePath}/.well-known/agent.json`,
+      async (_request: unknown, response: { json: (body: unknown) => void }) => {
+        response.json(await requestHandler.getAgentCard());
+      },
+    );
+
+    app.use(
+      `${peerBasePath}/${modules.AGENT_CARD_PATH}`,
+      modules.agentCardHandler({
+        agentCardProvider: requestHandler,
+      }),
+    );
+
+    app.use(
+      `${peerBasePath}/v1`,
+      gatewayAuthMiddleware,
+      modules.restHandler({
+        requestHandler,
+        userBuilder,
+      }),
+    );
+
+    app.use(
+      peerBasePath,
+      gatewayAuthMiddleware,
+      modules.jsonRpcHandler({
+        requestHandler,
+        userBuilder,
+      }),
+    );
   }
 }
 
