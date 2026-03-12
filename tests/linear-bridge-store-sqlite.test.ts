@@ -155,4 +155,63 @@ describe("sqlite session room store", () => {
 
     await expect(store.listPendingBootstrapRequests()).resolves.toEqual([]);
   });
+
+  it("ignores malformed sqlite rows instead of casting them as typed records", async () => {
+    const { store, cleanup } = await createStore();
+    cleanups.push(cleanup);
+
+    const db = await (store as unknown as {
+      getDb: () => Promise<{
+        prepare: (sql: string) => {
+          run: (...args: unknown[]) => void;
+        };
+      }>;
+    }).getDb();
+
+    db.prepare(`
+      INSERT INTO linear_thenvoi_session_rooms (
+        linear_session_id,
+        linear_issue_id,
+        thenvoi_room_id,
+        status,
+        last_event_key,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "bad-session",
+      "issue-1",
+      "room-1",
+      "invalid_status",
+      null,
+      "2026-03-03T00:00:00.000Z",
+      "2026-03-03T00:00:00.000Z",
+    );
+
+    db.prepare(`
+      INSERT INTO linear_thenvoi_bootstrap_requests (
+        event_key,
+        linear_session_id,
+        thenvoi_room_id,
+        expected_content,
+        message_type,
+        metadata_json,
+        created_at,
+        expires_at,
+        processed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+    `).run(
+      "bad-bootstrap",
+      "session-1",
+      "room-1",
+      "Bootstrap me",
+      "", // empty message type should fail runtime row validation
+      "{\"ok\":true}",
+      "2026-03-03T00:00:00.000Z",
+      "2099-03-03T00:10:00.000Z",
+    );
+
+    await expect(store.getBySessionId("bad-session")).resolves.toBeNull();
+    await expect(store.listPendingBootstrapRequests()).resolves.toEqual([]);
+  });
 });

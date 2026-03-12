@@ -25,6 +25,14 @@ interface BootstrapRequestRow {
   processed_at: string | null;
 }
 
+const SESSION_STATUSES = new Set<SessionRoomRecord["status"]>([
+  "active",
+  "waiting",
+  "completed",
+  "canceled",
+  "errored",
+]);
+
 /** SQLite-backed session room store. Uses `node:sqlite` (lazily imported). */
 class SqliteSessionRoomStore implements SessionRoomStore {
   private readonly dbPath: string;
@@ -36,7 +44,7 @@ class SqliteSessionRoomStore implements SessionRoomStore {
 
   public async getBySessionId(sessionId: string): Promise<SessionRoomRecord | null> {
     const db = await this.getDb();
-    const row = db
+    const rawRow = db
       .prepare(
         `
         SELECT
@@ -52,14 +60,15 @@ class SqliteSessionRoomStore implements SessionRoomStore {
         LIMIT 1
         `,
       )
-      .get(sessionId) as SessionRoomRow | undefined;
+      .get(sessionId);
+    const row = parseSessionRoomRow(rawRow);
 
     return row ? this.toRecord(row) : null;
   }
 
   public async getByIssueId(issueId: string): Promise<SessionRoomRecord | null> {
     const db = await this.getDb();
-    const row = db
+    const rawRow = db
       .prepare(
         `
         SELECT
@@ -76,7 +85,8 @@ class SqliteSessionRoomStore implements SessionRoomStore {
         LIMIT 1
         `,
       )
-      .get(issueId) as SessionRoomRow | undefined;
+      .get(issueId);
+    const row = parseSessionRoomRow(rawRow);
 
     return row ? this.toRecord(row) : null;
   }
@@ -170,7 +180,7 @@ class SqliteSessionRoomStore implements SessionRoomStore {
 
   public async listPendingBootstrapRequests(limit = 20): Promise<PendingBootstrapRequest[]> {
     const db = await this.getDb();
-    const rows = db
+    const rawRows = db
       .prepare(
         `
         SELECT
@@ -189,7 +199,8 @@ class SqliteSessionRoomStore implements SessionRoomStore {
         LIMIT ?
         `,
       )
-      .all(new Date().toISOString(), limit) as unknown as BootstrapRequestRow[];
+      .all(new Date().toISOString(), limit);
+    const rows = parseBootstrapRequestRows(rawRows);
 
     return rows.map((row) => ({
       eventKey: row.event_key,
@@ -323,11 +334,131 @@ class SqliteSessionRoomStore implements SessionRoomStore {
     }
 
     try {
-      return JSON.parse(metadataJson) as Record<string, unknown>;
+      const parsed = JSON.parse(metadataJson);
+      return asRecord(parsed) ?? undefined;
     } catch {
       return undefined;
     }
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function asNullableString(value: unknown): string | null | undefined {
+  if (value === null) {
+    return null;
+  }
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return asString(value);
+}
+
+function isSessionStatus(value: string): value is SessionRoomRecord["status"] {
+  return SESSION_STATUSES.has(value as SessionRoomRecord["status"]);
+}
+
+function parseSessionRoomRow(value: unknown): SessionRoomRow | null {
+  const row = asRecord(value);
+  if (!row) {
+    return null;
+  }
+
+  const linearSessionId = asString(row.linear_session_id);
+  const linearIssueId = asNullableString(row.linear_issue_id);
+  const thenvoiRoomId = asString(row.thenvoi_room_id);
+  const status = asString(row.status);
+  const lastEventKey = asNullableString(row.last_event_key);
+  const createdAt = asString(row.created_at);
+  const updatedAt = asString(row.updated_at);
+
+  if (
+    !linearSessionId
+    || linearIssueId === undefined
+    || !thenvoiRoomId
+    || !status
+    || !isSessionStatus(status)
+    || lastEventKey === undefined
+    || !createdAt
+    || !updatedAt
+  ) {
+    return null;
+  }
+
+  return {
+    linear_session_id: linearSessionId,
+    linear_issue_id: linearIssueId,
+    thenvoi_room_id: thenvoiRoomId,
+    status,
+    last_event_key: lastEventKey,
+    created_at: createdAt,
+    updated_at: updatedAt,
+  };
+}
+
+function parseBootstrapRequestRows(value: unknown): BootstrapRequestRow[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => parseBootstrapRequestRow(entry))
+    .filter((entry): entry is BootstrapRequestRow => entry !== null);
+}
+
+function parseBootstrapRequestRow(value: unknown): BootstrapRequestRow | null {
+  const row = asRecord(value);
+  if (!row) {
+    return null;
+  }
+
+  const eventKey = asString(row.event_key);
+  const linearSessionId = asString(row.linear_session_id);
+  const thenvoiRoomId = asString(row.thenvoi_room_id);
+  const expectedContent = asString(row.expected_content);
+  const messageType = asString(row.message_type);
+  const metadataJson = asNullableString(row.metadata_json);
+  const createdAt = asString(row.created_at);
+  const expiresAt = asString(row.expires_at);
+  const processedAt = asNullableString(row.processed_at);
+
+  if (
+    !eventKey
+    || !linearSessionId
+    || !thenvoiRoomId
+    || !expectedContent
+    || !messageType
+    || metadataJson === undefined
+    || !createdAt
+    || !expiresAt
+    || processedAt === undefined
+  ) {
+    return null;
+  }
+
+  return {
+    event_key: eventKey,
+    linear_session_id: linearSessionId,
+    thenvoi_room_id: thenvoiRoomId,
+    expected_content: expectedContent,
+    message_type: messageType,
+    metadata_json: metadataJson,
+    created_at: createdAt,
+    expires_at: expiresAt,
+    processed_at: processedAt,
+  };
 }
 
 export function createSqliteSessionRoomStore(dbPath: string): SessionRoomStore {
