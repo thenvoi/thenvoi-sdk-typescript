@@ -3,7 +3,7 @@ import { NoopLogger } from "../core/logger";
 import { FernRestAdapter } from "../client/rest/RestFacade";
 import type { RestRequestOptions } from "../client/rest/requestOptions";
 import { fetchPaginated, type PaginationOptions } from "../client/rest/pagination";
-import type { PlatformChatMessage, ThenvoiLinkRestApi } from "../client/rest/types";
+import type { PaginatedResponse, PlatformChatMessage, ThenvoiLinkRestApi } from "../client/rest/types";
 import type { PlatformEvent } from "./events";
 import { UnsupportedFeatureError } from "../core/errors";
 import { assertCapability } from "../contracts/capabilities";
@@ -333,19 +333,23 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
     return message ? toPlatformMessage(roomId, message) : null;
   }
 
-  public async listAllChats(
-    options?: PaginationOptions,
+  public async listChats(
+    request: { page: number; pageSize: number },
     requestOptions?: RestRequestOptions,
-  ): Promise<MetadataMap[]> {
+  ): Promise<PaginatedResponse<MetadataMap>> {
     if (!this.rest.listChats) {
       throw new UnsupportedFeatureError("Chat listing is not available in current REST adapter");
     }
 
+    return this.rest.listChats(request, requestOptions);
+  }
+
+  public async listAllChats(
+    options?: PaginationOptions,
+    requestOptions?: RestRequestOptions,
+  ): Promise<MetadataMap[]> {
     return fetchPaginated({
-      fetchPage: ({ page, pageSize }) => this.rest.listChats!(
-        { page, pageSize },
-        requestOptions,
-      ),
+      fetchPage: ({ page, pageSize }) => this.listChats({ page, pageSize }, requestOptions),
       pageSize: options?.pageSize,
       maxPages: options?.maxPages,
       strategy: options?.strategy,

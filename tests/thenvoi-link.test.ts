@@ -118,4 +118,37 @@ describe("ThenvoiLink event waiting", () => {
 
     await expect(link.markProcessed("room-1", "message-1", { bestEffort: true })).resolves.toBeUndefined();
   });
+
+  it("exposes request-first chat listing semantics via listChats", async () => {
+    let capturedRequest: { page: number; pageSize: number } | null = null;
+    let capturedOptions: { headers?: Record<string, string> } | undefined;
+    const link = new ThenvoiLink({
+      agentId: "agent-1",
+      apiKey: "key",
+      restApi: new FakeRestApi({
+        listChats: async (request, options) => {
+          capturedRequest = request;
+          capturedOptions = options;
+          return {
+            data: [{ id: "room-1" }],
+            metadata: { page: request.page, pageSize: request.pageSize },
+          };
+        },
+      }),
+      transport: new FakeTransport(),
+    });
+
+    await expect(
+      link.listChats(
+        { page: 2, pageSize: 25 },
+        { headers: { "x-test": "1" } },
+      ),
+    ).resolves.toEqual({
+      data: [{ id: "room-1" }],
+      metadata: { page: 2, pageSize: 25 },
+    });
+
+    expect(capturedRequest).toEqual({ page: 2, pageSize: 25 });
+    expect(capturedOptions).toEqual({ headers: { "x-test": "1" } });
+  });
 });
