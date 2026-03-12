@@ -374,4 +374,28 @@ describe("FernRestAdapter contact and memory parity", () => {
       { id: "agent-1", name: "Weather", type: "Agent", handle: "@sam/weather" },
     ]);
   });
+
+  it("throws clear errors when required agent identity fields are missing", async () => {
+    const rest = new RestFacade({
+      api: new FernRestAdapter({
+        agentApiIdentity: {
+          getAgentMe: async () => ({ data: { id: "agent-1" } }),
+        },
+      }),
+    });
+
+    await expect(rest.getAgentMe()).rejects.toThrow("AgentIdentity.name");
+  });
+
+  it("throws when legacy profile identity cannot produce a valid id or name", async () => {
+    const rest = new RestFacade({
+      api: new FernRestAdapter({
+        myProfile: {
+          getMyProfile: async () => ({ id: "", name: "" }),
+        },
+      }),
+    });
+
+    await expect(rest.getAgentMe()).rejects.toThrow("AgentIdentity.id");
+  });
 });

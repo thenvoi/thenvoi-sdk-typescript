@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { TopicHandlers, StreamingTransport } from "../src/platform/streaming/transport";
-import { RoomPresence } from "../src/runtime/RoomPresence";
+import { RoomPresence } from "../src/runtime/rooms/RoomPresence";
 import { ThenvoiLink } from "../src/platform/ThenvoiLink";
 import { FakeRestApi } from "./testUtils";
 

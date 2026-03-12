@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createLinearBridgeRuntime,
   handleAgentSessionEvent,
   type HandleAgentSessionEventInput,
   type LinearThenvoiBridgeConfig,
@@ -142,6 +143,19 @@ class RateLimitedParticipantsRestApi extends LinearThenvoiExampleRestApi {
   }
 }
 
+class FailFirstCreateChatRestApi extends LinearThenvoiExampleRestApi {
+  private failed = false;
+
+  public override async createChat(taskId?: string): Promise<{ id: string }> {
+    if (!this.failed) {
+      this.failed = true;
+      throw new Error("simulated room-creation failure");
+    }
+
+    return super.createChat(taskId);
+  }
+}
+
 function makeConfig(roomStrategy: "issue" | "session"): LinearThenvoiBridgeConfig {
   return {
     linearAccessToken: "lin_api_test",
@@ -223,6 +237,73 @@ describe("linear bridge room strategy", () => {
 
     expect(restApi.roomEvents).toHaveLength(2);
     expect(restApi.roomEvents[0]?.roomId).toBe(restApi.roomEvents[1]?.roomId);
+  });
+
+  it("serializes concurrent issue-room resolution with a shared runtime lock", async () => {
+    const restApi = new LinearThenvoiExampleRestApi();
+    const store = new MemorySessionRoomStore();
+    const runtime = createLinearBridgeRuntime();
+
+    await Promise.all([
+      handleAgentSessionEvent({
+        payload: makePayload("session-1", "issue-1"),
+        config: makeConfig("issue"),
+        deps: {
+          thenvoiRest: restApi,
+          linearClient: makeLinearClient(),
+          store,
+        },
+      }, { runtime }),
+      handleAgentSessionEvent({
+        payload: makePayload("session-2", "issue-1"),
+        config: makeConfig("issue"),
+        deps: {
+          thenvoiRest: restApi,
+          linearClient: makeLinearClient(),
+          store,
+        },
+      }, { runtime }),
+    ]);
+
+    expect(restApi.createChatCalls).toHaveLength(1);
+    expect(restApi.roomEvents).toHaveLength(2);
+    expect(restApi.roomEvents[0]?.roomId).toBe(restApi.roomEvents[1]?.roomId);
+  });
+
+  it("releases room-resolution lock after failure so later retries can proceed", async () => {
+    const restApi = new FailFirstCreateChatRestApi();
+    const store = new MemorySessionRoomStore();
+    const runtime = createLinearBridgeRuntime();
+
+    await expect(
+      handleAgentSessionEvent({
+        payload: makePayload("session-fail", "issue-1"),
+        config: makeConfig("issue"),
+        deps: {
+          thenvoiRest: restApi,
+          linearClient: makeLinearClient(),
+          store,
+        },
+      }, { runtime }),
+    ).rejects.toThrow("simulated room-creation failure");
+
+    await expect(
+      handleAgentSessionEvent({
+        payload: makePayload("session-retry", "issue-1"),
+        config: makeConfig("issue"),
+        deps: {
+          thenvoiRest: restApi,
+          linearClient: makeLinearClient(),
+          store,
+        },
+      }, { runtime }),
+    ).resolves.toBeUndefined();
+
+    expect(restApi.createChatCalls).toHaveLength(1);
+    expect(restApi.roomEvents).toHaveLength(1);
+    await expect(store.getBySessionId("session-retry")).resolves.toMatchObject({
+      status: "active",
+    });
   });
 
   it("reuses the same issue room after the previous session completed", async () => {

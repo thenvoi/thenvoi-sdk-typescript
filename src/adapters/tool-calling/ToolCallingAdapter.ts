@@ -92,11 +92,14 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
     while ((response.toolCalls?.length ?? 0) > 0) {
       roundCount += 1;
       if (roundCount > this.maxToolRounds) {
-        await tools.sendEvent(
+        const maxRoundsError = new Error(
           `Stopped tool loop after ${this.maxToolRounds} rounds to prevent infinite recursion.`,
+        );
+        await tools.sendEvent(
+          maxRoundsError.message,
           "error",
         );
-        return;
+        throw maxRoundsError;
       }
 
       const roundToolCalls = response.toolCalls ?? [];

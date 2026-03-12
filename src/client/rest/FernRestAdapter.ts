@@ -20,6 +20,7 @@ import { DEFAULT_REQUEST_OPTIONS, type RestRequestOptions } from "./requestOptio
 import { normalizePaginationMetadata } from "./pagination";
 import { normalizeContactRequestsResult } from "./responseNormalization";
 import type {
+  FernUserProfile,
   FernThenvoiClientLike,
   RestApi,
   AgentIdentity,
@@ -35,25 +36,87 @@ function mergeOptions(options?: RestRequestOptions): RestRequestOptions {
   };
 }
 
-function unwrapData<T>(value: unknown): T {
-  const record = asMetadataMap(value);
-  if (record?.data !== undefined) {
-    return record.data as T;
-  }
-
-  return value as T;
-}
-
 function asMetadataMap(value: unknown): MetadataMap | undefined {
   return asOptionalRecord(value) as MetadataMap | undefined;
 }
 
-function asRecordArray<T = MetadataMap>(value: unknown): T[] | undefined {
+function requireNonEmptyStringField(
+  value: unknown,
+  field: string,
+  source: string,
+): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`Invalid ${source} response: expected non-empty string AgentIdentity.${field}`);
+  }
+
+  return value;
+}
+
+function normalizeOptionalStringField(
+  value: unknown,
+  field: string,
+  source: string,
+): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    throw new Error(`Invalid ${source} response: expected string or null AgentIdentity.${field}`);
+  }
+
+  return value;
+}
+
+function normalizeAgentIdentityRecord(
+  record: MetadataMap,
+  source: string,
+): AgentIdentity {
+  return {
+    id: requireNonEmptyStringField(record.id, "id", source),
+    name: requireNonEmptyStringField(record.name, "name", source),
+    description: normalizeOptionalStringField(record.description, "description", source),
+    handle: normalizeOptionalStringField(record.handle, "handle", source),
+  };
+}
+
+function normalizeAgentIdentityEnvelope(
+  value: unknown,
+  source: string,
+): AgentIdentity {
+  const payload = asMetadataMap(extractEnvelopeData(value));
+  if (!payload) {
+    throw new Error(`Invalid ${source} response: expected object payload for AgentIdentity`);
+  }
+
+  return normalizeAgentIdentityRecord(payload, source);
+}
+
+function normalizeLegacyProfileIdentity(
+  profile: FernUserProfile,
+  source: string,
+): AgentIdentity {
+  const id = requireNonEmptyStringField(profile.id, "id", source);
+  const derivedName = profile.name
+    ?? ([profile.first_name, profile.last_name].filter(Boolean).join(" ").trim() || undefined)
+    ?? profile.username
+    ?? profile.id;
+  const name = requireNonEmptyStringField(derivedName, "name", source);
+
+  return {
+    id,
+    name,
+    description: profile.description ?? null,
+    handle: null,
+  };
+}
+
+function asRecordArray(value: unknown): MetadataMap[] | undefined {
   if (!Array.isArray(value)) {
     return undefined;
   }
 
-  return value.filter((entry): entry is T => asOptionalRecord(entry) !== undefined);
+  return value.filter((entry): entry is MetadataMap => asOptionalRecord(entry) !== undefined);
 }
 
 function extractEnvelopeData(value: unknown): unknown {
@@ -74,14 +137,18 @@ function extractEnvelopeMetadata(value: unknown): MetadataMap | undefined {
   return asMetadataMap(record.metadata) ?? asMetadataMap(record.meta);
 }
 
-function normalizePaginatedResponse<T = MetadataMap>(
+function normalizePaginatedResponse<T>(
   response: unknown,
+  normalizeItem: (value: MetadataMap) => T | null,
 ): PaginatedResponse<T> {
   const topLevelData = extractEnvelopeData(response);
   const nestedData = extractEnvelopeData(topLevelData);
+  const rawItems = asRecordArray(topLevelData) ?? asRecordArray(nestedData) ?? [];
 
   return {
-    data: asRecordArray<T>(topLevelData) ?? asRecordArray<T>(nestedData) ?? [],
+    data: rawItems
+      .map((item) => normalizeItem(item))
+      .filter((item): item is T => item !== null),
     metadata: normalizePaginationMetadata(
       extractEnvelopeMetadata(response) ?? extractEnvelopeMetadata(topLevelData),
     ),
@@ -102,7 +169,8 @@ function normalizeToolOperationResult(response: unknown): ToolOperationResult {
 }
 
 function normalizeMemoryRecord(response: unknown): MemoryRecord {
-  return asMetadataMap(extractEnvelopeData(response)) ?? {};
+  const payload = asMetadataMap(extractEnvelopeData(response));
+  return payload ? normalizeMemoryRecordItem(payload) ?? {} : {};
 }
 
 function extractChatId(response: unknown): string | undefined {
@@ -125,6 +193,108 @@ function isChatParticipant(value: unknown): value is ChatParticipant {
 function normalizeChatParticipantsResponse(response: unknown): ChatParticipant[] {
   const payload = extractEnvelopeData(response);
   return Array.isArray(payload) ? payload.filter(isChatParticipant) : [];
+}
+
+function normalizeMetadataRecord(value: MetadataMap): MetadataMap {
+  return value;
+}
+
+function hasInvalidString(value: unknown): boolean {
+  return value !== undefined && typeof value !== "string";
+}
+
+function hasInvalidNullableString(value: unknown): boolean {
+  return value !== undefined && value !== null && typeof value !== "string";
+}
+
+function hasInvalidNullableBoolean(value: unknown): boolean {
+  return value !== undefined && value !== null && typeof value !== "boolean";
+}
+
+function normalizePeerRecord(value: MetadataMap): PeerRecord | null {
+  if (
+    hasInvalidString(value.id)
+    || hasInvalidString(value.name)
+    || hasInvalidString(value.type)
+    || hasInvalidNullableString(value.handle)
+    || hasInvalidNullableString(value.description)
+  ) {
+    return null;
+  }
+
+  return {
+    ...(typeof value.id === "string" ? { id: value.id } : {}),
+    ...(typeof value.name === "string" ? { name: value.name } : {}),
+    ...(typeof value.type === "string" ? { type: value.type } : {}),
+    ...(value.handle !== undefined ? { handle: value.handle as string | null } : {}),
+    ...(value.description !== undefined ? { description: value.description as string | null } : {}),
+  };
+}
+
+function normalizeContactRecord(value: MetadataMap): ContactRecord | null {
+  if (
+    hasInvalidString(value.id)
+    || hasInvalidString(value.handle)
+    || hasInvalidNullableString(value.name)
+    || hasInvalidString(value.type)
+    || hasInvalidNullableString(value.description)
+    || hasInvalidNullableBoolean(value.is_external)
+    || hasInvalidString(value.inserted_at)
+  ) {
+    return null;
+  }
+
+  return {
+    ...(typeof value.id === "string" ? { id: value.id } : {}),
+    ...(typeof value.handle === "string" ? { handle: value.handle } : {}),
+    ...(value.name !== undefined ? { name: value.name as string | null } : {}),
+    ...(typeof value.type === "string" ? { type: value.type } : {}),
+    ...(value.description !== undefined ? { description: value.description as string | null } : {}),
+    ...(value.is_external !== undefined ? { is_external: value.is_external as boolean | null } : {}),
+    ...(typeof value.inserted_at === "string" ? { inserted_at: value.inserted_at } : {}),
+  };
+}
+
+function normalizeMemoryRecordItem(value: MetadataMap): MemoryRecord | null {
+  if (
+    hasInvalidString(value.id)
+    || hasInvalidString(value.content)
+    || hasInvalidString(value.system)
+    || hasInvalidString(value.type)
+    || hasInvalidString(value.segment)
+    || hasInvalidNullableString(value.thought)
+    || hasInvalidNullableString(value.subject_id)
+    || hasInvalidNullableString(value.source_agent_id)
+    || hasInvalidNullableString(value.organization_id)
+    || hasInvalidString(value.scope)
+    || hasInvalidString(value.status)
+    || (value.metadata !== undefined && value.metadata !== null && asMetadataMap(value.metadata) === undefined)
+    || hasInvalidNullableString(value.inserted_at)
+  ) {
+    return null;
+  }
+
+  return {
+    ...(typeof value.id === "string" ? { id: value.id } : {}),
+    ...(typeof value.content === "string" ? { content: value.content } : {}),
+    ...(typeof value.system === "string" ? { system: value.system } : {}),
+    ...(typeof value.type === "string" ? { type: value.type } : {}),
+    ...(typeof value.segment === "string" ? { segment: value.segment } : {}),
+    ...(value.thought !== undefined ? { thought: value.thought as string | null } : {}),
+    ...(value.subject_id !== undefined ? { subject_id: value.subject_id as string | null } : {}),
+    ...(value.source_agent_id !== undefined ? { source_agent_id: value.source_agent_id as string | null } : {}),
+    ...(value.organization_id !== undefined ? { organization_id: value.organization_id as string | null } : {}),
+    ...(typeof value.scope === "string" ? { scope: value.scope } : {}),
+    ...(typeof value.status === "string" ? { status: value.status } : {}),
+    ...(value.metadata !== undefined
+      ? { metadata: value.metadata === null ? null : asMetadataMap(value.metadata) ?? null }
+      : {}),
+    ...(value.inserted_at !== undefined ? { inserted_at: value.inserted_at as string | null } : {}),
+  };
+}
+
+function normalizePlatformMessageRecord(value: MetadataMap): PlatformChatMessage | null {
+  return normalizePlatformChatMessage(value);
 }
 
 function normalizePlatformChatMessage(value: unknown): PlatformChatMessage | null {
@@ -169,13 +339,8 @@ export class FernRestAdapter implements RestApi {
 
   public async getAgentMe(options?: RestRequestOptions): Promise<AgentIdentity> {
     if (this.client.agentApiIdentity?.getAgentMe) {
-      const profile = unwrapData<AgentIdentity>(await this.client.agentApiIdentity.getAgentMe(mergeOptions(options)));
-      return {
-        id: profile.id,
-        name: profile.name,
-        description: profile.description ?? null,
-        handle: profile.handle ?? null,
-      };
+      const response = await this.client.agentApiIdentity.getAgentMe(mergeOptions(options));
+      return normalizeAgentIdentityEnvelope(response, "agentApiIdentity.getAgentMe");
     }
 
     const profileApi = this.client.myProfile?.getMyProfile ?? this.client.humanApiProfile?.getMyProfile;
@@ -186,15 +351,7 @@ export class FernRestAdapter implements RestApi {
     }
 
     const profile = await profileApi(mergeOptions(options));
-    const name = profile.name
-      ?? ([profile.first_name, profile.last_name].filter(Boolean).join(" ") || undefined)
-      ?? profile.username
-      ?? profile.id;
-    return {
-      id: profile.id,
-      name,
-      description: profile.description ?? null,
-    };
+    return normalizeLegacyProfileIdentity(profile, "profile.getMyProfile");
   }
 
   public async createChatMessage(
@@ -422,7 +579,7 @@ export class FernRestAdapter implements RestApi {
       },
       mergeOptions(options),
     );
-    return normalizePaginatedResponse<PeerRecord>(response);
+    return normalizePaginatedResponse(response, normalizePeerRecord);
   }
 
   public async listChats(
@@ -442,7 +599,7 @@ export class FernRestAdapter implements RestApi {
       mergeOptions(options),
     );
 
-    return normalizePaginatedResponse<MetadataMap>(response);
+    return normalizePaginatedResponse(response, normalizeMetadataRecord);
   }
 
   public async listContacts(
@@ -465,7 +622,7 @@ export class FernRestAdapter implements RestApi {
       mergeOptions(options),
     );
 
-    return normalizePaginatedResponse<ContactRecord>(response);
+    return normalizePaginatedResponse(response, normalizeContactRecord);
   }
 
   public async addContact(
@@ -560,7 +717,7 @@ export class FernRestAdapter implements RestApi {
     }
 
     const response = await api(request, mergeOptions(options));
-    return normalizePaginatedResponse<MemoryRecord>(response);
+    return normalizePaginatedResponse(response, normalizeMemoryRecordItem);
   }
 
   public async storeMemory(
@@ -639,6 +796,7 @@ export class FernRestAdapter implements RestApi {
     if (listMessagesApi) {
       return normalizePaginatedResponse<PlatformChatMessage>(
         await listMessagesApi(request.chatId, listRequest, requestOptions),
+        normalizePlatformMessageRecord,
       );
     }
 
@@ -649,6 +807,7 @@ export class FernRestAdapter implements RestApi {
 
     return normalizePaginatedResponse<PlatformChatMessage>(
       await listAgentMessagesApi(request.chatId, listRequest, requestOptions),
+      normalizePlatformMessageRecord,
     );
   }
 
@@ -666,6 +825,7 @@ export class FernRestAdapter implements RestApi {
     if (getChatContextApi) {
       return normalizePaginatedResponse<PlatformChatMessage>(
         await getChatContextApi(request.chatId, contextRequest, requestOptions),
+        normalizePlatformMessageRecord,
       );
     }
 
@@ -676,6 +836,7 @@ export class FernRestAdapter implements RestApi {
 
     return normalizePaginatedResponse<PlatformChatMessage>(
       await getAgentChatContextApi(request.chatId, contextRequest, requestOptions),
+      normalizePlatformMessageRecord,
     );
   }
 }

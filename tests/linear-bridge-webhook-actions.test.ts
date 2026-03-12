@@ -477,6 +477,46 @@ describe("linear bridge webhook actions", () => {
     ]);
   });
 
+  it("treats duplicate prompted events as idempotent and does not re-forward room content", async () => {
+    const restApi = new LinearThenvoiExampleRestApi();
+    const store = new MemorySessionRoomStore();
+    const linearClient = makeLinearClient();
+
+    await handleAgentSessionEvent({
+      payload: makePayload("created"),
+      config,
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    const promptedPayload = {
+      ...makePayload("created"),
+      action: "prompted",
+      agentActivity: {
+        content: {
+          body: "Please continue with implementation.",
+        },
+      },
+    } as unknown as HandleAgentSessionEventInput["payload"];
+
+    await handleAgentSessionEvent({
+      payload: promptedPayload,
+      config,
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+    await handleAgentSessionEvent({
+      payload: promptedPayload,
+      config,
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    expect(restApi.roomEvents).toHaveLength(2);
+    expect(restApi.roomEvents[1]?.content).toContain("Please continue with implementation.");
+    await expect(store.listPendingBootstrapRequests()).resolves.toEqual([
+      expect.objectContaining({ messageType: "task" }),
+      expect.objectContaining({ messageType: "text" }),
+    ]);
+  });
+
   it("uses configured host handle when provided", async () => {
     const restApi = new LinearThenvoiExampleRestApi({
       agentId: "peer-actual-host",

@@ -50,60 +50,27 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     });
   };
 
-  const addSessionBodyAliasPair = (
-    canonical: {
-      name: string;
-      description: string;
-    },
-    alias: {
-      name: string;
-      description: string;
-    },
-    handler: (args: Record<string, unknown>) => Promise<unknown>,
-  ): void => {
-    addSessionBodyTool(canonical.name, canonical.description, handler);
-    addSessionBodyTool(alias.name, alias.description, handler);
-  };
-
-  addSessionBodyAliasPair(
-    {
-      name: "post_thought",
-      description: "Post a thought to the Linear agent session, visible to the user as internal reasoning.",
-    },
-    {
-      name: "linear_post_thought",
-      description: "Alias for post_thought.",
-    },
+  addSessionBodyTool(
+    "linear_post_thought",
+    "Post a thought to the Linear agent session, visible to the user as internal reasoning.",
     async (args) => {
       await postThought(client, args.session_id as string, args.body as string);
       return { ok: true };
     },
   );
 
-  addSessionBodyAliasPair(
-    {
-      name: "post_action",
-      description: "Post an action to the Linear agent session, showing the user what step is being taken.",
-    },
-    {
-      name: "linear_post_action",
-      description: "Alias for post_action.",
-    },
+  addSessionBodyTool(
+    "linear_post_action",
+    "Post an action to the Linear agent session, showing the user what step is being taken.",
     async (args) => {
       await postAction(client, args.session_id as string, args.body as string);
       return { ok: true };
     },
   );
 
-  addSessionBodyAliasPair(
-    {
-      name: "post_error",
-      description: "Post an error to the Linear agent session to notify the user of a failure.",
-    },
-    {
-      name: "linear_post_error",
-      description: "Alias for post_error.",
-    },
+  addSessionBodyTool(
+    "linear_post_error",
+    "Post an error to the Linear agent session to notify the user of a failure.",
     async (args) => {
       await postError(client, args.session_id as string, args.body as string);
       return { ok: true };
@@ -111,15 +78,9 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
   );
 
   if (enableElicitation) {
-    addSessionBodyAliasPair(
-      {
-        name: "post_elicitation",
-        description: "Ask the Linear user a question via an elicitation activity.",
-      },
-      {
-        name: "linear_ask_user",
-        description: "Alias for post_elicitation.",
-      },
+    addSessionBodyTool(
+      "linear_ask_user",
+      "Ask the Linear user a question via an elicitation activity.",
       async (args) => {
         await postElicitation(client, args.session_id as string, args.body as string);
         return { ok: true };
@@ -127,15 +88,9 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     );
   }
 
-  addSessionBodyAliasPair(
-    {
-      name: "complete_session",
-      description: "Post the final response to the Linear agent session and mark the session completed when a store is available.",
-    },
-    {
-      name: "linear_post_response",
-      description: "Alias for complete_session.",
-    },
+  addSessionBodyTool(
+    "linear_post_response",
+    "Post the final response to the Linear agent session and mark the session completed when a store is available.",
     async (args) => {
       await completeLinearSession({
         linearClient: client,
@@ -195,56 +150,25 @@ function addIssueTools(input: {
     issueCommentLimitSchema,
   } = input;
 
-  const addIssueReadAliasPair = (
-    canonicalName: string,
-    canonicalDescription: string,
-    aliasName: string,
-    aliasDescription: string,
-    reader: (issueId: string, args: Record<string, unknown>) => Promise<unknown>,
-    schema: z.ZodObject<z.ZodRawShape> = requiredIssueIdSchema,
-  ): void => {
-    const handler = async (args: Record<string, unknown>): Promise<unknown> => {
-      const issueId = resolveIssueId(canonicalName, args);
-      return reader(issueId, args);
-    };
-
-    tools.push(
-      {
-        name: aliasName,
-        description: aliasDescription,
-        schema,
-        handler: async (args: Record<string, unknown>) => {
-          const issueId = resolveIssueId(aliasName, args);
-          return reader(issueId, args);
-        },
-      },
-      {
-        name: canonicalName,
-        description: canonicalDescription,
-        schema,
-        handler,
-      },
-    );
-  };
-
-  addIssueReadAliasPair(
-    "linear_get_issue",
-    "Fetch the current Linear issue details using the exact issue UUID from the session context.",
-    "get_issue",
-    "Compatibility alias for linear_get_issue. Requires the exact Linear issue UUID from the session context.",
-    async (issueId) => readIssue(client, issueId),
-  );
-
-  addIssueReadAliasPair(
-    "linear_list_issue_comments",
-    "List recent comments for the current Linear issue using the exact issue UUID from the session context.",
-    "list_comments",
-    "Compatibility alias for linear_list_issue_comments. Requires the exact Linear issue UUID from the session context.",
-    async (issueId, args) => readIssueComments(client, issueId, typeof args.limit === "number" ? args.limit : 20),
-    requiredIssueIdSchema.extend({ limit: issueCommentLimitSchema }),
-  );
-
   tools.push(
+    {
+      name: "linear_get_issue",
+      description: "Fetch the current Linear issue details using the exact issue UUID from the session context.",
+      schema: requiredIssueIdSchema,
+      handler: async (args: Record<string, unknown>) => {
+        const issueId = resolveIssueId("linear_get_issue", args);
+        return readIssue(client, issueId);
+      },
+    },
+    {
+      name: "linear_list_issue_comments",
+      description: "List recent comments for the current Linear issue using the exact issue UUID from the session context.",
+      schema: requiredIssueIdSchema.extend({ limit: issueCommentLimitSchema }),
+      handler: async (args: Record<string, unknown>) => {
+        const issueId = resolveIssueId("linear_list_issue_comments", args);
+        return readIssueComments(client, issueId, typeof args.limit === "number" ? args.limit : 20);
+      },
+    },
     {
       name: "linear_list_workflow_states",
       description: "List workflow states for the current issue's team so the bridge can move the issue between Todo, In Progress, In Review, and Done.",
@@ -344,47 +268,22 @@ function assertUuid(toolName: string, value: string): void {
 function resolveIssueId(toolName: string, args: Record<string, unknown>): string {
   const issueId = resolveOptionalIssueId(toolName, args);
   if (!issueId) {
-    throw new Error(`${toolName} requires issue_id (legacy aliases issueId/id are deprecated).`);
+    throw new Error(`${toolName} requires issue_id.`);
   }
 
   return issueId;
-}
-
-const LEGACY_ISSUE_ID_ALIASES = ["issueId", "id"] as const;
-type LegacyIssueIdAlias = (typeof LEGACY_ISSUE_ID_ALIASES)[number];
-
-const LEGACY_ISSUE_ID_CANONICAL_KEY: Record<LegacyIssueIdAlias, "issue_id"> = {
-  issueId: "issue_id",
-  id: "issue_id",
-};
-
-function normalizeIssueIdentifierInput(args: Record<string, unknown>): { issue_id?: string } {
-  if (typeof args.issue_id === "string") {
-    return { issue_id: args.issue_id };
-  }
-
-  for (const alias of LEGACY_ISSUE_ID_ALIASES) {
-    const legacyValue = args[alias];
-    if (typeof legacyValue === "string") {
-      return { [LEGACY_ISSUE_ID_CANONICAL_KEY[alias]]: legacyValue };
-    }
-  }
-
-  return {};
 }
 
 function resolveOptionalIssueId(
   toolName: string,
   args: Record<string, unknown>,
 ): string | undefined {
-  const { issue_id: raw } = normalizeIssueIdentifierInput(args);
-
-  if (!raw) {
+  if (typeof args.issue_id !== "string" || args.issue_id.length === 0) {
     return undefined;
   }
 
-  assertUuid(toolName, raw);
-  return raw;
+  assertUuid(toolName, args.issue_id);
+  return args.issue_id;
 }
 
 async function readIssue(client: LinearActivityClient, issueId: string): Promise<unknown> {

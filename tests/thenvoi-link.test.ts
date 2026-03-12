@@ -151,4 +151,35 @@ describe("ThenvoiLink event waiting", () => {
     expect(capturedRequest).toEqual({ page: 2, pageSize: 25 });
     expect(capturedOptions).toEqual({ headers: { "x-test": "1" } });
   });
+
+  it("listAllChats paginates until metadata totalPages is reached", async () => {
+    const requests: Array<{ page: number; pageSize: number }> = [];
+    const link = new ThenvoiLink({
+      agentId: "agent-1",
+      apiKey: "key",
+      restApi: new FakeRestApi({
+        listChats: async (request) => {
+          requests.push(request);
+          const pageData = request.page === 1
+            ? [{ id: "room-1" }, { id: "room-2" }]
+            : [{ id: "room-3" }];
+          return {
+            data: pageData,
+            metadata: { totalPages: 2, page: request.page, pageSize: request.pageSize },
+          };
+        },
+      }),
+      transport: new FakeTransport(),
+    });
+
+    await expect(link.listAllChats({ pageSize: 2 })).resolves.toEqual([
+      { id: "room-1" },
+      { id: "room-2" },
+      { id: "room-3" },
+    ]);
+    expect(requests).toEqual([
+      { page: 1, pageSize: 2 },
+      { page: 2, pageSize: 2 },
+    ]);
+  });
 });

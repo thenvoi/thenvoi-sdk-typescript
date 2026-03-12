@@ -371,14 +371,16 @@ describe("ParlantAdapter", () => {
     await adapter.onStarted("Parlant Bridge", "Bridge to parlant");
 
     const tools = new FakeTools();
-    await adapter.onMessage(
-      makeMessage("Hi", "room-error"),
-      tools,
-      [],
-      null,
-      null,
-      { isSessionBootstrap: false, roomId: "room-error" },
-    );
+    await expect(
+      adapter.onMessage(
+        makeMessage("Hi", "room-error"),
+        tools,
+        [],
+        null,
+        null,
+        { isSessionBootstrap: false, roomId: "room-error" },
+      ),
+    ).rejects.toThrow("poll failed");
 
     expect(tools.events).toHaveLength(1);
     expect(tools.events[0]?.messageType).toBe("error");
@@ -412,14 +414,16 @@ describe("ParlantAdapter", () => {
     await adapter.onStarted("Parlant Bridge", "Bridge to parlant");
 
     const tools = new FakeTools();
-    await adapter.onMessage(
-      makeMessage("Hi", "room-init"),
-      tools,
-      [],
-      null,
-      null,
-      { isSessionBootstrap: false, roomId: "room-init" },
-    );
+    await expect(
+      adapter.onMessage(
+        makeMessage("Hi", "room-init"),
+        tools,
+        [],
+        null,
+        null,
+        { isSessionBootstrap: false, roomId: "room-init" },
+      ),
+    ).rejects.toThrow("parlant init failed");
 
     expect(logger.error).toHaveBeenCalledWith(
       "Parlant client initialization failed",

@@ -68,16 +68,15 @@ describe("ExecutionContext enhancements", () => {
       expect(ctx.isLlmInitialized).toBe(true);
     });
 
-    it("consumeBootstrapAndMarkLlmInitialized returns true on first call and marks LLM initialized", () => {
+    it("does not regress initialized flag once marked", () => {
       const ctx = makeContext();
       expect(ctx.isLlmInitialized).toBe(false);
 
-      const first = ctx.consumeBootstrapAndMarkLlmInitialized();
-      expect(first).toBe(true);
+      ctx.markLlmInitialized();
       expect(ctx.isLlmInitialized).toBe(true);
 
-      const second = ctx.consumeBootstrapAndMarkLlmInitialized();
-      expect(second).toBe(false);
+      ctx.markLlmInitialized();
+      expect(ctx.isLlmInitialized).toBe(true);
     });
   });
 

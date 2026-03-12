@@ -206,6 +206,44 @@ describe("createLinearWebhookHandler", () => {
     await expect(response.text()).resolves.toBe("Invalid webhook");
   });
 
+  it("rejects requests missing timestamp headers", async () => {
+    const { url } = await startServer();
+    const payload = makePayload();
+    const rawBody = JSON.stringify(payload);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "linear-signature": sign(config.linearWebhookSecret, rawBody),
+      },
+      body: rawBody,
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toBe("Missing webhook timestamp");
+  });
+
+  it("marks bootstrap handoff processed after inline dispatch", async () => {
+    const { store, url } = await startServer();
+    const payload = makePayload();
+    const rawBody = JSON.stringify(payload);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "linear-signature": sign(config.linearWebhookSecret, rawBody),
+        "linear-timestamp": String(payload.webhookTimestamp),
+      },
+      body: rawBody,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("OK");
+    await expect(store.listPendingBootstrapRequests()).resolves.toEqual([]);
+  });
+
   it("skips events that are already queued", async () => {
     const queued = new Set<string>();
     const dispatcher = {
@@ -230,6 +268,44 @@ describe("createLinearWebhookHandler", () => {
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
     expect(dispatcher.dispatch).toHaveBeenCalledOnce();
+    expect(linearClient.createAgentActivity).toHaveBeenCalledOnce();
+  });
+
+  it("dedupes concurrent duplicate deliveries while first request is in flight", async () => {
+    let resolveDispatch: (value: void | PromiseLike<void>) => void = () => undefined;
+    const dispatchGate = new Promise<void>((resolve) => {
+      resolveDispatch = resolve;
+    });
+    const dispatcher = {
+      dispatch: vi.fn(async () => {
+        await dispatchGate;
+      }),
+    } satisfies LinearBridgeDispatcher;
+
+    const { linearClient, url } = await startServer(dispatcher);
+    const payload = makePayload();
+    const rawBody = JSON.stringify(payload);
+    const headers = {
+      "content-type": "application/json",
+      "linear-signature": sign(config.linearWebhookSecret, rawBody),
+      "linear-timestamp": String(payload.webhookTimestamp),
+    };
+
+    const firstRequest = fetch(url, { method: "POST", headers, body: rawBody });
+    await vi.waitFor(() => {
+      expect(dispatcher.dispatch).toHaveBeenCalledTimes(1);
+    });
+
+    const secondRequest = await fetch(url, { method: "POST", headers, body: rawBody });
+    expect(secondRequest.status).toBe(200);
+    await expect(secondRequest.text()).resolves.toBe("OK");
+
+    resolveDispatch(undefined);
+
+    const firstResponse = await firstRequest;
+    expect(firstResponse.status).toBe(200);
+    await expect(firstResponse.text()).resolves.toBe("OK");
+    expect(dispatcher.dispatch).toHaveBeenCalledTimes(1);
     expect(linearClient.createAgentActivity).toHaveBeenCalledOnce();
   });
 

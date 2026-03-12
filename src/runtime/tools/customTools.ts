@@ -8,6 +8,13 @@ export interface CustomToolDef {
   description?: string;
 }
 
+export class CustomToolDefinitionError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = "CustomToolDefinitionError";
+  }
+}
+
 export class CustomToolValidationError extends Error {
   public readonly toolName: string;
   public readonly issues: string[];
@@ -33,13 +40,18 @@ export class CustomToolExecutionError extends Error {
   }
 }
 
-export function getCustomToolName(def: CustomToolDef): string {
-  const name = def.name.trim();
-  if (!name) {
-    throw new Error("Custom tool name must be a non-empty string.");
+function normalizeToolName(name: string, context: "definition" | "lookup"): string {
+  const normalized = name.trim();
+  if (!normalized) {
+    const noun = context === "definition" ? "name" : "lookup name";
+    throw new CustomToolDefinitionError(`Custom tool ${noun} must be a non-empty string.`);
   }
 
-  return name;
+  return normalized;
+}
+
+export function getCustomToolName(def: CustomToolDef): string {
+  return normalizeToolName(def.name, "definition");
 }
 
 export function customToolToOpenAISchema(def: CustomToolDef): Record<string, unknown> {
@@ -82,20 +94,25 @@ export function findCustomTool(
   tools: CustomToolDef[],
   name: string,
 ): CustomToolDef | undefined {
-  return tools.find((def) => getCustomToolName(def) === name);
+  const normalizedName = normalizeToolName(name, "lookup");
+  return tools.find((def) => getCustomToolName(def) === normalizedName);
 }
 
 export function findCustomToolInIndex(
   index: Map<string, CustomToolDef>,
   name: string,
 ): CustomToolDef | undefined {
-  return index.get(name);
+  return index.get(normalizeToolName(name, "lookup"));
 }
 
 export function buildCustomToolIndex(tools: CustomToolDef[]): Map<string, CustomToolDef> {
   const index = new Map<string, CustomToolDef>();
   for (const def of tools) {
-    index.set(getCustomToolName(def), def);
+    const name = getCustomToolName(def);
+    if (index.has(name)) {
+      throw new CustomToolDefinitionError(`Duplicate custom tool name '${name}' is not allowed.`);
+    }
+    index.set(name, def);
   }
   return index;
 }

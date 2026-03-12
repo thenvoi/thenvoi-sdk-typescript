@@ -73,6 +73,7 @@ function createExecution(options?: {
 
 describe("Execution", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -119,6 +120,31 @@ describe("Execution", () => {
 
     await execution.enqueue(makeEvent("m1"));
     await expect(execution.waitForIdle(10)).resolves.toBe(false);
+    const idleWaiters = (execution as unknown as { idleWaiters: Set<() => void> }).idleWaiters;
+    expect(idleWaiters.size).toBe(0);
+    await expect(execution.waitForIdle(500)).resolves.toBe(true);
+    await execution.stop();
+  });
+
+  it("waitForIdle clears timeout when idle resolves first", async () => {
+    vi.useFakeTimers();
+    const clearTimeoutSpy = vi.spyOn(global, "clearTimeout");
+    const { execution } = createExecution({
+      onExecute: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      },
+    });
+
+    await execution.enqueue(makeEvent("m1"));
+    const idlePromise = execution.waitForIdle(1_000);
+    await vi.advanceTimersByTimeAsync(20);
+    await expect(idlePromise).resolves.toBe(true);
+    expect(clearTimeoutSpy).toHaveBeenCalled();
+
+    const idleWaiters = (execution as unknown as { idleWaiters: Set<() => void> }).idleWaiters;
+    expect(idleWaiters.size).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(2_000);
     await execution.stop();
   });
 

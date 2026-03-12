@@ -38,7 +38,6 @@ export class ExecutionContext {
   private readonly adapterTools: AdapterToolsProtocol;
   private participantsMessage: string | null = null;
   private contactsMessage: string | null = null;
-  private bootstrap = true;
   private contextCache: ConversationContext | null = null;
   private contextCacheExpiresAt = 0;
 
@@ -180,29 +179,13 @@ export class ExecutionContext {
     return value;
   }
 
-  public consumeBootstrapAndMarkLlmInitialized(): boolean {
-    if (!this._llmInitialized) {
-      this._llmInitialized = true;
-      this.bootstrap = false;
-      return true;
-    }
-    const value = this.bootstrap;
-    this.bootstrap = false;
-    return value;
-  }
-
-  /** @deprecated Use consumeBootstrapAndMarkLlmInitialized(). */
-  public consumeBootstrap(): boolean {
-    return this.consumeBootstrapAndMarkLlmInitialized();
-  }
-
   public async getHydratedHistory(excludeMessageId?: string): Promise<MetadataMap[]> {
     if (!this.enableContextHydration || !this.link.rest.getChatContext) {
       return this.getRawHistory().filter((entry) => entry.id !== excludeMessageId);
     }
 
     try {
-      const context = await this.getContext();
+      const context = await this.hydrateContext();
       return context.messages.filter((entry) => entry.id !== excludeMessageId);
     } catch (error) {
       if (error instanceof UnsupportedFeatureError) {
@@ -213,7 +196,7 @@ export class ExecutionContext {
     }
   }
 
-  public async getContext(forceRefresh = false): Promise<ConversationContext> {
+  public async hydrateContext(forceRefresh = false): Promise<ConversationContext> {
     if (!this.enableContextHydration || !this.link.rest.getChatContext) {
       return this.buildLocalContext();
     }

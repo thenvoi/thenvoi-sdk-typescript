@@ -229,7 +229,7 @@ describe("A2AAdapter", () => {
     expect(second.message?.taskId).toBeUndefined();
   });
 
-  it("reports adapter errors to the room as error events", async () => {
+  it("reports adapter errors to the room and rethrows", async () => {
     const client = new FakeA2AClient({
       sendErrors: [new Error("upstream failure")],
     });
@@ -241,14 +241,16 @@ describe("A2AAdapter", () => {
     });
 
     const tools = new FakeTools();
-    await adapter.onMessage(
-      makeMessage("hello"),
-      tools,
-      { contextId: null, taskId: null, taskState: null },
-      null,
-      null,
-      { isSessionBootstrap: false, roomId: "room-3" },
-    );
+    await expect(
+      adapter.onMessage(
+        makeMessage("hello"),
+        tools,
+        { contextId: null, taskId: null, taskState: null },
+        null,
+        null,
+        { isSessionBootstrap: false, roomId: "room-3" },
+      ),
+    ).rejects.toThrow("upstream failure");
 
     expect(tools.events).toHaveLength(1);
     expect(tools.events[0]?.messageType).toBe("error");
@@ -286,14 +288,16 @@ describe("A2AAdapter", () => {
     });
 
     const tools = new FakeTools();
-    await adapter.onMessage(
-      makeMessage("hello", "room-limit"),
-      tools,
-      { contextId: null, taskId: null, taskState: null },
-      null,
-      null,
-      { isSessionBootstrap: false, roomId: "room-limit" },
-    );
+    await expect(
+      adapter.onMessage(
+        makeMessage("hello", "room-limit"),
+        tools,
+        { contextId: null, taskId: null, taskState: null },
+        null,
+        null,
+        { isSessionBootstrap: false, roomId: "room-limit" },
+      ),
+    ).rejects.toThrow("maximum event limit (1)");
 
     expect(tools.messages).toEqual(["first chunk"]);
     expect(tools.events).toHaveLength(1);

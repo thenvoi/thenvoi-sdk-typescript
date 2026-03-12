@@ -170,14 +170,25 @@ export class A2AAdapter extends SimpleAdapter<A2ASessionState, MessagingTools> {
       const response = await client.sendMessage(request);
       await this.handleEvent(response, tools, context.roomId, message.senderId);
     } catch (error) {
+      const errorMessage = asErrorMessage(error);
       this.logger.error("A2A adapter request failed", {
         roomId: context.roomId,
         remoteUrl: this.remoteUrl,
         error,
       });
-      await tools.sendEvent(`A2A agent error: ${asErrorMessage(error)}`, "error", {
-        a2a_error: asErrorMessage(error),
-      });
+      try {
+        await tools.sendEvent(`A2A agent error: ${errorMessage}`, "error", {
+          a2a_error: errorMessage,
+        });
+      } catch (eventError) {
+        this.logger.warn("A2A adapter failed to emit error event", {
+          roomId: context.roomId,
+          remoteUrl: this.remoteUrl,
+          error: eventError,
+        });
+      }
+
+      throw error instanceof Error ? error : new Error(errorMessage);
     }
   }
 
@@ -588,20 +599,103 @@ function unwrapResult(value: unknown, depth = 0): A2AEventLike | null {
   return event as A2AEventLike;
 }
 
-function isMessageEvent(event: A2AEventLike): event is A2AMessageLike {
-  return event.kind === "message";
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
-function isTaskEvent(event: A2AEventLike): event is A2ATaskLike {
-  return event.kind === "task" && typeof (event as A2ATaskLike).id === "string";
+function isOptionalString(value: unknown): value is string | undefined {
+  return value === undefined || typeof value === "string";
 }
 
-function isStatusUpdateEvent(event: A2AEventLike): event is A2AStatusUpdateEventLike {
-  return event.kind === "status-update" && typeof (event as A2AStatusUpdateEventLike).taskId === "string";
+function isMessagePart(value: unknown): value is A2AMessagePart {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return isOptionalString(value.kind)
+    && isOptionalString(value.type)
+    && isOptionalString(value.text)
+    && (value.root === undefined || isMessagePart(value.root));
 }
 
-function isArtifactUpdateEvent(event: A2AEventLike): event is A2AArtifactUpdateEventLike {
-  return event.kind === "artifact-update" && typeof (event as A2AArtifactUpdateEventLike).taskId === "string";
+function isMessageLike(value: unknown): value is A2AMessageLike {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  if (!isOptionalString(value.kind) || !isOptionalString(value.role)) {
+    return false;
+  }
+  if (!isOptionalString(value.contextId) || !isOptionalString(value.taskId) || !isOptionalString(value.messageId)) {
+    return false;
+  }
+  if (value.parts === undefined) {
+    return true;
+  }
+
+  return Array.isArray(value.parts) && value.parts.every((part) => isMessagePart(part));
+}
+
+function isStatusLike(value: unknown): value is A2AStatusLike {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  if (!isOptionalString(value.state)) {
+    return false;
+  }
+
+  return value.message === undefined || isMessageLike(value.message);
+}
+
+function isArtifactLike(value: unknown): value is A2AArtifactLike {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  if (value.parts === undefined) {
+    return true;
+  }
+
+  return Array.isArray(value.parts) && value.parts.every((part) => isMessagePart(part));
+}
+
+function isMessageEvent(event: unknown): event is A2AMessageLike {
+  return isRecord(event)
+    && event.kind === "message"
+    && isMessageLike(event)
+    && Array.isArray(event.parts);
+}
+
+function isTaskEvent(event: unknown): event is A2ATaskLike {
+  if (!isRecord(event) || event.kind !== "task") {
+    return false;
+  }
+
+  return typeof event.id === "string"
+    && isOptionalString(event.contextId)
+    && isStatusLike(event.status)
+    && (
+      event.artifacts === undefined
+      || (Array.isArray(event.artifacts) && event.artifacts.every((item: unknown) => isArtifactLike(item)))
+    )
+    && (event.history === undefined || (Array.isArray(event.history) && event.history.every((item: unknown) => isMessageLike(item))));
+}
+
+function isStatusUpdateEvent(event: unknown): event is A2AStatusUpdateEventLike {
+  return isRecord(event)
+    && event.kind === "status-update"
+    && typeof event.taskId === "string"
+    && typeof event.contextId === "string"
+    && isStatusLike(event.status);
+}
+
+function isArtifactUpdateEvent(event: unknown): event is A2AArtifactUpdateEventLike {
+  return isRecord(event)
+    && event.kind === "artifact-update"
+    && typeof event.taskId === "string"
+    && typeof event.contextId === "string"
+    && isArtifactLike(event.artifact);
 }
 
 async function loadDefaultA2AClientFactory(): Promise<A2AClientFactory> {

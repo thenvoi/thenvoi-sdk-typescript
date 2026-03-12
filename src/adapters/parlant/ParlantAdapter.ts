@@ -2,6 +2,7 @@ import { SimpleAdapter } from "../../core/simpleAdapter";
 import type { MessagingTools } from "../../contracts/protocols";
 import type { Logger } from "../../core/logger";
 import { NoopLogger } from "../../core/logger";
+import { UnsupportedFeatureError } from "../../core/errors";
 import type { PlatformMessage } from "../../runtime/types";
 import { renderSystemPrompt } from "../../runtime/prompts";
 import { asErrorMessage, asNonEmptyString, asRecord } from "../shared/coercion";
@@ -219,18 +220,29 @@ export class ParlantAdapter
 
       await tools.sendMessage(reply, [{ id: message.senderId }]);
     } catch (error) {
+      const errorMessage = asErrorMessage(error);
       this.logger.error("Parlant adapter request failed", {
         roomId: context.roomId,
         agentId: this.agentId,
         error,
       });
-      await tools.sendEvent(
-        `Parlant adapter error: ${asErrorMessage(error)}`,
-        "error",
-        {
-          parlant_error: asErrorMessage(error),
-        },
-      );
+      try {
+        await tools.sendEvent(
+          `Parlant adapter error: ${errorMessage}`,
+          "error",
+          {
+            parlant_error: errorMessage,
+          },
+        );
+      } catch (eventError) {
+        this.logger.warn("Parlant adapter failed to emit error event", {
+          roomId: context.roomId,
+          agentId: this.agentId,
+          error: eventError,
+        });
+      }
+
+      throw error instanceof Error ? error : new Error(errorMessage);
     }
   }
 
@@ -576,7 +588,11 @@ async function loadParlantClientFactory(config: {
   environment: string;
   baseUrl?: string;
 }): Promise<ParlantClientFactory> {
-  const module = (await import("parlant-client")) as {
+  const module = (await import("parlant-client").catch((error: unknown) => {
+    throw new UnsupportedFeatureError(
+      `ParlantAdapter requires optional dependency parlant-client. Install it with "pnpm add parlant-client". (${error instanceof Error ? error.message : String(error)})`,
+    );
+  })) as {
     ParlantClient?: new (options: {
       environment: () => string;
       baseUrl?: () => string;
@@ -584,7 +600,7 @@ async function loadParlantClientFactory(config: {
   };
 
   if (!module.ParlantClient) {
-    throw new Error(
+    throw new UnsupportedFeatureError(
       "ParlantAdapter requires optional dependency parlant-client. Install it with \"pnpm add parlant-client\".",
     );
   }

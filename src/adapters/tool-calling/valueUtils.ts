@@ -1,11 +1,4 @@
-import type { ToolCallingModelRequest, ToolRound } from "./types";
-
-/**
- * Returns the explicit tool-round history supplied by the caller.
- */
-export function resolveToolRounds(request: ToolCallingModelRequest): ToolRound[] {
-  return request.toolRounds ?? [];
-}
+import type { ToolCallingModelRequest } from "./types";
 
 export function normalizeConversationRole(
   value: unknown,

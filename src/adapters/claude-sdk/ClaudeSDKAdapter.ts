@@ -200,7 +200,15 @@ export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
       }
 
       if (this.enableExecutionReporting && type === "tool_use_summary") {
-        await tools.sendEvent(JSON.stringify(event), "tool_call");
+        try {
+          await tools.sendEvent(JSON.stringify(event), "tool_call");
+        } catch (error) {
+          this.logger.warn("Claude SDK execution reporting failed", {
+            roomId: context.roomId,
+            sessionId: this.sessionIds.get(context.roomId) ?? null,
+            error,
+          });
+        }
       }
     }
 

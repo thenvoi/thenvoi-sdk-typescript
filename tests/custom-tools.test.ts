@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import {
+  buildCustomToolIndex,
+  CustomToolDefinitionError,
   type CustomToolDef,
   customToolToAnthropicSchema,
   customToolToOpenAISchema,
   customToolsToSchemas,
   executeCustomTool,
   findCustomTool,
+  findCustomToolInIndex,
   getCustomToolName,
 } from "../src/runtime/tools/customTools";
 
@@ -173,6 +176,10 @@ describe("findCustomTool", () => {
     expect(findCustomTool([], "weather")).toBeUndefined();
   });
 
+  it("normalizes lookup names by trimming surrounding whitespace", () => {
+    expect(findCustomTool(tools, "  weather  ")).toEqual(tools[0]);
+  });
+
   it("finds first match when duplicates exist", () => {
     const dupes: CustomToolDef[] = [
       { schema: WeatherSchema, handler: asyncWeather, name: "weather" },
@@ -180,6 +187,27 @@ describe("findCustomTool", () => {
     ];
     const result = findCustomTool(dupes, "weather");
     expect(result!.handler).toBe(asyncWeather);
+  });
+});
+
+describe("buildCustomToolIndex", () => {
+  const tools: CustomToolDef[] = [
+    { schema: WeatherSchema, handler: asyncWeather, name: "weather" },
+    { schema: CalculatorSchema, handler: syncCalculator, name: "calculator" },
+  ];
+
+  it("normalizes index lookups with trimmed names", () => {
+    const index = buildCustomToolIndex(tools);
+    expect(findCustomToolInIndex(index, " calculator ")).toEqual(tools[1]);
+  });
+
+  it("rejects duplicate tool names", () => {
+    const duplicateTools: CustomToolDef[] = [
+      { schema: WeatherSchema, handler: asyncWeather, name: "weather" },
+      { schema: WeatherSchema, handler: failingTool, name: "weather" },
+    ];
+
+    expect(() => buildCustomToolIndex(duplicateTools)).toThrow(CustomToolDefinitionError);
   });
 });
 

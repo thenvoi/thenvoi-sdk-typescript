@@ -127,9 +127,7 @@ class GatewayPeerExecutor {
           state: "failed",
           final: true,
           text: "Peer request failed.",
-          metadata: {
-            error_type: error instanceof Error ? error.name : "UnknownError",
-          },
+          metadata: buildGatewayExecutionFailureMetadata(error),
         }),
       );
     } finally {
@@ -282,6 +280,7 @@ export class GatewayServer implements GatewayServerLike {
 
     app.get(
       `${peerBasePath}/.well-known/agent.json`,
+      gatewayAuthMiddleware,
       async (_request: unknown, response: { json: (body: unknown) => void }) => {
         response.json(await requestHandler.getAgentCard());
       },
@@ -289,6 +288,7 @@ export class GatewayServer implements GatewayServerLike {
 
     app.use(
       `${peerBasePath}/${modules.AGENT_CARD_PATH}`,
+      gatewayAuthMiddleware,
       modules.agentCardHandler({
         agentCardProvider: requestHandler,
       }),
@@ -540,9 +540,7 @@ function createGatewayAuthMiddleware(
   }
 
   return (request, response, next) => {
-    const authorization = getAuthorizationHeader(request.headers);
-    const expected = `Bearer ${authToken}`;
-    if (authorization && safeHeaderEquals(authorization, expected)) {
+    if (verifyBearerAuthorization(request.headers, authToken)) {
       next();
       return;
     }
@@ -560,7 +558,8 @@ function createUserBuilder(
   },
   modules: RuntimeA2AServerModules,
 ): (request: ExpressRequestLike) => Promise<AuthenticatedGatewayUser> {
-  if (!options.authToken) {
+  const authToken = options.authToken;
+  if (!authToken) {
     if (!options.allowUnauthenticatedLoopback) {
       throw new Error(
         "A2A gateway authToken is required unless allowUnauthenticatedLoopback is explicitly enabled on a loopback host.",
@@ -577,9 +576,7 @@ function createUserBuilder(
   }
 
   return async (request) => {
-    const authorization = getAuthorizationHeader(request.headers);
-    const expected = `Bearer ${options.authToken}`;
-    if (!authorization || !safeHeaderEquals(authorization, expected)) {
+    if (!verifyBearerAuthorization(request.headers, authToken)) {
       throw new Error("Unauthorized");
     }
 
@@ -603,6 +600,46 @@ function getAuthorizationHeader(
   }
 
   return typeof value === "string" ? value : null;
+}
+
+function verifyBearerAuthorization(
+  headers: ExpressRequestLike["headers"],
+  authToken: string,
+): boolean {
+  const authorization = getAuthorizationHeader(headers);
+  if (!authorization) {
+    return false;
+  }
+
+  return safeHeaderEquals(authorization, `Bearer ${authToken}`);
+}
+
+function buildGatewayExecutionFailureMetadata(
+  error: unknown,
+): Record<string, unknown> {
+  return {
+    error_type: error instanceof Error ? error.name : "UnknownError",
+    error_message: sanitizeGatewayErrorMessage(error),
+  };
+}
+
+function sanitizeGatewayErrorMessage(error: unknown): string {
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  const trimmed = rawMessage.trim();
+  if (!trimmed) {
+    return "Unknown error";
+  }
+
+  const withBearerRedaction = trimmed
+    .replace(/Bearer\s+[^\s,;]+/gi, "Bearer [REDACTED]")
+    .replace(/(token|authorization|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]");
+
+  const maxLength = 240;
+  if (withBearerRedaction.length <= maxLength) {
+    return withBearerRedaction;
+  }
+
+  return `${withBearerRedaction.slice(0, maxLength - 3)}...`;
 }
 
 function safeHeaderEquals(left: string, right: string): boolean {

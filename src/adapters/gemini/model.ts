@@ -5,10 +5,10 @@ import type {
   ToolCallingResponse,
   ToolResult,
 } from "../tool-calling";
+import { UnsupportedFeatureError } from "../../core/errors";
 import { toDisplayText, toWireString } from "../shared/coercion";
 import { LazyAsyncValue } from "../shared/lazyAsyncValue";
 import {
-  resolveToolRounds,
   normalizeConversationRole,
 } from "../tool-calling/valueUtils";
 
@@ -106,7 +106,7 @@ export class GeminiToolCallingModel implements ToolCallingModel {
         };
 
         if (!module.createPartFromFunctionCall || !module.createPartFromFunctionResponse) {
-          throw new Error(
+          throw new UnsupportedFeatureError(
             'GeminiAdapter requires createPartFromFunctionCall/createPartFromFunctionResponse from "@google/genai".',
           );
         }
@@ -162,7 +162,7 @@ export class GeminiToolCallingModel implements ToolCallingModel {
     // Merge consecutive same-role entries before appending tool call/result blocks.
     const merged = mergeConsecutiveGeminiContents(contents);
 
-    const rounds = resolveToolRounds(request);
+    const rounds = request.toolRounds ?? [];
     if (rounds.length === 0) {
       return merged;
     }
@@ -294,12 +294,16 @@ function openAIToolToGeminiDeclaration(
 }
 
 async function loadGeminiClientFactory(): Promise<GeminiClientFactory> {
-  const module = (await import("@google/genai")) as {
+  const module = (await import("@google/genai").catch((error: unknown) => {
+    throw new UnsupportedFeatureError(
+      `GeminiAdapter requires optional dependency "@google/genai". Install it with "pnpm add @google/genai". (${error instanceof Error ? error.message : String(error)})`,
+    );
+  })) as {
     GoogleGenAI?: new (options?: { apiKey?: string }) => GeminiClientLike;
   };
 
   if (!module.GoogleGenAI) {
-    throw new Error(
+    throw new UnsupportedFeatureError(
       'GeminiAdapter requires optional dependency "@google/genai". Install it with "pnpm add @google/genai".',
     );
   }

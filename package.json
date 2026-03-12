@@ -67,7 +67,7 @@
     "validate:linear": "node scripts/linear-live-validate.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "dependencies": {
     "@thenvoi/rest-client": "^0.0.112-rc.0",

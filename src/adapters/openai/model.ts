@@ -4,10 +4,10 @@ import type {
   ToolCallingModelRequest,
   ToolCallingResponse,
 } from "../tool-calling";
+import { UnsupportedFeatureError } from "../../core/errors";
 import { toDisplayText, toWireString } from "../shared/coercion";
 import { LazyAsyncValue } from "../shared/lazyAsyncValue";
 import {
-  resolveToolRounds,
   mapConversationMessages,
   normalizeConversationRole,
 } from "../tool-calling/valueUtils";
@@ -86,7 +86,7 @@ function toOpenAIMessages(request: ToolCallingModelRequest): Array<Record<string
     });
   }
 
-  const rounds = resolveToolRounds(request);
+  const rounds = request.toolRounds ?? [];
   if (rounds.length === 0) {
     return messages;
   }
@@ -100,7 +100,7 @@ function toOpenAIMessages(request: ToolCallingModelRequest): Array<Record<string
         type: "function",
         function: {
           name: call.name,
-          arguments: serializeArguments(call.input),
+          arguments: serializeArguments(call),
         },
       })),
     });
@@ -158,18 +158,18 @@ function parseToolCalls(raw: unknown): ToolCall[] {
 
     const callRecord = value as Record<string, unknown>;
     const id = typeof callRecord.id === "string" ? callRecord.id : null;
-    const fn = callRecord.function;
-    if (!id || !fn || typeof fn !== "object") {
+    const functionValue = callRecord.function;
+    if (!id || !functionValue || typeof functionValue !== "object") {
       continue;
     }
 
-    const fnRecord = fn as Record<string, unknown>;
-    const name = typeof fnRecord.name === "string" ? fnRecord.name : null;
+    const functionRecord = functionValue as Record<string, unknown>;
+    const name = typeof functionRecord.name === "string" ? functionRecord.name : null;
     if (!name) {
       continue;
     }
 
-    const { input, parseError } = parseArguments(fnRecord.arguments);
+    const { input, parseError } = parseArguments(functionRecord.arguments);
     parsed.push({
       id,
       name,
@@ -231,23 +231,31 @@ function parseText(content: unknown): string {
   return chunks.join("\n").trim();
 }
 
-function serializeArguments(input: Record<string, unknown>): string {
+function serializeArguments(call: ToolCall): string {
   try {
-    return JSON.stringify(input);
-  } catch {
-    return "{}";
+    return JSON.stringify(call.input);
+  } catch (error) {
+    throw new Error(
+      `OpenAI tool-call arguments for "${call.name}" (${call.id}) could not be serialized: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 }
 
 async function loadOpenAIClientFactory(): Promise<OpenAIClientFactory> {
-  const module = (await import("openai")) as {
+  const module = (await import("openai").catch((error: unknown) => {
+    throw new UnsupportedFeatureError(
+      `OpenAIAdapter requires optional dependency "openai". Install it with "pnpm add openai". (${error instanceof Error ? error.message : String(error)})`,
+    );
+  })) as {
     default?: new (options?: { apiKey?: string }) => OpenAIClientLike;
     OpenAI?: new (options?: { apiKey?: string }) => OpenAIClientLike;
   };
 
   const OpenAIClientCtor = module.default ?? module.OpenAI;
   if (!OpenAIClientCtor) {
-    throw new Error(
+    throw new UnsupportedFeatureError(
       'OpenAIAdapter requires optional dependency "openai". Install it with "pnpm add openai".',
     );
   }

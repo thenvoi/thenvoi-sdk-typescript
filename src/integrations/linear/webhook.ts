@@ -80,6 +80,12 @@ export function createInlineLinearBridgeDispatcher(
       });
 
       if (result.ok) {
+        await markBootstrapHandoffProcessed({
+          eventKey: job.eventKey,
+          store: job.input.deps.store,
+          logger,
+          sessionId: job.input.payload.agentSession.id,
+        });
         return;
       }
 
@@ -152,6 +158,12 @@ export function createInProcessLinearBridgeDispatcher(
         });
 
         if (result.ok) {
+          await markBootstrapHandoffProcessed({
+            eventKey: job.eventKey,
+            store: job.input.deps.store,
+            logger,
+            sessionId: job.input.payload.agentSession.id,
+          });
           return;
         }
 
@@ -180,6 +192,7 @@ export function createInProcessLinearBridgeDispatcher(
         queued.delete(job.eventKey);
         inFlight.delete(dispatchTask);
       });
+      await dispatchTask;
     },
   };
 }
@@ -191,6 +204,7 @@ export function createLinearWebhookHandler(
   const runtime = createLinearBridgeRuntime();
   const dispatcher = options.dispatcher ?? createInlineLinearBridgeDispatcher({ logger });
   const webhookClient = new LinearWebhookClient(options.config.linearWebhookSecret);
+  const inFlightEventKeys = new Set<string>();
 
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     if (request.method !== "POST") {
@@ -207,11 +221,16 @@ export function createLinearWebhookHandler(
       sendText(response, 400, "Missing webhook signature");
       return;
     }
+    const timestamp = getHeaderValue(request, LINEAR_WEBHOOK_TS_HEADER);
+    if (!timestamp) {
+      logger.warn("linear_thenvoi_bridge.webhook_missing_timestamp", {});
+      sendText(response, 400, "Missing webhook timestamp");
+      return;
+    }
 
     const rawBody = await readRawBody(request as NodeRequestWithBody);
     let payload: AgentSessionEventWebhookPayload;
     try {
-      const timestamp = getHeaderValue(request, LINEAR_WEBHOOK_TS_HEADER) ?? undefined;
       payload = webhookClient.parseData(
         rawBody,
         signature,
@@ -241,7 +260,8 @@ export function createLinearWebhookHandler(
       eventKey,
     });
     const existing = await options.deps.store.getBySessionId(payload.agentSession.id);
-    if (existing?.lastEventKey === eventKey || dispatcher.isQueued?.(eventKey)) {
+    const alreadyInFlight = inFlightEventKeys.has(eventKey);
+    if (existing?.lastEventKey === eventKey || alreadyInFlight || dispatcher.isQueued?.(eventKey)) {
       logger.info("linear_thenvoi_bridge.webhook_duplicate_ignored", {
         sessionId: payload.agentSession.id,
         eventKey,
@@ -249,23 +269,24 @@ export function createLinearWebhookHandler(
       sendText(response, 200, "OK");
       return;
     }
-
-    if (normalizeAction(payload.action) === "created") {
-      try {
-        await postThought(
-          options.deps.linearClient,
-          payload.agentSession.id,
-          "Received session. Setting up workspace...",
-        );
-      } catch (error) {
-        logger.warn("linear_thenvoi_bridge.webhook_acknowledgment_failed", {
-          sessionId: payload.agentSession.id,
-          error,
-        });
-      }
-    }
+    inFlightEventKeys.add(eventKey);
 
     try {
+      if (normalizeAction(payload.action) === "created") {
+        try {
+          await postThought(
+            options.deps.linearClient,
+            payload.agentSession.id,
+            "Received session. Setting up workspace...",
+          );
+        } catch (error) {
+          logger.warn("linear_thenvoi_bridge.webhook_acknowledgment_failed", {
+            sessionId: payload.agentSession.id,
+            error,
+          });
+        }
+      }
+
       await dispatcher.dispatch({
         eventKey,
         runtime,
@@ -286,6 +307,8 @@ export function createLinearWebhookHandler(
 
       sendText(response, isRetryableDispatchError(error) ? 503 : 500, "Dispatch failed");
       return;
+    } finally {
+      inFlightEventKeys.delete(eventKey);
     }
     logger.info("linear_thenvoi_bridge.webhook_dispatched", {
       sessionId: payload.agentSession.id,
@@ -383,6 +406,23 @@ async function runDispatchAttempt(
       });
       await sleep(retryBaseDelayMs * attempt);
     }
+  }
+}
+
+async function markBootstrapHandoffProcessed(input: {
+  eventKey: string;
+  store: HandleAgentSessionEventInput["deps"]["store"];
+  logger: Logger;
+  sessionId: string;
+}): Promise<void> {
+  try {
+    await input.store.markBootstrapRequestProcessed(input.eventKey);
+  } catch (error) {
+    input.logger.warn("linear_thenvoi_bridge.bootstrap_handoff_mark_processed_failed", {
+      eventKey: input.eventKey,
+      sessionId: input.sessionId,
+      error: serializeError(error),
+    });
   }
 }
 

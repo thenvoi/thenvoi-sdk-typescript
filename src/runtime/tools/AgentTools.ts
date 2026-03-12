@@ -34,6 +34,7 @@ import {
   DEFAULT_AGENT_TOOLS_CAPABILITIES,
   type AgentToolsCapabilities,
   type AgentToolsProtocol,
+  isToolExecutorError,
   type ToolExecutorError,
 } from "../../contracts/protocols";
 import {
@@ -339,6 +340,19 @@ export class AgentTools implements AgentToolsProtocol {
     try {
       return await handler(arguments_);
     } catch (error) {
+      if (isToolExecutorError(error)) {
+        return error;
+      }
+
+      if (error instanceof ValidationError) {
+        return createToolExecutorError({
+          errorType: "ToolArgumentsValidationError",
+          toolName,
+          message: error.message,
+          legacyMessage: `Invalid arguments for ${toolName}: ${error.message}`,
+        });
+      }
+
       const message = error instanceof Error ? error.message : String(error);
       return createToolExecutorError({
         errorType: "ToolExecutionError",
@@ -724,13 +738,13 @@ export class AgentTools implements AgentToolsProtocol {
       thenvoi_send_message: async (arguments_) =>
         this.sendMessage(
           String(arguments_.content ?? ""),
-          (arguments_.mentions as string[] | Array<{ id: string; handle?: string }>) ?? [],
+          this.normalizeMentionInput(arguments_.mentions),
         ),
       thenvoi_send_event: async (arguments_) =>
         this.sendEvent(
           String(arguments_.content ?? ""),
           String(arguments_.message_type ?? "task"),
-          (arguments_.metadata as MetadataMap | undefined) ?? undefined,
+          this.normalizeOptionalMetadata(arguments_.metadata),
         ),
       thenvoi_add_participant: async (arguments_) =>
         this.addParticipant(String(arguments_.name ?? ""), String(arguments_.role ?? "member")),
@@ -740,7 +754,7 @@ export class AgentTools implements AgentToolsProtocol {
         this.lookupPeers(Number(arguments_.page ?? 1), Number(arguments_.page_size ?? 50)),
       thenvoi_get_participants: async () => this.getParticipants(),
       thenvoi_create_chatroom: async (arguments_) =>
-        this.createChatroom(arguments_.task_id as string | undefined),
+        this.createChatroom(this.normalizeOptionalString(arguments_.task_id)),
     };
   }
 
@@ -926,6 +940,42 @@ export class AgentTools implements AgentToolsProtocol {
     }
 
     return value as MetadataMap;
+  }
+
+  private normalizeMentionInput(value: unknown): MentionInput {
+    if (!Array.isArray(value) || value.length === 0) {
+      return [];
+    }
+
+    if (typeof value[0] === "string") {
+      return value.filter((entry): entry is string => typeof entry === "string");
+    }
+
+    const mentions: MentionReference[] = [];
+    for (const entry of value) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        continue;
+      }
+
+      const mention = entry as Record<string, unknown>;
+      if (typeof mention.id !== "string") {
+        continue;
+      }
+
+      const normalized: MentionReference = { id: mention.id };
+      if (typeof mention.handle === "string") {
+        normalized.handle = mention.handle;
+      }
+      if (typeof mention.name === "string") {
+        normalized.name = mention.name;
+      }
+      if (typeof mention.username === "string") {
+        normalized.username = mention.username;
+      }
+      mentions.push(normalized);
+    }
+
+    return mentions;
   }
 
   private normalizeOptionalMemoryScope(value: unknown): MemoryScope | undefined {

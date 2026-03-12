@@ -221,7 +221,7 @@ class SqliteSessionRoomStore implements SessionRoomStore {
         `
         UPDATE linear_thenvoi_bootstrap_requests
         SET processed_at = ?
-        WHERE event_key = ?
+        WHERE event_key = ? AND processed_at IS NULL
         `,
       )
       .run(new Date().toISOString(), eventKey);
@@ -291,8 +291,10 @@ class SqliteSessionRoomStore implements SessionRoomStore {
         ALTER TABLE linear_thenvoi_session_rooms
         ADD COLUMN last_event_key TEXT
       `);
-    } catch {
-      // Column already exists on newer databases.
+    } catch (error) {
+      if (!isDuplicateColumnError(error)) {
+        throw error;
+      }
     }
 
     try {
@@ -300,8 +302,10 @@ class SqliteSessionRoomStore implements SessionRoomStore {
         ALTER TABLE linear_thenvoi_bootstrap_requests
         ADD COLUMN message_type TEXT NOT NULL DEFAULT 'task'
       `);
-    } catch {
-      // Column already exists on newer databases.
+    } catch (error) {
+      if (!isDuplicateColumnError(error)) {
+        throw error;
+      }
     }
 
     try {
@@ -309,8 +313,10 @@ class SqliteSessionRoomStore implements SessionRoomStore {
         ALTER TABLE linear_thenvoi_bootstrap_requests
         ADD COLUMN metadata_json TEXT
       `);
-    } catch {
-      // Column already exists on newer databases.
+    } catch (error) {
+      if (!isDuplicateColumnError(error)) {
+        throw error;
+      }
     }
 
     return db;
@@ -348,6 +354,14 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   }
 
   return value as Record<string, unknown>;
+}
+
+function isDuplicateColumnError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return /duplicate column name/i.test(error.message);
 }
 
 function asString(value: unknown): string | null {

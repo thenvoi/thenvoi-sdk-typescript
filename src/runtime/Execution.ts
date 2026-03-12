@@ -43,7 +43,7 @@ export class Execution {
   private readonly logger: Logger;
   private readonly eventQueue: PlatformEvent[] = [];
   private readonly waiters: Array<(event: PlatformEvent | null) => void> = [];
-  private readonly idleWaiters: Array<() => void> = [];
+  private readonly idleWaiters = new Set<() => void>();
   private readonly drainedWsMessageIds = new Set<string>();
   private processTask: Promise<void>;
   private firstWsMessageId: string | null = null;
@@ -85,19 +85,37 @@ export class Execution {
       return true;
     }
 
-    const idle = new Promise<boolean>((resolve) => {
-      this.idleWaiters.push(() => resolve(true));
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+      const idleWaiter = (): void => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        this.idleWaiters.delete(idleWaiter);
+        if (timeoutHandle !== null) {
+          clearTimeout(timeoutHandle);
+        }
+        resolve(true);
+      };
+
+      this.idleWaiters.add(idleWaiter);
+      if (timeoutMs === undefined) {
+        return;
+      }
+
+      timeoutHandle = setTimeout(() => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        this.idleWaiters.delete(idleWaiter);
+        resolve(false);
+      }, timeoutMs);
     });
-
-    if (timeoutMs === undefined) {
-      return idle;
-    }
-
-    const timeout = new Promise<boolean>((resolve) => {
-      setTimeout(() => resolve(false), timeoutMs);
-    });
-
-    return Promise.race([idle, timeout]);
   }
 
   public async stop(timeoutMs?: number): Promise<boolean> {
@@ -203,7 +221,8 @@ export class Execution {
       return;
     }
 
-    const waiters = this.idleWaiters.splice(0, this.idleWaiters.length);
+    const waiters = [...this.idleWaiters];
+    this.idleWaiters.clear();
     for (const waiter of waiters) {
       waiter();
     }

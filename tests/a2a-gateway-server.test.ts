@@ -187,6 +187,12 @@ describe("GatewayServer", () => {
       id: "gateway-bearer",
       authType: "bearer",
     });
+
+    await expect(options?.userBuilder?.({
+      headers: {
+        authorization: "Bearer wrong-token",
+      },
+    })).rejects.toThrow("Unauthorized");
   });
 
   it("applies security headers and bearer auth middleware when configured", async () => {
@@ -333,5 +339,62 @@ describe("GatewayServer", () => {
       peerSlug: "weather",
       taskId: "task-cancel",
     });
+  });
+
+  it("includes sanitized failure metadata when peer execution throws", async () => {
+    const { recordedExecutors, loadModules } = createModulesRecorder();
+    const server = createGatewayServer(makeServerOptions({
+      allowUnauthenticatedLoopback: true,
+      loadModules,
+      onRequest: async function* () {
+        throw new Error("upstream failed Bearer secret-token token=abc123 api_key=xyz");
+      },
+    }));
+
+    await server.start();
+    const executor = recordedExecutors[0];
+    expect(executor).toBeDefined();
+    if (!executor) {
+      throw new Error("Expected a recorded gateway executor");
+    }
+
+    const publishedEvents: unknown[] = [];
+    await executor.execute(
+      {
+        taskId: "task-fail",
+        contextId: "ctx-fail",
+        userMessage: {
+          kind: "message",
+          messageId: "m-fail",
+          role: "user",
+          parts: [],
+        },
+      },
+      {
+        publish: (event) => {
+          publishedEvents.push(event);
+        },
+        finished: () => undefined,
+      },
+    );
+    await server.stop();
+
+    expect(publishedEvents).toHaveLength(1);
+    const event = publishedEvents[0] as {
+      kind?: string;
+      final?: boolean;
+      status?: { state?: string };
+      metadata?: Record<string, unknown>;
+    };
+
+    expect(event.kind).toBe("status-update");
+    expect(event.final).toBe(true);
+    expect(event.status?.state).toBe("failed");
+    expect(event.metadata?.error_type).toBe("Error");
+    expect(typeof event.metadata?.error_message).toBe("string");
+    expect(String(event.metadata?.error_message)).toContain("[REDACTED]");
+    expect(String(event.metadata?.error_message)).not.toContain("secret-token");
+    expect(String(event.metadata?.error_message)).not.toContain("abc123");
+    expect(String(event.metadata?.error_message)).not.toContain("xyz");
   });
 });

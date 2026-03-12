@@ -45,7 +45,7 @@ class PaginatedChatsApi implements RestApi {
     return { ok: true };
   }
 
-  public async listPeers() {
+  public async listPeers(): Promise<PaginatedResponse<Record<string, unknown>>> {
     return { data: [], metadata: { page: 1, pageSize: 50, totalPages: 1, totalCount: 0 } };
   }
 
@@ -140,6 +140,15 @@ class MalformedMetadataChatsApi extends PaginatedChatsApi {
     }
 
     return { data: [] };
+  }
+}
+
+class InvalidPeersApi extends PaginatedChatsApi {
+  public override async listPeers(): Promise<PaginatedResponse<Record<string, unknown>>> {
+    return {
+      data: undefined as unknown as Array<Record<string, unknown>>,
+      metadata: { page: 1, pageSize: 10, totalPages: 1, totalCount: 0 },
+    };
   }
 }
 
@@ -286,5 +295,16 @@ describe("RestFacade pagination helpers", () => {
     await expect(
       rest.listAllChats({ strategy: "until_empty", metadataValidation: "strict" }),
     ).rejects.toThrow("Invalid pagination metadata");
+  });
+
+  it("normalizes listPeers to an empty array when adapter returns undefined data", async () => {
+    const rest = new RestFacade({
+      api: new InvalidPeersApi(),
+    });
+
+    await expect(rest.listPeers({ page: 1, pageSize: 10, notInChat: "room-1" })).resolves.toEqual({
+      data: [],
+      metadata: { page: 1, pageSize: 10, totalPages: 1, totalCount: 0 },
+    });
   });
 });

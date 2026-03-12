@@ -35,7 +35,7 @@ await agent.run(); // graceful shutdown on SIGINT/SIGTERM
 
 ## Prerequisites
 
-- **Node.js 20+**
+- **Node.js 22+**
 - **pnpm** package manager
 
 ---

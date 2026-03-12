@@ -19,11 +19,11 @@ export {
 export { ContactEventHandler, HUB_ROOM_SYSTEM_PROMPT } from "./ContactEventHandler";
 export type { ExecutionState } from "./ExecutionContext";
 
-export { AgentRuntime } from "./AgentRuntime";
+export { AgentRuntime } from "./rooms/AgentRuntime";
 export { Execution } from "./Execution";
 export { ExecutionContext } from "./ExecutionContext";
 export { PlatformRuntime } from "./PlatformRuntime";
-export { RoomPresence } from "./RoomPresence";
+export { RoomPresence } from "./rooms/RoomPresence";
 
 export { AgentTools } from "./tools/AgentTools";
 export {

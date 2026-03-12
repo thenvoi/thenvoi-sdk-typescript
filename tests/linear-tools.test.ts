@@ -97,14 +97,12 @@ function makeMockClient(): LinearActivityClient {
 }
 
 describe("createLinearTools", () => {
-  it("returns the INT-193 contract plus compatibility aliases", () => {
+  it("returns the canonical v1 linear tool contract", () => {
     const tools = createLinearTools({ client: makeMockClient() });
-    expect(tools).toHaveLength(18);
+    expect(tools).toHaveLength(11);
 
     const names = tools.map((tool) => tool.name).sort();
     expect(names).toEqual([
-      "complete_session",
-      "get_issue",
       "linear_add_issue_comment",
       "linear_ask_user",
       "linear_get_issue",
@@ -116,11 +114,6 @@ describe("createLinearTools", () => {
       "linear_post_thought",
       "linear_update_issue",
       "linear_update_plan",
-      "list_comments",
-      "post_action",
-      "post_elicitation",
-      "post_error",
-      "post_thought",
     ]);
   });
 
@@ -131,10 +124,10 @@ describe("createLinearTools", () => {
     }
   });
 
-  it("post_thought validates and calls the activity layer", async () => {
+  it("linear_post_thought validates and calls the activity layer", async () => {
     const client = makeMockClient();
     const tools = createLinearTools({ client });
-    const tool = tools.find((entry) => entry.name === "post_thought")!;
+    const tool = tools.find((entry) => entry.name === "linear_post_thought")!;
 
     const result = await executeCustomTool(tool, {
       session_id: "sess-1",
@@ -148,10 +141,10 @@ describe("createLinearTools", () => {
     });
   });
 
-  it("post_action validates and calls the activity layer", async () => {
+  it("linear_post_action validates and calls the activity layer", async () => {
     const client = makeMockClient();
     const tools = createLinearTools({ client });
-    const tool = tools.find((entry) => entry.name === "post_action")!;
+    const tool = tools.find((entry) => entry.name === "linear_post_action")!;
 
     const result = await executeCustomTool(tool, {
       session_id: "sess-1",
@@ -165,10 +158,10 @@ describe("createLinearTools", () => {
     });
   });
 
-  it("post_elicitation validates and calls the activity layer", async () => {
+  it("linear_ask_user validates and calls the activity layer", async () => {
     const client = makeMockClient();
     const tools = createLinearTools({ client });
-    const tool = tools.find((entry) => entry.name === "post_elicitation")!;
+    const tool = tools.find((entry) => entry.name === "linear_ask_user")!;
 
     const result = await executeCustomTool(tool, {
       session_id: "sess-1",
@@ -182,7 +175,7 @@ describe("createLinearTools", () => {
     });
   });
 
-  it("complete_session posts the final response and marks the session completed", async () => {
+  it("linear_post_response posts the final response and marks the session completed", async () => {
     const client = makeMockClient();
     const store = new MemorySessionRoomStore();
     await store.upsert({
@@ -196,7 +189,7 @@ describe("createLinearTools", () => {
     });
 
     const tools = createLinearTools({ client, store });
-    const tool = tools.find((entry) => entry.name === "complete_session")!;
+    const tool = tools.find((entry) => entry.name === "linear_post_response")!;
 
     const result = await executeCustomTool(tool, {
       session_id: "sess-1",
@@ -210,23 +203,6 @@ describe("createLinearTools", () => {
     });
     await expect(store.getBySessionId("sess-1")).resolves.toMatchObject({
       status: "completed",
-    });
-  });
-
-  it("linear_post_response remains as a completion alias", async () => {
-    const client = makeMockClient();
-    const tools = createLinearTools({ client });
-    const tool = tools.find((entry) => entry.name === "linear_post_response")!;
-
-    const result = await executeCustomTool(tool, {
-      session_id: "sess-1",
-      body: "Wrapped up",
-    });
-
-    expect(result).toEqual({ ok: true });
-    expect(client.createAgentActivity).toHaveBeenCalledWith({
-      agentSessionId: "sess-1",
-      content: { type: "response", body: "Wrapped up" },
     });
   });
 
@@ -249,7 +225,7 @@ describe("createLinearTools", () => {
 
   it("rejects invalid input with Zod validation error", async () => {
     const tools = createLinearTools({ client: makeMockClient() });
-    const tool = tools.find((entry) => entry.name === "post_thought")!;
+    const tool = tools.find((entry) => entry.name === "linear_post_thought")!;
 
     await expect(
       executeCustomTool(tool, { session_id: 123 as unknown as string }),
@@ -328,40 +304,21 @@ describe("createLinearTools", () => {
     expect(properties).not.toHaveProperty("id");
   });
 
-  it("get_issue alias returns normalized issue details", async () => {
-    const client = makeMockClient();
-    const tools = createLinearTools({ client });
-    const tool = tools.find((entry) => entry.name === "get_issue")!;
-
-    const result = await executeCustomTool(tool, {
-      id: TEST_ISSUE_ID,
-    });
-
-    expect(result).toEqual({
-      issue: expect.objectContaining({
-        id: TEST_ISSUE_ID,
-        identifier: "SOF-1",
-      }),
-    });
-  });
-
-  it("accepts deprecated issue id aliases through the normalization shim", async () => {
+  it("rejects non-canonical issue id aliases", async () => {
     const client = makeMockClient();
     const tools = createLinearTools({ client });
     const tool = tools.find((entry) => entry.name === "linear_get_issue")!;
 
-    await executeCustomTool(tool, {
+    await expect(executeCustomTool(tool, {
       issueId: TEST_ISSUE_ID,
-    });
-    await executeCustomTool(tool, {
+    })).rejects.toThrow("requires issue_id");
+    await expect(executeCustomTool(tool, {
       id: OTHER_TEST_ISSUE_ID,
-    });
-
-    expect(client.issue).toHaveBeenNthCalledWith(1, TEST_ISSUE_ID);
-    expect(client.issue).toHaveBeenNthCalledWith(2, OTHER_TEST_ISSUE_ID);
+    })).rejects.toThrow("requires issue_id");
+    expect(client.issue).not.toHaveBeenCalled();
   });
 
-  it("prefers canonical issue_id when aliases are also present", async () => {
+  it("uses canonical issue_id even when unknown extra fields are present", async () => {
     const client = makeMockClient();
     const tools = createLinearTools({ client });
     const tool = tools.find((entry) => entry.name === "linear_get_issue")!;
@@ -416,25 +373,6 @@ describe("createLinearTools", () => {
     });
     expect(client.issue).toHaveBeenCalledWith(TEST_ISSUE_ID);
     expect(client.workflowStates).toHaveBeenCalledWith({ teamId: "team-1" });
-  });
-
-  it("list_comments alias returns recent comments", async () => {
-    const client = makeMockClient();
-    const tools = createLinearTools({ client });
-    const tool = tools.find((entry) => entry.name === "list_comments")!;
-
-    const result = await executeCustomTool(tool, {
-      issueId: TEST_ISSUE_ID,
-      limit: 10,
-    });
-
-    expect(result).toEqual({
-      comments: [
-        expect.objectContaining({
-          id: "comment-1",
-        }),
-      ],
-    });
   });
 
   it("linear_add_issue_comment posts a comment through the Linear client", async () => {

@@ -4,10 +4,10 @@ import type {
   ToolCallingModelRequest,
   ToolCallingResponse,
 } from "../tool-calling";
+import { UnsupportedFeatureError } from "../../core/errors";
 import { toDisplayText, toWireString } from "../shared/coercion";
 import { LazyAsyncValue } from "../shared/lazyAsyncValue";
 import {
-  resolveToolRounds,
   mapConversationMessages,
   mergeConsecutiveSameRole,
   normalizeConversationRole,
@@ -76,10 +76,10 @@ function toAnthropicMessages(
   request: ToolCallingModelRequest,
 ): Array<Record<string, unknown>> {
   const messages = mergeConsecutiveSameRole(
-    mapConversationMessages(request, toBaseAnthropicMessage),
+    mapConversationMessages(request, toAnthropicMessageWithSystemAsUser),
   );
 
-  const rounds = resolveToolRounds(request);
+  const rounds = request.toolRounds ?? [];
   if (rounds.length === 0) {
     return messages;
   }
@@ -109,7 +109,7 @@ function toAnthropicMessages(
   return messages;
 }
 
-function toBaseAnthropicMessage(
+function toAnthropicMessageWithSystemAsUser(
   entry: Record<string, unknown>,
 ): Record<string, unknown> | null {
   const role = normalizeConversationRole(entry.role);
@@ -178,14 +178,18 @@ function parseAnthropicResponse(
 }
 
 async function loadAnthropicClientFactory(): Promise<AnthropicClientFactory> {
-  const module = (await import("@anthropic-ai/sdk")) as {
+  const module = (await import("@anthropic-ai/sdk").catch((error: unknown) => {
+    throw new UnsupportedFeatureError(
+      `AnthropicAdapter requires optional dependency "@anthropic-ai/sdk". Install it with "pnpm add @anthropic-ai/sdk". (${error instanceof Error ? error.message : String(error)})`,
+    );
+  })) as {
     default?: new (options?: { apiKey?: string }) => AnthropicClientLike;
     Anthropic?: new (options?: { apiKey?: string }) => AnthropicClientLike;
   };
 
   const AnthropicClientCtor = module.default ?? module.Anthropic;
   if (!AnthropicClientCtor) {
-    throw new Error(
+    throw new UnsupportedFeatureError(
       'AnthropicAdapter requires optional dependency "@anthropic-ai/sdk". Install it with "pnpm add @anthropic-ai/sdk".',
     );
   }

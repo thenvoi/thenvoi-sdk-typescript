@@ -315,10 +315,10 @@ describe("AgentTools", () => {
     expect(isToolExecutorError(result)).toBe(true);
     expect(result).toMatchObject({
       ok: false,
-      errorType: "ToolExecutionError",
+      errorType: "ToolArgumentsValidationError",
       toolName: "thenvoi_send_message",
     });
-    expect(toLegacyToolExecutorErrorMessage(result)).toContain("Error executing thenvoi_send_message");
+    expect(toLegacyToolExecutorErrorMessage(result)).toContain("Invalid arguments for thenvoi_send_message");
   });
 
   it("returns error string for unknown tools", async () => {

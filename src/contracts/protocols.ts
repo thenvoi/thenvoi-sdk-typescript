@@ -209,8 +209,6 @@ export interface PreprocessorContext {
   getHydratedHistory(excludeMessageId?: string): Promise<MetadataMap[]>;
   consumeParticipantsMessage(): string | null;
   consumeContactsMessage(): string | null;
-  consumeBootstrapAndMarkLlmInitialized(): boolean;
-  consumeBootstrap(): boolean;
   readonly isLlmInitialized: boolean;
   markLlmInitialized(): void;
   injectSystemMessage(message: string): void;

@@ -1,7 +1,7 @@
 import type { FrameworkAdapter, Preprocessor } from "../contracts/protocols";
 import type { ContactEvent, PlatformEvent } from "../platform/events";
 import { ThenvoiLink, type ThenvoiLinkOptions } from "../platform/ThenvoiLink";
-import { AgentRuntime } from "./AgentRuntime";
+import { AgentRuntime } from "./rooms/AgentRuntime";
 import type { AgentConfig, ContactEventConfig, SessionConfig } from "./types";
 import type { PlatformMessage } from "./types";
 import { RuntimeStateError, ValidationError } from "../core/errors";
