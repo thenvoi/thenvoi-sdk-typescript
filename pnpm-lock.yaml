@@ -23,9 +23,6 @@ importers:
       '@langchain/langgraph':
         specifier: ^1.2.0
         version: 1.2.0(@langchain/core@1.1.31(openai@6.27.0(ws@8.19.0)(zod@3.25.76)))(zod-to-json-schema@3.25.1(zod@3.25.76))(zod@3.25.76)
-      '@linear/sdk':
-        specifier: ^76.0.0
-        version: 76.0.0(graphql@16.13.0)
       '@thenvoi/rest-client':
         specifier: ^0.0.112-rc.0
         version: 0.0.112-rc.0
@@ -41,9 +38,6 @@ importers:
       parlant-client:
         specifier: ^3.2.0
         version: 3.2.0
-      phoenix:
-        specifier: ^1.8.4
-        version: 1.8.4
       zod:
         specifier: ^3.24.2
         version: 3.25.76
@@ -54,6 +48,9 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: ^0.2.63
         version: 0.2.63(zod@3.25.76)
+      '@linear/sdk':
+        specifier: ^76.0.0
+        version: 76.0.0(graphql@16.13.0)
       '@openai/codex-sdk':
         specifier: ^0.107.0
         version: 0.107.0
@@ -75,6 +72,9 @@ importers:
       eslint:
         specifier: ^9.22.0
         version: 9.39.3
+      phoenix:
+        specifier: ^1.8.4
+        version: 1.8.4
       tsup:
         specifier: ^8.4.0
         version: 8.5.1(postcss@8.5.8)(typescript@5.9.3)

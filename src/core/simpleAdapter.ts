@@ -7,6 +7,15 @@ import type {
   PlatformMessageLike,
 } from "../contracts/protocols";
 
+/**
+ * Base class for framework adapters that process one message at a time.
+ *
+ * Subclass this and implement {@link onMessage} to build a custom adapter.
+ * Built-in adapters (OpenAI, Anthropic, Gemini, etc.) already extend this.
+ *
+ * @typeParam H - Converted history format your adapter expects (e.g. OpenAI messages array).
+ * @typeParam TTools - Tool interface exposed to the adapter (defaults to {@link AdapterToolsProtocol}).
+ */
 export abstract class SimpleAdapter<H, TTools = AdapterToolsProtocol>
   implements FrameworkAdapter
 {

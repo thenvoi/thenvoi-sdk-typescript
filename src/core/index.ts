@@ -1,6 +1,7 @@
 export { SimpleAdapter } from "./simpleAdapter";
 export type {
   FrameworkAdapter,
+  FrameworkAdapterInput,
   Preprocessor,
   HistoryConverter,
   MessagingTools,

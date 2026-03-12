@@ -21,7 +21,7 @@ export interface AgentIdentity {
   handle?: string | null;
 }
 
-export interface ChatParticipant extends MetadataMap {
+export interface ChatParticipant {
   id: string;
   name: string;
   type: string;
@@ -37,9 +37,9 @@ export interface ChatMessageMention {
 
 export interface PaginationMetadata extends PaginationMetadataLike {}
 
-export interface PaginatedResponse<T extends MetadataMap = MetadataMap> extends PaginatedList<T> {}
+export interface PaginatedResponse<T = MetadataMap> extends PaginatedList<T> {}
 
-export interface PlatformChatMessage extends MetadataMap {
+export interface PlatformChatMessage {
   id: string;
   content: string;
   sender_id: string;

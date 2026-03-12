@@ -99,6 +99,7 @@ export interface ToolExecutor {
 
 export interface ParticipantTools extends RoomParticipantTools, PeerLookupTools {}
 
+/** Full tool surface available to framework adapters during message handling. */
 export interface AdapterToolsProtocol
   extends
     MessagingTools,
@@ -152,6 +153,7 @@ export interface PreprocessorContext {
   consumeSystemMessages(): string[];
 }
 
+/** Contract that every adapter must satisfy. Implement via {@link SimpleAdapter} for convenience. */
 export interface FrameworkAdapter {
   onEvent(input: FrameworkAdapterInput): Promise<void>;
   onCleanup(roomId: string): Promise<void>;

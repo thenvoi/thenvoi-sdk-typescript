@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { SimpleAdapter } from "../../core/simpleAdapter";
 import { UnsupportedFeatureError } from "../../core/errors";
+import type { PeerRecord } from "../../contracts/dtos";
 import type { MessagingTools } from "../../contracts/protocols";
 import type { ChatMessageMention } from "../../client/rest/types";
 import type { PlatformMessage } from "../../runtime/types";
@@ -470,7 +471,7 @@ class AsyncEventQueue<T> {
   }
 }
 
-function toGatewayPeer(value: Record<string, unknown>): GatewayPeer | null {
+function toGatewayPeer(value: Record<string, unknown> | PeerRecord): GatewayPeer | null {
   const id = asNonEmptyString(value.id);
   if (!id) {
     return null;

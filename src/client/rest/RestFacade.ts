@@ -48,7 +48,7 @@ function asRecord(value: unknown): MetadataMap | undefined {
   return isMetadataMap(value) ? value : undefined;
 }
 
-function asRecordArray<T extends MetadataMap = MetadataMap>(value: unknown): T[] | undefined {
+function asRecordArray<T = MetadataMap>(value: unknown): T[] | undefined {
   if (!Array.isArray(value)) {
     return undefined;
   }
@@ -74,7 +74,7 @@ function extractEnvelopeMetadata(value: unknown): MetadataMap | undefined {
   return asRecord(record.metadata) ?? asRecord(record.meta);
 }
 
-function normalizePaginatedResponse<T extends MetadataMap = MetadataMap>(
+function normalizePaginatedResponse<T = MetadataMap>(
   response: unknown,
 ): PaginatedResponse<T> {
   const topLevelData = extractEnvelopeData(response);
@@ -405,7 +405,7 @@ export class FernRestAdapter implements RestApi {
       return null;
     }
 
-    return payload as PlatformChatMessage;
+    return payload as unknown as PlatformChatMessage;
   }
 
   public async listPeers(
@@ -1034,9 +1034,9 @@ export class RestFacade implements RestApi {
   private forward<T>(
     operation: string,
     call: () => Promise<T>,
-    metadata?: MetadataMap,
+    metadata?: object,
   ): Promise<T> {
-    this.logger.debug(`REST ${operation}`, metadata);
+    this.logger.debug(`REST ${operation}`, metadata as Record<string, unknown>);
     return call();
   }
 }

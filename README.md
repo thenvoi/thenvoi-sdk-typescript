@@ -180,6 +180,10 @@ await agent.run();
 
 ### OpenAI
 
+```bash
+pnpm add openai
+```
+
 ```ts
 import { Agent, OpenAIAdapter, loadAgentConfig } from "@thenvoi/sdk";
 
@@ -195,6 +199,10 @@ await agent.run();
 ```
 
 ### Anthropic
+
+```bash
+pnpm add @anthropic-ai/sdk
+```
 
 ```ts
 import { Agent, AnthropicAdapter, loadAgentConfig } from "@thenvoi/sdk";
@@ -212,6 +220,10 @@ await agent.run();
 
 ### Gemini
 
+```bash
+pnpm add @google/genai
+```
+
 ```ts
 import { Agent, GeminiAdapter, loadAgentConfig } from "@thenvoi/sdk";
 
@@ -227,6 +239,10 @@ await agent.run();
 ```
 
 ### Claude Agent SDK
+
+```bash
+pnpm add @anthropic-ai/claude-agent-sdk
+```
 
 ```ts
 import { Agent, ClaudeSDKAdapter, loadAgentConfig } from "@thenvoi/sdk";
@@ -244,6 +260,10 @@ await agent.run();
 ```
 
 ### Codex
+
+```bash
+pnpm add @openai/codex-sdk
+```
 
 ```ts
 import {
@@ -284,6 +304,10 @@ await agent.run();
 
 ### LangGraph
 
+```bash
+pnpm add @langchain/langgraph @langchain/core
+```
+
 ```ts
 import { Agent, LangGraphAdapter, loadAgentConfig } from "@thenvoi/sdk";
 
@@ -300,6 +324,10 @@ await agent.run();
 ```
 
 ### A2A Bridge
+
+```bash
+pnpm add @a2a-js/sdk
+```
 
 Connect a Thenvoi agent to an external A2A-compliant agent:
 

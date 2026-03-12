@@ -78,6 +78,7 @@ export interface LoadAgentConfigFromEnvOptions {
   prefix?: string;
 }
 
+/** Load agent credentials from a YAML config file (defaults to `./agent_config.yaml`). */
 export function loadAgentConfig(
   agentKey?: string,
   configPath?: string,
@@ -121,6 +122,7 @@ export function loadAgentConfig(
   return toAgentConfigResult(section, sourceLabel);
 }
 
+/** Load agent credentials from environment variables (prefix defaults to `THENVOI_`). */
 export function loadAgentConfigFromEnv(
   options?: LoadAgentConfigFromEnvOptions,
 ): AgentCredentials {

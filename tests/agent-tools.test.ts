@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { RestFacade } from "../src/client/rest/RestFacade";
 import type { RestApi } from "../src/client/rest/types";
-import type { ContactRequestAction } from "../src/contracts/dtos";
+import type { ContactRequestAction, ListMemoriesArgs, StoreMemoryArgs } from "../src/contracts/dtos";
 import { UnsupportedFeatureError, ValidationError } from "../src/core/errors";
 import { AgentTools } from "../src/runtime/tools/AgentTools";
 
@@ -15,8 +15,8 @@ class FakeRestApi implements RestApi {
     handle?: string;
     requestId?: string;
   }> = [];
-  public readonly memoryQueries: Array<Record<string, unknown>> = [];
-  public readonly storedMemories: Array<Record<string, unknown>> = [];
+  public readonly memoryQueries: ListMemoriesArgs[] = [];
+  public readonly storedMemories: StoreMemoryArgs[] = [];
 
   public async getAgentMe() {
     return { id: "a1", name: "Agent", description: "desc" };

@@ -1,3 +1,4 @@
+import type { ParticipantRecord } from "../contracts/dtos";
 import type {
   AdapterToolsProtocol,
   FrameworkAdapterInput,
@@ -36,7 +37,7 @@ export type PlatformMessage = PlatformMessageLike;
 export interface ConversationContext {
   roomId: string;
   messages: Array<Record<string, unknown>>;
-  participants: Array<Record<string, unknown>>;
+  participants: ParticipantRecord[];
   hydratedAt: Date;
 }
 

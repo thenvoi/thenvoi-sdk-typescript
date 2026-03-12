@@ -14,6 +14,12 @@ export interface AgentCreateOptions extends Omit<PlatformRuntimeOptions, "agentI
   shutdownTimeoutMs?: number | null;
 }
 
+/**
+ * Top-level handle for a Thenvoi agent.
+ *
+ * Use {@link Agent.create} to build an instance from config + adapter,
+ * then call {@link Agent.run} to connect to the platform and handle messages.
+ */
 export class Agent {
   private readonly platformRuntime: PlatformRuntime;
   private readonly adapter: FrameworkAdapter;
@@ -26,6 +32,7 @@ export class Agent {
     this.adapter = adapter;
   }
 
+  /** Build an Agent from credentials and a framework adapter. */
   public static create(options: AgentCreateOptions): Agent {
     const {
       adapter,
@@ -118,6 +125,7 @@ export class Agent {
     return await this.platformRuntime.resetRoomSession(roomId, timeoutMs);
   }
 
+  /** Start the agent, listen for messages, and block until shutdown. Registers SIGINT/SIGTERM handlers by default. */
   public async run(options?: {
     shutdownTimeoutMs?: number | null;
     signals?: boolean;

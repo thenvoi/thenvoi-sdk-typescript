@@ -10,6 +10,8 @@ const EXTERNAL = [
   "@anthropic-ai/sdk",
   "@anthropic-ai/claude-agent-sdk",
   "@google/genai",
+  "@linear/sdk",
+  "@linear/sdk/webhooks",
   "@openai/codex-sdk",
   "express",
   "openai",
