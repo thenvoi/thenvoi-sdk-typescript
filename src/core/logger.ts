@@ -37,6 +37,7 @@ export class ConsoleLogger implements Logger {
     message: string,
     context?: Record<string, unknown>,
   ): void {
+    // eslint-disable-next-line no-console -- ConsoleLogger is the intended consumer of console methods.
     const fn = console[level];
     if (context === undefined) {
       fn(message);

@@ -28,6 +28,7 @@ interface CreateThenvoiMcpBridgeOptions {
 export interface ThenvoiMcpBridge {
   serverConfig: McpSdkServerConfigWithInstance;
   allowedTools: string[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- matches SDK's own SdkMcpToolDefinition<any> signature
   toolDefinitions: Array<SdkMcpToolDefinition<any>>;
 }
 
@@ -41,6 +42,7 @@ export function createThenvoiMcpBridge(
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- matches SDK's own SdkMcpToolDefinition<any> signature
   const toolDefinitions: Array<SdkMcpToolDefinition<any>> = [];
   for (const toolName of toolNames) {
     const model = TOOL_MODELS[toolName as keyof typeof TOOL_MODELS];

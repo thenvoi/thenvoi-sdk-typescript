@@ -41,7 +41,7 @@ export interface ThreadRef {
   id: string;
 }
 
-interface ThreadStartParams {
+interface _ThreadStartParams {
   model?: string | null;
   cwd?: string | null;
   approvalPolicy?: CodexApprovalPolicy | null;
@@ -53,7 +53,7 @@ interface ThreadStartParams {
   persistExtendedHistory: boolean;
 }
 
-interface ThreadResumeParams {
+interface _ThreadResumeParams {
   threadId: string;
   model?: string | null;
   cwd?: string | null;
@@ -147,11 +147,11 @@ export interface DynamicToolCallResponse {
   success: boolean;
 }
 
-interface CommandExecutionApprovalResponse {
+interface _CommandExecutionApprovalResponse {
   decision: "accept" | "acceptForSession" | "decline" | "cancel";
 }
 
-interface FileChangeApprovalResponse {
+interface _FileChangeApprovalResponse {
   decision: "accept" | "acceptForSession" | "decline" | "cancel";
 }
 

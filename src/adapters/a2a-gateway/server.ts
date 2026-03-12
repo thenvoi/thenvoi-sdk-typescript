@@ -2,7 +2,6 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { Server as HttpServer } from "node:http";
 
 import type {
-  GatewayA2AStatusUpdateEvent,
   GatewayCancelRequest,
   GatewayMessagePart,
   GatewayPeer,

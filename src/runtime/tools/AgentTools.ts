@@ -252,7 +252,7 @@ export class AgentTools implements AgentToolsProtocol {
       name,
       role,
       type: String(peer.type ?? "Agent"),
-      handle: (peer.handle as string | undefined) ?? null,
+      handle: typeof peer.handle === "string" ? peer.handle : null,
     };
 
     this.participants.push(participantRecord);
@@ -620,8 +620,12 @@ export class AgentTools implements AgentToolsProtocol {
     }
 
     if (typeof mentions[0] !== "string") {
-      return mentions as MentionReference[];
+      return mentions.filter(
+        (entry): entry is MentionReference => typeof entry === "object" && entry !== null && "id" in entry,
+      );
     }
+
+    const stringMentions = mentions.filter((entry): entry is string => typeof entry === "string");
 
     const participantsByHandle = new Map<string, MentionReference>();
     const participantsById = new Map<string, MentionReference>();
@@ -642,7 +646,7 @@ export class AgentTools implements AgentToolsProtocol {
       }
     }
 
-    return (mentions as string[]).map((mention) => {
+    return stringMentions.map((mention) => {
       // Try by ID first (UUID strings), then by handle, then by display name.
       const byId = participantsById.get(mention);
       if (byId) {
@@ -751,7 +755,10 @@ export class AgentTools implements AgentToolsProtocol {
       thenvoi_remove_participant: async (arguments_) =>
         this.removeParticipant(String(arguments_.name ?? "")),
       thenvoi_lookup_peers: async (arguments_) =>
-        this.lookupPeers(Number(arguments_.page ?? 1), Number(arguments_.page_size ?? 50)),
+        this.lookupPeers(
+          coercePositiveInt(arguments_.page, 1),
+          coercePositiveInt(arguments_.page_size, 50),
+        ),
       thenvoi_get_participants: async () => this.getParticipants(),
       thenvoi_create_chatroom: async (arguments_) =>
         this.createChatroom(this.normalizeOptionalString(arguments_.task_id)),
@@ -762,8 +769,8 @@ export class AgentTools implements AgentToolsProtocol {
     return {
       thenvoi_list_contacts: async (arguments_) =>
         this.listContacts({
-          page: Number(arguments_.page ?? 1),
-          pageSize: Number(arguments_.page_size ?? 50),
+          page: coercePositiveInt(arguments_.page, 1),
+          pageSize: coercePositiveInt(arguments_.page_size, 50),
         }),
       thenvoi_add_contact: async (arguments_) =>
         this.addContact({
@@ -774,8 +781,8 @@ export class AgentTools implements AgentToolsProtocol {
         this.removeContact(this.toRemoveContactArgs(arguments_)),
       thenvoi_list_contact_requests: async (arguments_) =>
         this.listContactRequests({
-          page: Number(arguments_.page ?? 1),
-          pageSize: Number(arguments_.page_size ?? 50),
+          page: coercePositiveInt(arguments_.page, 1),
+          pageSize: coercePositiveInt(arguments_.page_size, 50),
           sentStatus: String(arguments_.sent_status ?? "pending"),
         }),
       thenvoi_respond_contact_request: async (arguments_) =>
@@ -812,9 +819,10 @@ export class AgentTools implements AgentToolsProtocol {
       };
     }
 
+    // contactId is guaranteed non-undefined: the guard above throws when both are falsy.
     return {
       target: "contactId",
-      contactId: contactId as string,
+      contactId: contactId!,
     };
   }
 
@@ -838,10 +846,11 @@ export class AgentTools implements AgentToolsProtocol {
       };
     }
 
+    // requestId is guaranteed non-undefined: the guard above throws when both are falsy.
     return {
       action: actionValue,
       target: "requestId",
-      requestId: requestId as string,
+      requestId: requestId!,
     };
   }
 
@@ -1085,6 +1094,11 @@ function isListMemoryScope(value: string): value is MemoryScope {
 
 function isMemoryStatus(value: string): value is MemoryStatus {
   return LIST_MEMORY_STATUSES.has(value as MemoryStatus);
+}
+
+function coercePositiveInt(value: unknown, fallback: number): number {
+  const num = Number(value ?? fallback);
+  return Number.isFinite(num) && num >= 1 ? Math.floor(num) : fallback;
 }
 
 /**

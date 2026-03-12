@@ -162,7 +162,17 @@ export class A2AAdapter extends SimpleAdapter<A2ASessionState, MessagingTools> {
           if (streamEventCount > this.maxStreamEvents) {
             throw new Error(`A2A stream exceeded maximum event limit (${this.maxStreamEvents})`);
           }
-          await this.handleEvent(event, tools, context.roomId, message.senderId);
+          try {
+            await this.handleEvent(event, tools, context.roomId, message.senderId);
+          } catch (handleError) {
+            this.logger.error("A2A stream event handling failed", {
+              roomId: context.roomId,
+              remoteUrl: this.remoteUrl,
+              streamEventCount,
+              error: handleError,
+            });
+            throw handleError;
+          }
         }
         return;
       }

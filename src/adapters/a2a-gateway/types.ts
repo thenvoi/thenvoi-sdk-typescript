@@ -11,11 +11,6 @@ export type GatewayTaskState =
   | "auth-required"
   | "unknown";
 
-interface GatewayTextPart {
-  kind: "text";
-  text: string;
-}
-
 export interface GatewayMessagePart {
   kind?: string;
   text?: string;

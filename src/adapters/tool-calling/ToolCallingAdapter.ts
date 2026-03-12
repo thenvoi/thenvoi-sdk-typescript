@@ -228,7 +228,7 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
     try {
       await tools.sendEvent(JSON.stringify(payload), messageType);
     } catch (error) {
-      this.logger.warn("Tool execution reporting failed", {
+      this.logger.error("Tool execution reporting failed", {
         messageType,
         payload,
         error,

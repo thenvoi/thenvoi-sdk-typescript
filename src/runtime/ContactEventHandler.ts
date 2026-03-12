@@ -3,7 +3,7 @@ import { NoopLogger } from "../core/logger";
 import type { ContactEvent, MessageEvent } from "../platform/events";
 import type { AdapterToolsProtocol } from "../contracts/protocols";
 import type { ChatMessagingRestApi, ChatRoomRestApi } from "../client/rest/types";
-import type { ContactEventConfig, ContactEventCallback } from "./types";
+import type { ContactEventConfig } from "./types";
 import {
   SYNTHETIC_SENDER_TYPE,
   SYNTHETIC_CONTACT_EVENTS_SENDER_ID,
@@ -344,6 +344,7 @@ export class ContactEventHandler {
       const payload: Record<string, unknown> = {
         name: error.name,
         message: error.message,
+        stack: error.stack,
       };
 
       if (typeof (error as { retryable?: unknown }).retryable !== "undefined") {

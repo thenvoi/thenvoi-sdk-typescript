@@ -247,6 +247,12 @@ export class ParlantAdapter
   }
 
   public async onCleanup(roomId: string): Promise<void> {
+    const pendingSession = this.roomSessionInitPromises.get(roomId);
+    const pendingBootstrap = this.roomBootstrapInitPromises.get(roomId);
+
+    // Await in-flight initialization before deleting state to avoid orphaned writes.
+    await Promise.allSettled([pendingSession, pendingBootstrap].filter(Boolean));
+
     this.roomSessions.delete(roomId);
     this.roomCustomers.delete(roomId);
     this.bootstrappedRooms.delete(roomId);

@@ -11,7 +11,6 @@ import {
 } from "../src/contracts/protocols";
 import type {
   AgentToolsCapabilities,
-  FrameworkAdapterInput,
   PlatformMessageLike,
   PreprocessorContext,
 } from "../src/contracts/protocols";

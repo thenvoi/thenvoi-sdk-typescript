@@ -270,7 +270,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
       let event: CodexRpcEvent;
       try {
         event = await client.recvEvent(config.turnTimeoutMs);
-      } catch (error) {
+      } catch {
         if (turnId) {
           try {
             const interrupt: TurnInterruptParams = { threadId, turnId };
