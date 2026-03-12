@@ -74,7 +74,7 @@ cp agent_config.yaml.example agent_config.yaml  # Edit with your agent credentia
 
 ### Advanced Imports
 
-The root package intentionally focuses on the main runtime and adapter API. Lower-level helpers live under subpaths:
+The root package keeps the common runtime and adapter entry points, while specialized helpers live under subpaths:
 
 ```ts
 import { FernRestAdapter, RestFacade } from "@thenvoi/sdk/rest";

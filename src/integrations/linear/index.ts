@@ -1,7 +1,9 @@
 export {
+  createLinearBridgeRuntime,
   completeLinearSession,
   handleAgentSessionEvent,
 } from "./bridge";
+export type { LinearBridgeRuntime } from "./bridge";
 export { stripHandlePrefix, dedupeHandles } from "./handles";
 export { createSqliteSessionRoomStore } from "./store";
 export {
@@ -14,6 +16,7 @@ export {
 } from "./activities";
 export { createLinearTools } from "./tools";
 export {
+  createInlineLinearBridgeDispatcher,
   createInProcessLinearBridgeDispatcher,
   createLinearWebhookHandler,
 } from "./webhook";

@@ -7,7 +7,6 @@ import type {
 import { toDisplayText, toWireString } from "../shared/coercion";
 import { LazyAsyncValue } from "../shared/lazyAsyncValue";
 import {
-  resolveToolCalls,
   resolveToolRounds,
   mapConversationMessages,
   normalizeConversationRole,

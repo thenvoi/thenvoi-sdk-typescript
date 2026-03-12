@@ -39,7 +39,7 @@ export class Execution {
   private readonly link: ThenvoiLink;
   private readonly context: ExecutionContext;
   private readonly onExecute: (context: ExecutionContext, event: PlatformEvent) => Promise<void>;
-  private readonly onFailure?: (error: unknown, event: PlatformEvent) => void;
+  private readonly onFailure?: (error: unknown, event: PlatformEvent) => void | Promise<void>;
   private readonly logger: Logger;
   private readonly eventQueue: PlatformEvent[] = [];
   private readonly waiters: Array<(event: PlatformEvent | null) => void> = [];

@@ -584,7 +584,7 @@ describe("A2AGatewayAdapter", () => {
     expect(text).toBe("matched by legacy gateway_peer_id slug");
   });
 
-  it("does not let superseded legacy sender messages finalize the new pending task", async () => {
+  it("keeps concurrent room tasks independent and requires task metadata when overlapping", async () => {
     const rest = new FakeRestApi();
 
     let onRequest: ((request: GatewayRequest) => AsyncIterable<unknown>) | null = null;
@@ -630,10 +630,6 @@ describe("A2AGatewayAdapter", () => {
     const newIterator = newStream[Symbol.asyncIterator]();
     await newIterator.next(); // new working
 
-    const superseded = await oldIterator.next();
-    expect(superseded.value?.status?.state).toBe("failed");
-    expect(superseded.value?.final).toBe(true);
-
     await adapter.onMessage(
       makePeerMessage({
         content: "stale sender-only message",
@@ -649,7 +645,23 @@ describe("A2AGatewayAdapter", () => {
 
     await adapter.onMessage(
       makePeerMessage({
-        content: "fresh task-correlated response",
+        content: "response for old task",
+        roomId: "room-1",
+        senderId: "peer-weather",
+        metadata: {
+          gateway_task_id: "task-old",
+        },
+      }),
+      new FakeTools(),
+      { contextToRoom: {}, roomParticipants: {} },
+      null,
+      null,
+      { isSessionBootstrap: false, roomId: "room-1" },
+    );
+
+    await adapter.onMessage(
+      makePeerMessage({
+        content: "response for new task",
         roomId: "room-1",
         senderId: "peer-weather",
         metadata: {
@@ -663,8 +675,13 @@ describe("A2AGatewayAdapter", () => {
       { isSessionBootstrap: false, roomId: "room-1" },
     );
 
+    const oldFinal = await oldIterator.next();
+    expect(oldFinal.value?.final).toBe(true);
+    expect(oldFinal.value?.status?.state).toBe("completed");
+    expect(oldFinal.value?.status?.message?.parts?.[0]?.text).toBe("response for old task");
+
     const newFinal = await newIterator.next();
     const text = newFinal.value?.status?.message?.parts?.[0]?.text;
-    expect(text).toBe("fresh task-correlated response");
+    expect(text).toBe("response for new task");
   });
 });

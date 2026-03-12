@@ -2,12 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   Agent,
-  AgentTools,
-  Execution,
-  PlatformRuntime,
-  RoomPresence,
   ThenvoiLink,
+  PlatformRuntime,
 } from "../src/index";
+import { AgentTools, Execution, RoomPresence } from "../src/runtime";
 import { RestFacade, type RestApi } from "../src/rest";
 
 class ContractRestApi implements RestApi {

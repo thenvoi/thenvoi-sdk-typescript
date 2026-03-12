@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import {
-  OpenAIAdapter,
-  type CustomToolDef,
-  type HistoryProvider,
-  type PlatformMessage,
-} from "../src/index";
+import { OpenAIAdapter } from "../src/index";
+import type { HistoryProvider, PlatformMessage } from "../src/runtime";
+import type { CustomToolDef } from "../src/runtime/tools/customTools";
 import type { AgentToolsProtocol } from "../src/core";
 import type { ToolCallingModel } from "../src/adapters";
 import type {
@@ -126,8 +123,6 @@ class FakeTools implements AgentToolsProtocol {
 class FakeModel implements ToolCallingModel {
   private turns = 0;
   public readonly requests: Array<{
-    toolCalls?: Array<{ id: string; name: string; input: Record<string, unknown> }>;
-    toolResults?: Array<{ toolCallId: string; name: string; output: unknown; isError?: boolean }>;
     toolRounds?: Array<{
       toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>;
       toolResults: Array<{ toolCallId: string; name: string; output: unknown; isError?: boolean }>;
@@ -136,8 +131,6 @@ class FakeModel implements ToolCallingModel {
 
   public async complete(
     request: {
-      toolCalls?: Array<{ id: string; name: string; input: Record<string, unknown> }>;
-      toolResults?: Array<{ toolCallId: string; name: string; output: unknown; isError?: boolean }>;
       toolRounds?: Array<{
         toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>;
         toolResults: Array<{ toolCallId: string; name: string; output: unknown; isError?: boolean }>;
@@ -145,8 +138,6 @@ class FakeModel implements ToolCallingModel {
     },
   ): Promise<{ text?: string; toolCalls?: Array<{ id: string; name: string; input: Record<string, unknown> }> }> {
     this.requests.push({
-      toolCalls: request.toolCalls,
-      toolResults: request.toolResults,
       toolRounds: request.toolRounds,
     });
     this.turns += 1;
@@ -201,11 +192,9 @@ describe("ToolCallingAdapter", () => {
     expect(model.requests).toHaveLength(2);
 
     const secondRequest = model.requests[1];
-    const flatResults = secondRequest?.toolResults ?? [];
     const roundResults = (secondRequest?.toolRounds ?? []).flatMap((round) => round.toolResults);
-    const allResults = [...flatResults, ...roundResults];
 
-    expect(allResults).toEqual(
+    expect(roundResults).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           toolCallId: "tc1",
@@ -284,16 +273,14 @@ describe("ToolCallingAdapter", () => {
 
     class ErrorToolModel implements ToolCallingModel {
       private turns = 0;
-      public async complete(req: { toolRounds?: Array<{ toolResults: Array<{ output: unknown }> }>; toolResults?: Array<{ output: unknown }> }): Promise<{ text?: string; toolCalls?: Array<{ id: string; name: string; input: Record<string, unknown> }> }> {
+      public async complete(req: { toolRounds?: Array<{ toolResults: Array<{ output: unknown }> }> }): Promise<{ text?: string; toolCalls?: Array<{ id: string; name: string; input: Record<string, unknown> }> }> {
         this.turns += 1;
         if (this.turns === 1) {
           return {
             toolCalls: [{ id: "tc1", name: "search", input: { query: "test" } }],
           };
         }
-        // Verify the error was caught and passed as tool result (prefer toolRounds, then flat fallback fields).
-        const toolOutput =
-          req.toolRounds?.[0]?.toolResults?.[0]?.output ?? req.toolResults?.[0]?.output;
+        const toolOutput = req.toolRounds?.[0]?.toolResults?.[0]?.output;
         const caughtAsTypedError = Boolean(
           toolOutput
           && typeof toolOutput === "object"

@@ -1,4 +1,4 @@
-import { CHAT_EVENT_TYPES } from "../messages";
+import { CHAT_EVENT_TYPES } from "../../contracts/chatEvents";
 
 export const TOOL_MODELS = {
   thenvoi_send_message: {

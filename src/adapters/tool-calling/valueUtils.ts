@@ -1,44 +1,10 @@
-import type { ToolCall, ToolCallingModelRequest, ToolRound } from "./types";
+import type { ToolCallingModelRequest, ToolRound } from "./types";
 
 /**
- * Returns tool calls from the request, synthesizing stubs from tool results
- * when only the flat `toolResults` field is provided without `toolCalls`.
- * Synthesized stubs use `input: {}` because the original arguments are not
- * available on ToolResult — callers should migrate to `toolRounds` instead.
- */
-export function resolveToolCalls(request: ToolCallingModelRequest): ToolCall[] {
-  if ((request.toolCalls?.length ?? 0) > 0) {
-    return request.toolCalls as ToolCall[];
-  }
-
-  return (request.toolResults ?? []).map((result) => ({
-    id: result.toolCallId,
-    name: result.name,
-    input: {},
-  }));
-}
-
-/**
- * Prefer structured tool rounds. When only deprecated flat fields are present,
- * synthesize a single compatibility round to avoid duplicating fallback logic
- * across model adapters.
+ * Returns the explicit tool-round history supplied by the caller.
  */
 export function resolveToolRounds(request: ToolCallingModelRequest): ToolRound[] {
-  const rounds = request.toolRounds ?? [];
-  if (rounds.length > 0) {
-    return rounds;
-  }
-
-  const flatToolCalls = request.toolCalls ?? [];
-  const flatToolResults = request.toolResults ?? [];
-  if (flatToolCalls.length === 0 && flatToolResults.length === 0) {
-    return [];
-  }
-
-  return [{
-    toolCalls: resolveToolCalls(request),
-    toolResults: flatToolResults,
-  }];
+  return request.toolRounds ?? [];
 }
 
 export function normalizeConversationRole(

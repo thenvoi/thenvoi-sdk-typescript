@@ -2,9 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   BASE_INSTRUCTIONS,
-  CHAT_EVENT_TYPES,
-  assertChatEventType,
-  isChatEventType,
   MessageRetryTracker,
   ParticipantTracker,
   buildParticipantsMessage,
@@ -12,7 +9,12 @@ import {
   formatMessageForLlm,
   renderSystemPrompt,
   replaceUuidMentions,
-} from "../src/index";
+} from "../src/runtime";
+import {
+  CHAT_EVENT_TYPES,
+  assertChatEventType,
+  isChatEventType,
+} from "../src/contracts/chatEvents";
 
 describe("runtime utilities", () => {
   it("replaces UUID mentions", () => {

@@ -1,7 +1,8 @@
 import { UnsupportedFeatureError, ValidationError } from "../../core/errors";
 import type { AgentToolsRestApi } from "../../client/rest/types";
 import { DEFAULT_REQUEST_OPTIONS } from "../../client/rest/requestOptions";
-import { assertCapability } from "../capabilities";
+import { assertCapability } from "../../contracts/capabilities";
+import { assertChatEventType, CHAT_EVENT_TYPES } from "../../contracts/chatEvents";
 import type {
   AddContactArgs,
   ContactRecord,
@@ -35,7 +36,6 @@ import {
   type AgentToolsProtocol,
   type ToolExecutorError,
 } from "../../contracts/protocols";
-import { assertChatEventType, CHAT_EVENT_TYPES } from "../messages";
 import {
   CHAT_TOOL_NAMES,
   MEMORY_TOOL_NAMES,
@@ -798,13 +798,9 @@ export class AgentTools implements AgentToolsProtocol {
       };
     }
 
-    if (!contactId) {
-      throw new ValidationError("Provide exactly one of handle or contact_id");
-    }
-
     return {
       target: "contactId",
-      contactId,
+      contactId: contactId as string,
     };
   }
 
@@ -828,14 +824,10 @@ export class AgentTools implements AgentToolsProtocol {
       };
     }
 
-    if (!requestId) {
-      throw new ValidationError("Provide exactly one of handle or request_id");
-    }
-
     return {
       action: actionValue,
       target: "requestId",
-      requestId,
+      requestId: requestId as string,
     };
   }
 

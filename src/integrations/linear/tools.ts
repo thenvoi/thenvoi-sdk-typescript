@@ -50,51 +50,60 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     });
   };
 
-  addSessionBodyTool(
-    "post_thought",
-    "Post a thought to the Linear agent session, visible to the user as internal reasoning.",
-    async (args) => {
-      await postThought(client, args.session_id as string, args.body as string);
-      return { ok: true };
+  const addSessionBodyAliasPair = (
+    canonical: {
+      name: string;
+      description: string;
     },
-  );
-  addSessionBodyTool(
-    "linear_post_thought",
-    "Alias for post_thought.",
+    alias: {
+      name: string;
+      description: string;
+    },
+    handler: (args: Record<string, unknown>) => Promise<unknown>,
+  ): void => {
+    addSessionBodyTool(canonical.name, canonical.description, handler);
+    addSessionBodyTool(alias.name, alias.description, handler);
+  };
+
+  addSessionBodyAliasPair(
+    {
+      name: "post_thought",
+      description: "Post a thought to the Linear agent session, visible to the user as internal reasoning.",
+    },
+    {
+      name: "linear_post_thought",
+      description: "Alias for post_thought.",
+    },
     async (args) => {
       await postThought(client, args.session_id as string, args.body as string);
       return { ok: true };
     },
   );
 
-  addSessionBodyTool(
-    "post_action",
-    "Post an action to the Linear agent session, showing the user what step is being taken.",
-    async (args) => {
-      await postAction(client, args.session_id as string, args.body as string);
-      return { ok: true };
+  addSessionBodyAliasPair(
+    {
+      name: "post_action",
+      description: "Post an action to the Linear agent session, showing the user what step is being taken.",
     },
-  );
-  addSessionBodyTool(
-    "linear_post_action",
-    "Alias for post_action.",
+    {
+      name: "linear_post_action",
+      description: "Alias for post_action.",
+    },
     async (args) => {
       await postAction(client, args.session_id as string, args.body as string);
       return { ok: true };
     },
   );
 
-  addSessionBodyTool(
-    "post_error",
-    "Post an error to the Linear agent session to notify the user of a failure.",
-    async (args) => {
-      await postError(client, args.session_id as string, args.body as string);
-      return { ok: true };
+  addSessionBodyAliasPair(
+    {
+      name: "post_error",
+      description: "Post an error to the Linear agent session to notify the user of a failure.",
     },
-  );
-  addSessionBodyTool(
-    "linear_post_error",
-    "Alias for post_error.",
+    {
+      name: "linear_post_error",
+      description: "Alias for post_error.",
+    },
     async (args) => {
       await postError(client, args.session_id as string, args.body as string);
       return { ok: true };
@@ -102,17 +111,15 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
   );
 
   if (enableElicitation) {
-    addSessionBodyTool(
-      "post_elicitation",
-      "Ask the Linear user a question via an elicitation activity.",
-      async (args) => {
-        await postElicitation(client, args.session_id as string, args.body as string);
-        return { ok: true };
+    addSessionBodyAliasPair(
+      {
+        name: "post_elicitation",
+        description: "Ask the Linear user a question via an elicitation activity.",
       },
-    );
-    addSessionBodyTool(
-      "linear_ask_user",
-      "Alias for post_elicitation.",
+      {
+        name: "linear_ask_user",
+        description: "Alias for post_elicitation.",
+      },
       async (args) => {
         await postElicitation(client, args.session_id as string, args.body as string);
         return { ok: true };
@@ -120,22 +127,15 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     );
   }
 
-  addSessionBodyTool(
-    "complete_session",
-    "Post the final response to the Linear agent session and mark the session completed when a store is available.",
-    async (args) => {
-      await completeLinearSession({
-        linearClient: client,
-        agentSessionId: args.session_id as string,
-        body: args.body as string,
-        store,
-      });
-      return { ok: true };
+  addSessionBodyAliasPair(
+    {
+      name: "complete_session",
+      description: "Post the final response to the Linear agent session and mark the session completed when a store is available.",
     },
-  );
-  addSessionBodyTool(
-    "linear_post_response",
-    "Alias for complete_session.",
+    {
+      name: "linear_post_response",
+      description: "Alias for complete_session.",
+    },
     async (args) => {
       await completeLinearSession({
         linearClient: client,
@@ -169,47 +169,82 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     },
   );
 
+  addIssueTools({
+    tools,
+    client,
+    requiredIssueIdSchema,
+    optionalIssueIdSchema,
+    issueCommentLimitSchema,
+  });
+
+  return tools;
+}
+
+function addIssueTools(input: {
+  tools: CustomToolDef[];
+  client: LinearActivityClient;
+  requiredIssueIdSchema: z.AnyZodObject;
+  optionalIssueIdSchema: z.AnyZodObject;
+  issueCommentLimitSchema: z.ZodOptional<z.ZodNumber>;
+}): void {
+  const {
+    tools,
+    client,
+    requiredIssueIdSchema,
+    optionalIssueIdSchema,
+    issueCommentLimitSchema,
+  } = input;
+
+  const addIssueReadAliasPair = (
+    canonicalName: string,
+    canonicalDescription: string,
+    aliasName: string,
+    aliasDescription: string,
+    reader: (issueId: string, args: Record<string, unknown>) => Promise<unknown>,
+    schema: z.ZodObject<z.ZodRawShape> = requiredIssueIdSchema,
+  ): void => {
+    const handler = async (args: Record<string, unknown>): Promise<unknown> => {
+      const issueId = resolveIssueId(canonicalName, args);
+      return reader(issueId, args);
+    };
+
+    tools.push(
+      {
+        name: aliasName,
+        description: aliasDescription,
+        schema,
+        handler: async (args: Record<string, unknown>) => {
+          const issueId = resolveIssueId(aliasName, args);
+          return reader(issueId, args);
+        },
+      },
+      {
+        name: canonicalName,
+        description: canonicalDescription,
+        schema,
+        handler,
+      },
+    );
+  };
+
+  addIssueReadAliasPair(
+    "linear_get_issue",
+    "Fetch the current Linear issue details using the exact issue UUID from the session context.",
+    "get_issue",
+    "Compatibility alias for linear_get_issue. Requires the exact Linear issue UUID from the session context.",
+    async (issueId) => readIssue(client, issueId),
+  );
+
+  addIssueReadAliasPair(
+    "linear_list_issue_comments",
+    "List recent comments for the current Linear issue using the exact issue UUID from the session context.",
+    "list_comments",
+    "Compatibility alias for linear_list_issue_comments. Requires the exact Linear issue UUID from the session context.",
+    async (issueId, args) => readIssueComments(client, issueId, typeof args.limit === "number" ? args.limit : 20),
+    requiredIssueIdSchema.extend({ limit: issueCommentLimitSchema }),
+  );
+
   tools.push(
-    {
-      name: "get_issue",
-      description: "Compatibility alias for linear_get_issue. Requires the exact Linear issue UUID from the session context.",
-      schema: requiredIssueIdSchema,
-      handler: async (args: Record<string, unknown>) => {
-        const issueId = resolveIssueId("get_issue", args);
-        return readIssue(client, issueId);
-      },
-    },
-    {
-      name: "list_comments",
-      description: "Compatibility alias for linear_list_issue_comments. Requires the exact Linear issue UUID from the session context.",
-      schema: requiredIssueIdSchema.extend({
-        limit: issueCommentLimitSchema,
-      }),
-      handler: async (args: Record<string, unknown>) => {
-        const issueId = resolveIssueId("list_comments", args);
-        return readIssueComments(client, issueId, typeof args.limit === "number" ? args.limit : 20);
-      },
-    },
-    {
-      name: "linear_get_issue",
-      description: "Fetch the current Linear issue details using the exact issue UUID from the session context.",
-      schema: requiredIssueIdSchema,
-      handler: async (args: Record<string, unknown>) => {
-        const issueId = resolveIssueId("linear_get_issue", args);
-        return readIssue(client, issueId);
-      },
-    },
-    {
-      name: "linear_list_issue_comments",
-      description: "List recent comments for the current Linear issue using the exact issue UUID from the session context.",
-      schema: requiredIssueIdSchema.extend({
-        limit: issueCommentLimitSchema,
-      }),
-      handler: async (args: Record<string, unknown>) => {
-        const issueId = resolveIssueId("linear_list_issue_comments", args);
-        return readIssueComments(client, issueId, typeof args.limit === "number" ? args.limit : 20);
-      },
-    },
     {
       name: "linear_list_workflow_states",
       description: "List workflow states for the current issue's team so the bridge can move the issue between Todo, In Progress, In Review, and Done.",
@@ -297,8 +332,6 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
       },
     },
   );
-
-  return tools;
 }
 
 function assertUuid(toolName: string, value: string): void {

@@ -1,4 +1,4 @@
-import type { PlatformMessage } from "../src/index";
+import type { PlatformMessage } from "../src/runtime";
 import type { AgentToolsProtocol } from "../src/core";
 import { DEFAULT_AGENT_TOOLS_CAPABILITIES } from "../src/contracts/protocols";
 import type {

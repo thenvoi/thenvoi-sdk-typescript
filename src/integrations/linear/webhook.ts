@@ -10,8 +10,10 @@ import {
 import { NoopLogger, type Logger } from "../../core/logger";
 import { postError, postThought } from "./activities";
 import {
+  createLinearBridgeRuntime,
   getAgentSessionEventKey,
   handleAgentSessionEvent,
+  type LinearBridgeRuntime,
 } from "./bridge";
 import type {
   HandleAgentSessionEventInput,
@@ -22,10 +24,11 @@ import type {
 export interface LinearBridgeDispatchJob {
   eventKey: string;
   input: HandleAgentSessionEventInput;
+  runtime?: LinearBridgeRuntime;
 }
 
 export interface LinearBridgeDispatcher {
-  dispatch(job: LinearBridgeDispatchJob): void;
+  dispatch(job: LinearBridgeDispatchJob): Promise<void> | void;
   isQueued?(eventKey: string): boolean;
   waitForIdle?(): Promise<void>;
 }
@@ -54,10 +57,54 @@ type DispatchAttemptResult =
   | { ok: true }
   | { ok: false; attempts: number; error: unknown };
 
+export function createInlineLinearBridgeDispatcher(
+  options?: { logger?: Logger },
+): LinearBridgeDispatcher {
+  const logger = options?.logger ?? new NoopLogger();
+  const runtime = createLinearBridgeRuntime();
+
+  return {
+    dispatch: async (job: LinearBridgeDispatchJob): Promise<void> => {
+      const result = await runDispatchAttempt(async () => {
+        await handleAgentSessionEvent(job.input, {
+          skipAcknowledgment: true,
+          expectedEventKey: job.eventKey,
+          runtime: job.runtime ?? runtime,
+        });
+      }, {
+        logger,
+        failureEvent: "linear_thenvoi_bridge.dispatch_failed",
+        retryEvent: "linear_thenvoi_bridge.dispatch_retrying",
+        eventKey: job.eventKey,
+        sessionId: job.input.payload.agentSession.id,
+      });
+
+      if (result.ok) {
+        return;
+      }
+
+      const failure: DispatchTerminalFailure = {
+        eventKey: job.eventKey,
+        sessionId: job.input.payload.agentSession.id,
+        attempts: result.attempts,
+        error: result.error,
+      };
+      await signalTerminalDispatchFailure({
+        logger,
+        job,
+        failure,
+      });
+
+      throw result.error;
+    },
+  };
+}
+
 export function createInProcessLinearBridgeDispatcher(
   options?: { logger?: Logger },
 ): LinearBridgeDispatcher {
   const logger = options?.logger ?? new NoopLogger();
+  const runtime = createLinearBridgeRuntime();
   const queued = new Set<string>();
   const inFlight = new Set<Promise<void>>();
   const terminalFailures: DispatchTerminalFailure[] = [];
@@ -79,7 +126,7 @@ export function createInProcessLinearBridgeDispatcher(
         `Linear bridge async dispatch failed for ${failures.length} event(s)`,
       );
     },
-    dispatch: (job: LinearBridgeDispatchJob) => {
+    dispatch: async (job: LinearBridgeDispatchJob): Promise<void> => {
       if (queued.has(job.eventKey)) {
         return;
       }
@@ -94,6 +141,7 @@ export function createInProcessLinearBridgeDispatcher(
           await handleAgentSessionEvent(job.input, {
             skipAcknowledgment: true,
             expectedEventKey: job.eventKey,
+            runtime: job.runtime ?? runtime,
           });
         }, {
           logger,
@@ -140,7 +188,8 @@ export function createLinearWebhookHandler(
   options: CreateLinearWebhookHandlerOptions,
 ): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
   const logger = options.deps.logger ?? new NoopLogger();
-  const dispatcher = options.dispatcher ?? createInProcessLinearBridgeDispatcher({ logger });
+  const runtime = createLinearBridgeRuntime();
+  const dispatcher = options.dispatcher ?? createInlineLinearBridgeDispatcher({ logger });
   const webhookClient = new LinearWebhookClient(options.config.linearWebhookSecret);
 
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
@@ -216,14 +265,28 @@ export function createLinearWebhookHandler(
       }
     }
 
-    dispatcher.dispatch({
-      eventKey,
-      input: {
-        payload,
-        config: options.config,
-        deps: options.deps,
-      },
-    });
+    try {
+      await dispatcher.dispatch({
+        eventKey,
+        runtime,
+        input: {
+          payload,
+          config: options.config,
+          deps: options.deps,
+        },
+      });
+    } catch (error) {
+      logger.error("linear_thenvoi_bridge.webhook_dispatch_failed", {
+        sessionId: payload.agentSession.id,
+        issueId: payload.agentSession.issue?.id ?? null,
+        action: payload.action,
+        eventKey,
+        error: serializeError(error),
+      });
+
+      sendText(response, isRetryableDispatchError(error) ? 503 : 500, "Dispatch failed");
+      return;
+    }
     logger.info("linear_thenvoi_bridge.webhook_dispatched", {
       sessionId: payload.agentSession.id,
       issueId: payload.agentSession.issue?.id ?? null,

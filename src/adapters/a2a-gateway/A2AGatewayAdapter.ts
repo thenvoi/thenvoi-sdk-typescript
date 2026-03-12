@@ -31,7 +31,8 @@ const DEFAULT_PEER_PAGE_SIZE = 100;
 const DEFAULT_MAX_PEER_PAGES = 25;
 
 interface PendingTaskRecord extends PendingA2ATask {
-  readonly requireTaskMetadata: boolean;
+  readonly strictTaskMetadata: boolean;
+  requireTaskMetadata: boolean;
   readonly queue: AsyncEventQueue<GatewayA2AStatusUpdateEvent>;
 }
 
@@ -53,7 +54,7 @@ export class A2AGatewayAdapter
   private readonly peersById = new Map<string, GatewayPeer>();
   private readonly contextToRoom = new Map<string, string>();
   private readonly roomParticipants = new Map<string, Set<string>>();
-  private readonly pendingByRoom = new Map<string, PendingTaskRecord>();
+  private readonly pendingByRoom = new Map<string, Map<string, PendingTaskRecord>>();
   private readonly pendingByTask = new Map<string, PendingTaskRecord>();
 
   private server: ReturnType<GatewayServerFactory> | null = null;
@@ -112,11 +113,8 @@ export class A2AGatewayAdapter
       this.rehydrate(history);
     }
 
-    const pending = this.pendingByRoom.get(context.roomId);
+    const pending = this.resolvePendingForMessage(context.roomId, message);
     if (!pending) {
-      return;
-    }
-    if (!shouldRouteToPendingTask(message, pending)) {
       return;
     }
 
@@ -129,10 +127,19 @@ export class A2AGatewayAdapter
   }
 
   public async onCleanup(roomId: string): Promise<void> {
-    const pending = this.pendingByRoom.get(roomId);
-    if (pending) {
-      pending.queue.cancel();
-      this.removePending(pending);
+    const roomPendings = this.pendingByRoom.get(roomId);
+    if (roomPendings && roomPendings.size > 0) {
+      for (const pending of roomPendings.values()) {
+        pending.queue.cancel();
+      }
+      roomPendings.clear();
+      this.pendingByRoom.delete(roomId);
+    }
+
+    for (const [taskId, pending] of this.pendingByTask) {
+      if (pending.roomId === roomId) {
+        this.pendingByTask.delete(taskId);
+      }
     }
   }
 
@@ -148,7 +155,7 @@ export class A2AGatewayAdapter
 
   public async onRuntimeStop(): Promise<void> {
     // Cancel all pending queues so dequeue() calls resolve immediately.
-    for (const pending of this.pendingByRoom.values()) {
+    for (const pending of this.pendingByTask.values()) {
       pending.queue.cancel();
     }
     this.pendingByRoom.clear();
@@ -220,36 +227,25 @@ export class A2AGatewayAdapter
       peer.id,
     );
 
-    const existing = this.pendingByRoom.get(roomId);
+    const roomPendings = this.pendingByRoom.get(roomId);
+    const activeInRoom = roomPendings?.size ?? 0;
     const queue = new AsyncEventQueue<GatewayA2AStatusUpdateEvent>();
+    const strictTaskMetadata = hadContext;
     const pending: PendingTaskRecord = {
       taskId: request.taskId,
       contextId,
       peerId: peer.id,
       peerSlug: peer.slug,
       roomId,
-      requireTaskMetadata: Boolean(existing) || hadContext,
+      strictTaskMetadata,
+      requireTaskMetadata: strictTaskMetadata || activeInRoom > 0,
       queue,
       enqueue: (event) => {
         queue.enqueue(event);
       },
     };
 
-    // Cancel any existing pending task for this room before registering the new one.
-    if (existing) {
-      this.finalizePending(
-        existing,
-        buildStatusEvent({
-          taskId: existing.taskId,
-          contextId: existing.contextId,
-          state: "failed",
-          final: true,
-          text: "Superseded by a new request for the same room.",
-        }),
-      );
-    }
-
-    this.pendingByRoom.set(roomId, pending);
+    this.registerPending(pending);
     this.pendingByTask.set(pending.taskId, pending);
 
     yield buildStatusEvent({
@@ -327,6 +323,54 @@ export class A2AGatewayAdapter
         text: `Task canceled by A2A client (${peerId}).`,
       }),
     );
+  }
+
+  private registerPending(pending: PendingTaskRecord): void {
+    const roomPendings = this.pendingByRoom.get(pending.roomId) ?? new Map<string, PendingTaskRecord>();
+    roomPendings.set(pending.taskId, pending);
+    this.pendingByRoom.set(pending.roomId, roomPendings);
+
+    if (roomPendings.size > 1) {
+      for (const entry of roomPendings.values()) {
+        entry.requireTaskMetadata = true;
+      }
+    }
+  }
+
+  private resolvePendingForMessage(
+    roomId: string,
+    message: PlatformMessage,
+  ): PendingTaskRecord | null {
+    const roomPendings = this.pendingByRoom.get(roomId);
+    if (!roomPendings || roomPendings.size === 0) {
+      return null;
+    }
+
+    const metadata = message.metadata ?? {};
+    const gatewayTaskId = asNonEmptyString(metadata.gateway_task_id);
+    if (gatewayTaskId) {
+      const pending = roomPendings.get(gatewayTaskId) ?? null;
+      if (!pending || !shouldRouteToPendingTask(message, pending)) {
+        return null;
+      }
+
+      return pending;
+    }
+
+    let matched: PendingTaskRecord | null = null;
+    for (const pending of roomPendings.values()) {
+      if (!shouldRouteToPendingTask(message, pending)) {
+        continue;
+      }
+
+      if (matched) {
+        return null;
+      }
+
+      matched = pending;
+    }
+
+    return matched;
   }
 
   private resolveGatewayPeer(
@@ -423,9 +467,17 @@ export class A2AGatewayAdapter
   }
 
   private removePending(pending: PendingTaskRecord): void {
-    const byRoom = this.pendingByRoom.get(pending.roomId);
-    if (byRoom === pending) {
-      this.pendingByRoom.delete(pending.roomId);
+    const roomPendings = this.pendingByRoom.get(pending.roomId);
+    if (roomPendings) {
+      roomPendings.delete(pending.taskId);
+      if (roomPendings.size === 0) {
+        this.pendingByRoom.delete(pending.roomId);
+      } else {
+        const hasMultiple = roomPendings.size > 1;
+        for (const entry of roomPendings.values()) {
+          entry.requireTaskMetadata = entry.strictTaskMetadata || hasMultiple;
+        }
+      }
     }
 
     const byTask = this.pendingByTask.get(pending.taskId);

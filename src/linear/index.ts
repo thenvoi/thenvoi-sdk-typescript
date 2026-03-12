@@ -1,6 +1,8 @@
 export {
   DEFAULT_STATUS_MAPPING,
   completeLinearSession,
+  createInlineLinearBridgeDispatcher,
+  createLinearBridgeRuntime,
   createLinearTools,
   createInProcessLinearBridgeDispatcher,
   createLinearWebhookHandler,
@@ -21,6 +23,7 @@ export type {
   LinearBridgeDispatcher,
   HandleAgentSessionEventInput,
   LinearActivityClient,
+  LinearBridgeRuntime,
   LinearSessionStatus,
   LinearThenvoiBridgeConfig,
   LinearThenvoiBridgeDeps,

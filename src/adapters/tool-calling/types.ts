@@ -24,21 +24,10 @@ export interface ToolRound {
   toolResults: ToolResult[];
 }
 
-/**
- * Request payload sent to a {@link ToolCallingModel}.
- *
- * Model implementations should prefer `toolRounds` when present.
- * Fall back to the flat `toolCalls`/`toolResults` fields only when
- * `toolRounds` is undefined or empty (backwards compatibility).
- */
 export interface ToolCallingModelRequest {
   systemPrompt?: string;
   messages: ToolModelMessage[];
   tools: ToolModelSchema[];
-  /** @deprecated Use toolRounds instead for multi-round accuracy. */
-  toolCalls?: ToolCall[];
-  /** @deprecated Use toolRounds instead for multi-round accuracy. */
-  toolResults?: ToolResult[];
   toolRounds?: ToolRound[];
 }
 
