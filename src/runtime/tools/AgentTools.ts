@@ -9,6 +9,11 @@ import type {
   ListContactRequestsArgs,
   ListContactsArgs,
   ListMemoriesArgs,
+  MemoryScope,
+  MemorySegment,
+  MemoryStatus,
+  MemorySystem,
+  MemoryType,
   MemoryRecord,
   MentionInput,
   MentionReference,
@@ -105,6 +110,46 @@ const CONTACT_REQUEST_ACTIONS: ReadonlySet<RespondContactRequestArgs["action"]> 
   "approve",
   "reject",
   "cancel",
+]);
+
+const MEMORY_SYSTEMS: ReadonlySet<StoreMemoryArgs["system"]> = new Set([
+  "sensory",
+  "working",
+  "long_term",
+]);
+
+const MEMORY_TYPES: ReadonlySet<StoreMemoryArgs["type"]> = new Set([
+  "iconic",
+  "echoic",
+  "haptic",
+  "episodic",
+  "semantic",
+  "procedural",
+]);
+
+const MEMORY_SEGMENTS: ReadonlySet<StoreMemoryArgs["segment"]> = new Set([
+  "user",
+  "agent",
+  "tool",
+  "guideline",
+]);
+
+const LIST_MEMORY_SCOPES: ReadonlySet<MemoryScope> = new Set([
+  "subject",
+  "organization",
+  "all",
+]);
+
+const LIST_MEMORY_STATUSES: ReadonlySet<MemoryStatus> = new Set([
+  "active",
+  "superseded",
+  "archived",
+  "all",
+]);
+
+const MEMORY_SCOPES: ReadonlySet<NonNullable<StoreMemoryArgs["scope"]>> = new Set([
+  "subject",
+  "organization",
 ]);
 
 export class AgentTools implements AgentToolsProtocol {
@@ -727,9 +772,9 @@ export class AgentTools implements AgentToolsProtocol {
   private buildMemoryToolHandlers(): Record<string, ToolHandler> {
     return {
       thenvoi_list_memories: async (arguments_) =>
-        this.listMemories(arguments_ as unknown as ListMemoriesArgs),
+        this.listMemories(this.toListMemoriesArgs(arguments_)),
       thenvoi_store_memory: async (arguments_) =>
-        this.storeMemory(arguments_ as unknown as StoreMemoryArgs),
+        this.storeMemory(this.toStoreMemoryArgs(arguments_)),
       thenvoi_get_memory: async (arguments_) =>
         this.getMemory(String(arguments_.memory_id ?? "")),
       thenvoi_supersede_memory: async (arguments_) =>
@@ -753,15 +798,19 @@ export class AgentTools implements AgentToolsProtocol {
       };
     }
 
+    if (!contactId) {
+      throw new ValidationError("Provide exactly one of handle or contact_id");
+    }
+
     return {
       target: "contactId",
-      contactId: contactId as string,
+      contactId,
     };
   }
 
   private toRespondContactRequestArgs(arguments_: MetadataMap): RespondContactRequestArgs {
-    const action = this.normalizeOptionalString(arguments_.action);
-    if (!action || !CONTACT_REQUEST_ACTIONS.has(action as RespondContactRequestArgs["action"])) {
+    const actionValue = this.normalizeOptionalString(arguments_.action);
+    if (!actionValue || !isContactRequestAction(actionValue)) {
       throw new ValidationError("action must be one of: approve, reject, cancel");
     }
 
@@ -773,16 +822,76 @@ export class AgentTools implements AgentToolsProtocol {
 
     if (handle) {
       return {
-        action: action as RespondContactRequestArgs["action"],
+        action: actionValue,
         target: "handle",
         handle,
       };
     }
 
+    if (!requestId) {
+      throw new ValidationError("Provide exactly one of handle or request_id");
+    }
+
     return {
-      action: action as RespondContactRequestArgs["action"],
+      action: actionValue,
       target: "requestId",
-      requestId: requestId as string,
+      requestId,
+    };
+  }
+
+  private toListMemoriesArgs(arguments_: MetadataMap): ListMemoriesArgs {
+    const pageSize = this.normalizeOptionalNumber(arguments_.page_size);
+    const scope = this.normalizeOptionalMemoryScope(arguments_.scope);
+    const system = this.normalizeOptionalMemorySystem(arguments_.system);
+    const type = this.normalizeOptionalMemoryType(arguments_.type);
+    const segment = this.normalizeOptionalMemorySegment(arguments_.segment);
+    const status = this.normalizeOptionalMemoryStatus(arguments_.status);
+    const subjectId = this.normalizeOptionalString(arguments_.subject_id);
+    const contentQuery = this.normalizeOptionalString(arguments_.content_query);
+
+    return {
+      ...(subjectId ? { subject_id: subjectId } : {}),
+      ...(scope ? { scope } : {}),
+      ...(system ? { system } : {}),
+      ...(type ? { type } : {}),
+      ...(segment ? { segment } : {}),
+      ...(contentQuery ? { content_query: contentQuery } : {}),
+      ...(typeof pageSize === "number" ? { page_size: pageSize } : {}),
+      ...(status ? { status } : {}),
+    };
+  }
+
+  private toStoreMemoryArgs(arguments_: MetadataMap): StoreMemoryArgs {
+    const content = this.normalizeRequiredString(arguments_.content, "content");
+    const thought = this.normalizeRequiredString(arguments_.thought, "thought");
+    const system = this.normalizeOptionalMemorySystem(arguments_.system);
+    const type = this.normalizeOptionalMemoryType(arguments_.type);
+    const segment = this.normalizeOptionalMemorySegment(arguments_.segment);
+    const scope = this.normalizeOptionalStoreMemoryScope(arguments_.scope);
+    const subjectId = this.normalizeOptionalString(arguments_.subject_id);
+    const metadata = this.normalizeOptionalMetadata(arguments_.metadata);
+
+    if (!system) {
+      throw new ValidationError("system must be one of: sensory, working, long_term");
+    }
+
+    if (!type) {
+      throw new ValidationError("type must be one of: iconic, echoic, haptic, episodic, semantic, procedural");
+    }
+
+    if (!segment) {
+      throw new ValidationError("segment must be one of: user, agent, tool, guideline");
+    }
+
+    return {
+      content,
+      thought,
+      system,
+      type,
+      segment,
+      ...(scope ? { scope } : {}),
+      ...(subjectId ? { subject_id: subjectId } : {}),
+      ...(metadata ? { metadata } : {}),
     };
   }
 
@@ -794,6 +903,146 @@ export class AgentTools implements AgentToolsProtocol {
     const normalized = value.trim();
     return normalized.length > 0 ? normalized : undefined;
   }
+
+  private normalizeRequiredString(value: unknown, fieldName: string): string {
+    const normalized = this.normalizeOptionalString(value);
+    if (!normalized) {
+      throw new ValidationError(`${fieldName} is required`);
+    }
+
+    return normalized;
+  }
+
+  private normalizeOptionalNumber(value: unknown): number | undefined {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value === "string") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+
+    return undefined;
+  }
+
+  private normalizeOptionalMetadata(value: unknown): MetadataMap | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return undefined;
+    }
+
+    return value as MetadataMap;
+  }
+
+  private normalizeOptionalMemoryScope(value: unknown): MemoryScope | undefined {
+    const normalized = this.normalizeOptionalString(value);
+    if (!normalized) {
+      return undefined;
+    }
+
+    if (!isListMemoryScope(normalized)) {
+      throw new ValidationError("scope must be one of: subject, organization, all");
+    }
+
+    return normalized;
+  }
+
+  private normalizeOptionalMemorySystem(value: unknown): MemorySystem | undefined {
+    const normalized = this.normalizeOptionalString(value);
+    if (!normalized) {
+      return undefined;
+    }
+
+    if (!isMemorySystem(normalized)) {
+      throw new ValidationError("system must be one of: sensory, working, long_term");
+    }
+
+    return normalized;
+  }
+
+  private normalizeOptionalMemoryType(value: unknown): MemoryType | undefined {
+    const normalized = this.normalizeOptionalString(value);
+    if (!normalized) {
+      return undefined;
+    }
+
+    if (!isMemoryType(normalized)) {
+      throw new ValidationError("type must be one of: iconic, echoic, haptic, episodic, semantic, procedural");
+    }
+
+    return normalized;
+  }
+
+  private normalizeOptionalMemorySegment(value: unknown): MemorySegment | undefined {
+    const normalized = this.normalizeOptionalString(value);
+    if (!normalized) {
+      return undefined;
+    }
+
+    if (!isMemorySegment(normalized)) {
+      throw new ValidationError("segment must be one of: user, agent, tool, guideline");
+    }
+
+    return normalized;
+  }
+
+  private normalizeOptionalMemoryStatus(value: unknown): MemoryStatus | undefined {
+    const normalized = this.normalizeOptionalString(value);
+    if (!normalized) {
+      return undefined;
+    }
+
+    if (!isMemoryStatus(normalized)) {
+      throw new ValidationError("status must be one of: active, superseded, archived, all");
+    }
+
+    return normalized;
+  }
+
+  private normalizeOptionalStoreMemoryScope(
+    value: unknown,
+  ): NonNullable<StoreMemoryArgs["scope"]> | undefined {
+    const normalized = this.normalizeOptionalString(value);
+    if (!normalized) {
+      return undefined;
+    }
+
+    if (!isStoreMemoryScope(normalized)) {
+      throw new ValidationError("scope must be one of: subject, organization");
+    }
+
+    return normalized;
+  }
+}
+
+function isContactRequestAction(value: string): value is RespondContactRequestArgs["action"] {
+  return CONTACT_REQUEST_ACTIONS.has(value as RespondContactRequestArgs["action"]);
+}
+
+function isMemorySystem(value: string): value is MemorySystem {
+  return MEMORY_SYSTEMS.has(value as MemorySystem);
+}
+
+function isMemoryType(value: string): value is MemoryType {
+  return MEMORY_TYPES.has(value as MemoryType);
+}
+
+function isMemorySegment(value: string): value is MemorySegment {
+  return MEMORY_SEGMENTS.has(value as MemorySegment);
+}
+
+function isStoreMemoryScope(value: string): value is NonNullable<StoreMemoryArgs["scope"]> {
+  return MEMORY_SCOPES.has(value as NonNullable<StoreMemoryArgs["scope"]>);
+}
+
+function isListMemoryScope(value: string): value is MemoryScope {
+  return LIST_MEMORY_SCOPES.has(value as MemoryScope);
+}
+
+function isMemoryStatus(value: string): value is MemoryStatus {
+  return LIST_MEMORY_STATUSES.has(value as MemoryStatus);
 }
 
 /**
