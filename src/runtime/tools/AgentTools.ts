@@ -134,7 +134,7 @@ export class AgentTools implements AgentToolsProtocol {
     mentions: MentionInput = [],
   ): Promise<ToolOperationResult> {
     if (mentions.length > 0 && typeof mentions[0] === "string" && this.participants.length === 0) {
-      await this.refreshParticipants();
+      await this.syncParticipants();
     }
 
     const resolvedMentions = this.resolveMentions(mentions);
@@ -172,7 +172,7 @@ export class AgentTools implements AgentToolsProtocol {
   }
 
   public async addParticipant(name: string, role = "member"): Promise<ToolOperationResult> {
-    const existing = await this.refreshParticipants();
+    const existing = await this.syncParticipants();
     const alreadyInRoom = existing.find(
       (participant) => String(participant.name ?? "").toLowerCase() === name.toLowerCase(),
     );
@@ -216,7 +216,7 @@ export class AgentTools implements AgentToolsProtocol {
   }
 
   public async removeParticipant(name: string): Promise<ToolOperationResult> {
-    const participants = await this.refreshParticipants();
+    const participants = await this.syncParticipants();
     const participant = participants.find(
       (entry) => String(entry.name ?? "").toLowerCase() === name.toLowerCase(),
     );
@@ -254,18 +254,22 @@ export class AgentTools implements AgentToolsProtocol {
   }
 
   public async getParticipants(): Promise<ParticipantRecord[]> {
-    return [...this.participants];
+    return this.fetchParticipants();
   }
 
-  private async refreshParticipants(): Promise<ParticipantRecord[]> {
+  private async fetchParticipants(): Promise<ParticipantRecord[]> {
     const participants = await this.rest.listChatParticipants(this.roomId, DEFAULT_REQUEST_OPTIONS);
-    const normalized = participants.map((participant) => ({
+    return participants.map((participant) => ({
       id: participant.id,
       name: participant.name,
       type: participant.type,
       handle: participant.handle ?? null,
     }));
-    this.replaceParticipants(normalized);
+  }
+
+  private async syncParticipants(): Promise<ParticipantRecord[]> {
+    const participants = await this.fetchParticipants();
+    this.replaceParticipants(participants);
     return [...this.participants];
   }
 
@@ -677,7 +681,7 @@ export class AgentTools implements AgentToolsProtocol {
         this.removeParticipant(String(arguments_.name ?? "")),
       thenvoi_lookup_peers: async (arguments_) =>
         this.lookupPeers(Number(arguments_.page ?? 1), Number(arguments_.page_size ?? 50)),
-      thenvoi_get_participants: async () => this.refreshParticipants(),
+      thenvoi_get_participants: async () => this.getParticipants(),
       thenvoi_create_chatroom: async (arguments_) =>
         this.createChatroom(arguments_.task_id as string | undefined),
     };

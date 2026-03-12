@@ -27,7 +27,7 @@ interface ClaudeAssistantMessage {
   content: ClaudeAssistantTextBlock[];
 }
 
-interface ClaudeSdkMessageLike {
+interface ClaudeSDKMessageLike {
   type: string;
   session_id?: string;
   subtype?: string;
@@ -49,12 +49,17 @@ interface ClaudeQueryOptions {
   allowedTools?: string[];
 }
 
-export interface ClaudeSdkQueryParams {
+export interface ClaudeSDKQueryParams {
   prompt: string;
   options?: ClaudeQueryOptions;
 }
 
-export type ClaudeSdkQuery = (params: ClaudeSdkQueryParams) => AsyncIterable<ClaudeSdkMessageLike>;
+export type ClaudeSDKQuery = (params: ClaudeSDKQueryParams) => AsyncIterable<ClaudeSDKMessageLike>;
+
+/** @deprecated Use ClaudeSDKQueryParams instead. */
+export type ClaudeSdkQueryParams = ClaudeSDKQueryParams;
+/** @deprecated Use ClaudeSDKQuery instead. */
+export type ClaudeSdkQuery = ClaudeSDKQuery;
 
 export interface ClaudeSDKAdapterOptions {
   model?: string;
@@ -66,7 +71,7 @@ export interface ClaudeSDKAdapterOptions {
   enableMemoryTools?: boolean;
   enableMcpTools?: boolean;
   cwd?: string;
-  queryFn?: ClaudeSdkQuery;
+  queryFn?: ClaudeSDKQuery;
   logger?: Logger;
 }
 
@@ -82,7 +87,7 @@ export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
   private readonly enableMemoryTools: boolean;
   private readonly enableMcpTools: boolean;
   private readonly cwd?: string;
-  private readonly queryFnOverride?: ClaudeSdkQuery;
+  private readonly queryFnOverride?: ClaudeSDKQuery;
   private readonly logger: Logger;
   private readonly sessionIds = new Map<string, string>();
   private readonly roomTools = new Map<string, AdapterToolsProtocol>();
@@ -233,9 +238,9 @@ export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
   }
 }
 
-async function loadClaudeQuery(): Promise<ClaudeSdkQuery> {
+async function loadClaudeQuery(): Promise<ClaudeSDKQuery> {
   const module = (await import("@anthropic-ai/claude-agent-sdk")) as {
-    query?: ClaudeSdkQuery;
+    query?: ClaudeSDKQuery;
   };
 
   if (!module.query) {
@@ -245,7 +250,7 @@ async function loadClaudeQuery(): Promise<ClaudeSdkQuery> {
   return module.query;
 }
 
-function extractAssistantText(event: ClaudeSdkMessageLike): string {
+function extractAssistantText(event: ClaudeSDKMessageLike): string {
   if (event.type !== "assistant") {
     return "";
   }

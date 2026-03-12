@@ -151,4 +151,81 @@ describe("OpenAIAdapter", () => {
       ),
     ).toBe(true);
   });
+
+  it("returns structured parse errors for malformed tool arguments instead of executing tools", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const responses = [
+      {
+        choices: [
+          {
+            message: {
+              tool_calls: [
+                {
+                  id: "call_bad",
+                  type: "function",
+                  function: {
+                    name: "thenvoi_get_participants",
+                    arguments: "{bad json",
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        choices: [
+          {
+            message: {
+              content: "Handled malformed args",
+            },
+          },
+        ],
+      },
+    ];
+
+    const client = {
+      chat: {
+        completions: {
+          create: async (params: Record<string, unknown>) => {
+            requests.push(params);
+            const next = responses.shift();
+            if (!next) {
+              throw new Error("No mock OpenAI response available");
+            }
+            return next;
+          },
+        },
+      },
+    };
+
+    const adapter = new OpenAIAdapter({
+      openAIModel: "gpt-5.2",
+      clientFactory: async () => client,
+    });
+    const tools = new OpenAITestTools();
+
+    await adapter.onMessage(
+      makeMessage("hello"),
+      tools,
+      history,
+      null,
+      null,
+      {
+        isSessionBootstrap: true,
+        roomId: "room-1",
+      },
+    );
+
+    expect(tools.executed).toEqual([]);
+    expect(tools.messages).toEqual(["Handled malformed args"]);
+    expect(requests).toHaveLength(2);
+
+    const secondMessages = requests[1]?.messages as Array<Record<string, unknown>>;
+    const toolMessage = secondMessages.find(
+      (entry) => entry.role === "tool" && entry.tool_call_id === "call_bad",
+    );
+    expect(typeof toolMessage?.content).toBe("string");
+    expect(toolMessage?.content).toContain("ToolCallArgumentsParseError");
+  });
 });

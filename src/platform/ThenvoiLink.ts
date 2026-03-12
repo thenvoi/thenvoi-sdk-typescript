@@ -45,6 +45,10 @@ interface PendingWaiter {
   cleanup: () => void;
 }
 
+export interface MessageMarkOptions {
+  bestEffort?: boolean;
+}
+
 function toPlatformMessage(roomId: string, message: PlatformChatMessage): PlatformMessage {
   return {
     id: message.id,
@@ -245,27 +249,78 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
     };
   }
 
-  public async markProcessing(roomId: string, messageId: string): Promise<void> {
-    try {
-      await this.rest.markMessageProcessing(roomId, messageId);
-    } catch (error: unknown) {
-      this.logger.warn("markProcessing failed (best-effort)", { roomId, messageId, error });
-    }
+  public async markProcessing(
+    roomId: string,
+    messageId: string,
+    options?: MessageMarkOptions,
+  ): Promise<void> {
+    await this.markMessageStatus(
+      "markProcessing",
+      {
+        roomId,
+        messageId,
+      },
+      () => this.rest.markMessageProcessing(roomId, messageId),
+      options,
+    );
   }
 
-  public async markProcessed(roomId: string, messageId: string): Promise<void> {
-    try {
-      await this.rest.markMessageProcessed(roomId, messageId);
-    } catch (error: unknown) {
-      this.logger.warn("markProcessed failed (best-effort)", { roomId, messageId, error });
-    }
+  public async markProcessed(
+    roomId: string,
+    messageId: string,
+    options?: MessageMarkOptions,
+  ): Promise<void> {
+    await this.markMessageStatus(
+      "markProcessed",
+      {
+        roomId,
+        messageId,
+      },
+      () => this.rest.markMessageProcessed(roomId, messageId),
+      options,
+    );
   }
 
-  public async markFailed(roomId: string, messageId: string, error: string): Promise<void> {
+  public async markFailed(
+    roomId: string,
+    messageId: string,
+    error: string,
+    options?: MessageMarkOptions,
+  ): Promise<void> {
+    const normalizedError = error.trim() || "Unknown error";
+    await this.markMessageStatus(
+      "markFailed",
+      {
+        roomId,
+        messageId,
+        error: normalizedError,
+      },
+      () => this.rest.markMessageFailed(roomId, messageId, normalizedError),
+      options,
+    );
+  }
+
+  private async markMessageStatus(
+    operation: "markProcessing" | "markProcessed" | "markFailed",
+    context: {
+      roomId: string;
+      messageId: string;
+      error?: string;
+    },
+    mark: () => Promise<unknown>,
+    options?: MessageMarkOptions,
+  ): Promise<void> {
     try {
-      await this.rest.markMessageFailed(roomId, messageId, error.trim() || "Unknown error");
-    } catch (err: unknown) {
-      this.logger.warn("markFailed failed (best-effort)", { roomId, messageId, error: err });
+      await mark();
+    } catch (error: unknown) {
+      if (!options?.bestEffort) {
+        throw error;
+      }
+
+      this.logger.warn(`${operation} failed (best-effort)`, {
+        ...context,
+        error,
+      });
     }
   }
 

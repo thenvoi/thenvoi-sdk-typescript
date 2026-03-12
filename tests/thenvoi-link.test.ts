@@ -88,4 +88,34 @@ describe("ThenvoiLink event waiting", () => {
     await expect(link.subscribeAgentContacts()).resolves.toBeUndefined();
     expect(transport.joinedTopics).toContain("agent_contacts:agent-1");
   });
+
+  it("propagates mark errors by default", async () => {
+    const link = new ThenvoiLink({
+      agentId: "agent-1",
+      apiKey: "key",
+      restApi: new FakeRestApi({
+        markMessageProcessed: async () => {
+          throw new Error("mark failed");
+        },
+      }),
+      transport: new FakeTransport(),
+    });
+
+    await expect(link.markProcessed("room-1", "message-1")).rejects.toThrow("mark failed");
+  });
+
+  it("supports explicit best-effort marking", async () => {
+    const link = new ThenvoiLink({
+      agentId: "agent-1",
+      apiKey: "key",
+      restApi: new FakeRestApi({
+        markMessageProcessed: async () => {
+          throw new Error("mark failed");
+        },
+      }),
+      transport: new FakeTransport(),
+    });
+
+    await expect(link.markProcessed("room-1", "message-1", { bestEffort: true })).resolves.toBeUndefined();
+  });
 });

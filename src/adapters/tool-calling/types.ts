@@ -4,6 +4,7 @@ export interface ToolCall {
   id: string;
   name: string;
   input: MetadataMap;
+  inputParseError?: string;
 }
 
 export interface ToolResult {

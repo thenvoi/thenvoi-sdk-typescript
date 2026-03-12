@@ -170,35 +170,42 @@ function parseToolCalls(raw: unknown): ToolCall[] {
       continue;
     }
 
+    const { input, parseError } = parseArguments(fnRecord.arguments);
     parsed.push({
       id,
       name,
-      input: parseArguments(fnRecord.arguments),
+      input,
+      ...(parseError ? { inputParseError: parseError } : {}),
     });
   }
 
   return parsed;
 }
 
-function parseArguments(value: unknown): Record<string, unknown> {
+function parseArguments(value: unknown): { input: Record<string, unknown>; parseError?: string } {
   if (value && typeof value === "object" && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
+    return { input: value as Record<string, unknown> };
   }
 
   if (typeof value !== "string" || value.trim() === "") {
-    return {};
+    return { input: {} };
   }
 
   try {
     const parsed = JSON.parse(value);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
+      return { input: parsed as Record<string, unknown> };
     }
+    return {
+      input: {},
+      parseError: "Tool-call arguments must parse to a JSON object.",
+    };
   } catch {
-    // Ignore malformed tool-call arguments and continue with empty input.
+    return {
+      input: {},
+      parseError: "Tool-call arguments are not valid JSON.",
+    };
   }
-
-  return {};
 }
 
 function parseText(content: unknown): string {

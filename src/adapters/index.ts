@@ -15,10 +15,8 @@ export {
 } from "./anthropic";
 export {
   GeminiAdapter,
-  type GeminiAdapterOptions,
-} from "./gemini";
-export {
   GeminiToolCallingModel,
+  type GeminiAdapterOptions,
   type GeminiToolCallingModelOptions,
   type GeminiClientFactory,
 } from "./gemini";
@@ -68,6 +66,8 @@ export {
   ClaudeSDKAdapter,
   type ClaudeSDKAdapterOptions,
   type ClaudePermissionMode,
+  type ClaudeSDKQuery,
+  type ClaudeSDKQueryParams,
   type ClaudeSdkQuery,
   type ClaudeSdkQueryParams,
 } from "./claude-sdk";

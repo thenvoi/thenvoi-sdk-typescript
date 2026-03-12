@@ -110,30 +110,40 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
           );
         }
 
-        const customTool = findCustomToolInIndex(this.customToolIndex, call.name);
         let output: unknown;
-        if (customTool) {
-          try {
-            output = await executeCustomTool(customTool, call.input);
-          } catch (error) {
-            if (error instanceof CustomToolValidationError || error instanceof CustomToolExecutionError) {
-              output = {
-                ok: false,
-                errorType: error.name,
-                message: error.message,
-                toolName: error.toolName,
-              };
-            } else {
-              output = {
-                ok: false,
-                errorType: "CustomToolUnknownError",
-                message: error instanceof Error ? error.message : String(error),
-                toolName: call.name,
-              };
-            }
-          }
+        if (call.inputParseError) {
+          output = {
+            ok: false,
+            errorType: "ToolCallArgumentsParseError",
+            message: call.inputParseError,
+            toolName: call.name,
+            toolCallId: call.id,
+          };
         } else {
-          output = await tools.executeToolCall(call.name, call.input);
+          const customTool = findCustomToolInIndex(this.customToolIndex, call.name);
+          if (customTool) {
+            try {
+              output = await executeCustomTool(customTool, call.input);
+            } catch (error) {
+              if (error instanceof CustomToolValidationError || error instanceof CustomToolExecutionError) {
+                output = {
+                  ok: false,
+                  errorType: error.name,
+                  message: error.message,
+                  toolName: error.toolName,
+                };
+              } else {
+                output = {
+                  ok: false,
+                  errorType: "CustomToolUnknownError",
+                  message: error instanceof Error ? error.message : String(error),
+                  toolName: call.name,
+                };
+              }
+            }
+          } else {
+            output = await tools.executeToolCall(call.name, call.input);
+          }
         }
         const isError = isToolOutputError(output);
         roundToolResults.push({
@@ -235,6 +245,6 @@ export function runSingleToolRound(
 ): Promise<ToolCallingResponse> {
   return model.complete(request).catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Tool round failed: ${message}`);
+    throw new Error(`Tool round failed: ${message}`, { cause: error });
   });
 }

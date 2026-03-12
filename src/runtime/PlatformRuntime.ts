@@ -218,20 +218,21 @@ export class PlatformRuntime {
 
     const messageId = String(input.message.id ?? "");
     const roomId = input.roomId;
+    const messageMarkOptions = { bestEffort: true } as const;
 
     if (messageId) {
-      await this.link.markProcessing(roomId, messageId);
+      await this.link.markProcessing(roomId, messageId, messageMarkOptions);
     }
 
     try {
       await adapter.onEvent(input);
       if (messageId) {
-        await this.link.markProcessed(roomId, messageId);
+        await this.link.markProcessed(roomId, messageId, messageMarkOptions);
       }
     } catch (error) {
       const label = error instanceof Error ? error.message : String(error);
       if (messageId) {
-        await this.link.markFailed(roomId, messageId, label);
+        await this.link.markFailed(roomId, messageId, label, messageMarkOptions);
       }
       throw error;
     }
