@@ -237,46 +237,25 @@ export class A2AAdapter extends SimpleAdapter<A2ASessionState, MessagingTools> {
   ): Promise<void> {
     const state = normalizeState(task.status.state);
     const key = roomTaskKey(roomId, task.id);
+    const sender = this.trackTask({
+      roomId,
+      key,
+      taskId: task.id,
+      contextId: task.contextId,
+      senderId,
+    });
 
-    this.taskSenders.set(key, { id: senderId });
-    this.tasks.set(roomId, task.id);
-    if (task.contextId) {
-      this.contexts.set(roomId, task.contextId);
-    }
-
-    if (state === "working") {
-      const text = extractMessageText(task.status.message);
-      if (text) {
-        await tools.sendEvent(text, "thought");
-      }
-      return;
-    }
-
-    if (state === "input-required") {
-      const text = extractMessageText(task.status.message) ?? "Please provide more information.";
-      await tools.sendMessage(text, [this.taskSenders.get(key) ?? { id: senderId }]);
-      await this.emitTaskEvent(tools, task.contextId, task.id, state);
-      return;
-    }
-
-    if (state === "completed") {
-      const response = extractTaskResponse(task);
-      if (response) {
-        await tools.sendMessage(response, [this.taskSenders.get(key) ?? { id: senderId }]);
-      }
-      await this.emitTaskEvent(tools, task.contextId, task.id, state);
-      this.taskSenders.delete(key);
-      this.tasks.delete(roomId);
-      return;
-    }
-
-    if (TERMINAL_STATES.has(state)) {
-      const errorText = extractMessageText(task.status.message) ?? `A2A task ${state}`;
-      await tools.sendEvent(errorText, "error", { a2a_state: state });
-      await this.emitTaskEvent(tools, task.contextId, task.id, state);
-      this.taskSenders.delete(key);
-      this.tasks.delete(roomId);
-    }
+    await this.handleStateTransition({
+      state,
+      statusMessage: task.status.message,
+      completedMessage: extractTaskResponse(task),
+      tools,
+      sender,
+      contextId: task.contextId,
+      taskId: task.id,
+      roomId,
+      key,
+    });
   }
 
   private async handleStatusUpdateEvent(
@@ -287,46 +266,89 @@ export class A2AAdapter extends SimpleAdapter<A2ASessionState, MessagingTools> {
   ): Promise<void> {
     const state = normalizeState(event.status.state);
     const key = roomTaskKey(roomId, event.taskId);
-    const sender = this.taskSenders.get(key) ?? { id: senderId };
+    const sender = this.trackTask({
+      roomId,
+      key,
+      taskId: event.taskId,
+      contextId: event.contextId,
+      senderId,
+    });
 
-    this.taskSenders.set(key, sender);
-    this.tasks.set(roomId, event.taskId);
-    if (event.contextId) {
-      this.contexts.set(roomId, event.contextId);
+    await this.handleStateTransition({
+      state,
+      statusMessage: event.status.message,
+      completedMessage: extractMessageText(event.status.message),
+      tools,
+      sender,
+      contextId: event.contextId,
+      taskId: event.taskId,
+      roomId,
+      key,
+    });
+  }
+
+  private trackTask(input: {
+    roomId: string;
+    key: string;
+    taskId: string;
+    contextId?: string;
+    senderId: string;
+  }): { id: string } {
+    const sender = this.taskSenders.get(input.key) ?? { id: input.senderId };
+    this.taskSenders.set(input.key, sender);
+    this.tasks.set(input.roomId, input.taskId);
+    if (input.contextId) {
+      this.contexts.set(input.roomId, input.contextId);
     }
 
-    if (state === "working") {
-      const thought = extractMessageText(event.status.message);
+    return sender;
+  }
+
+  private clearTaskTracking(key: string, roomId: string): void {
+    this.taskSenders.delete(key);
+    this.tasks.delete(roomId);
+  }
+
+  private async handleStateTransition(input: {
+    state: A2ATaskState;
+    statusMessage?: A2AMessageLike;
+    completedMessage: string | null;
+    tools: MessagingTools;
+    sender: { id: string };
+    contextId?: string;
+    taskId: string;
+    roomId: string;
+    key: string;
+  }): Promise<void> {
+    if (input.state === "working") {
+      const thought = extractMessageText(input.statusMessage);
       if (thought) {
-        await tools.sendEvent(thought, "thought");
+        await input.tools.sendEvent(thought, "thought");
       }
       return;
     }
 
-    if (state === "input-required") {
-      const text = extractMessageText(event.status.message) ?? "Please provide more information.";
-      await tools.sendMessage(text, [sender]);
-      await this.emitTaskEvent(tools, event.contextId, event.taskId, state);
+    if (input.state === "input-required") {
+      const text = extractMessageText(input.statusMessage) ?? "Please provide more information.";
+      await input.tools.sendMessage(text, [input.sender]);
+      await this.emitTaskEvent(input.tools, input.contextId, input.taskId, input.state);
       return;
     }
 
-    if (state === "completed") {
-      const text = extractMessageText(event.status.message);
-      if (text) {
-        await tools.sendMessage(text, [sender]);
+    if (input.state === "completed") {
+      if (input.completedMessage) {
+        await input.tools.sendMessage(input.completedMessage, [input.sender]);
       }
-      await this.emitTaskEvent(tools, event.contextId, event.taskId, state);
-      this.taskSenders.delete(key);
-      this.tasks.delete(roomId);
+      await this.emitTaskEvent(input.tools, input.contextId, input.taskId, input.state);
+      this.clearTaskTracking(input.key, input.roomId);
       return;
     }
 
-    if (TERMINAL_STATES.has(state)) {
-      const text = extractMessageText(event.status.message) ?? `A2A task ${state}`;
-      await tools.sendEvent(text, "error", { a2a_state: state });
-      await this.emitTaskEvent(tools, event.contextId, event.taskId, state);
-      this.taskSenders.delete(key);
-      this.tasks.delete(roomId);
+    if (TERMINAL_STATES.has(input.state)) {
+      const text = extractMessageText(input.statusMessage) ?? `A2A task ${input.state}`;
+      await input.tools.sendEvent(text, "error", { a2a_state: input.state });
+      await this.emitTaskEvent(input.tools, input.contextId, input.taskId, input.state);
+      this.clearTaskTracking(input.key, input.roomId);
     }
   }
 
