@@ -190,4 +190,28 @@ describe("Agent.run signal handling", () => {
     );
     expect(signalCalls).toHaveLength(0);
   });
+
+  it("preserves null shutdown timeout in signal mode", async () => {
+    const mockRuntime = {
+      start: vi.fn(async () => {}),
+      stop: vi.fn(async () => true),
+      runForever: vi.fn(async () => {}),
+      name: "test",
+      description: "test",
+      contactConfiguration: undefined,
+      isContactsSubscribed: false,
+    };
+    const mockAdapter = {
+      onEvent: vi.fn(),
+      onStarted: vi.fn(),
+      onCleanup: vi.fn(),
+    };
+    const agent = new Agent(mockRuntime as never, mockAdapter as never);
+
+    await agent.run({ shutdownTimeoutMs: null });
+
+    expect(mockRuntime.stop).toHaveBeenCalledTimes(1);
+    expect(mockRuntime.stop).toHaveBeenCalledWith(undefined);
+    expect(mockRuntime.stop).not.toHaveBeenCalledWith(30_000);
+  });
 });

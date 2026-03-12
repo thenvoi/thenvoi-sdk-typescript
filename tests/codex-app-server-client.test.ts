@@ -10,6 +10,7 @@ interface ClientInternals {
   handleLine(line: string): Promise<void>;
   events: CodexRpcEvent[];
   pending: Map<number | string, { resolve(value: unknown): void; reject(error: Error): void }>;
+  waiters: Array<{ resolve(event: CodexRpcEvent): void; reject(error: Error): void; timer: NodeJS.Timeout | null }>;
 }
 
 function getInternals(client: CodexAppServerStdioClient): ClientInternals {
@@ -80,5 +81,22 @@ describe("CodexAppServerStdioClient", () => {
     expect(error).toBeInstanceOf(CodexJsonRpcError);
     expect((error as CodexJsonRpcError).code).toBe(-32002);
     expect((error as CodexJsonRpcError).data).toEqual({ threadId: "thread-1" });
+  });
+
+  it("rejects pending request/event waiters during explicit close", async () => {
+    const client = new CodexAppServerStdioClient();
+    const internals = getInternals(client);
+    const requestReject = vi.fn();
+    internals.pending.set("pending-1", { resolve: vi.fn(), reject: requestReject });
+
+    const pendingEvent = client.recvEvent();
+    expect(internals.waiters).toHaveLength(1);
+
+    await client.close();
+
+    await expect(pendingEvent).rejects.toThrow("Codex app-server closed by client.");
+    expect(requestReject).toHaveBeenCalledTimes(1);
+    expect(internals.pending.size).toBe(0);
+    expect(internals.waiters).toHaveLength(0);
   });
 });

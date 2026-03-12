@@ -56,7 +56,7 @@ export class Agent {
         : {}),
     });
     const agent = new Agent(runtime, adapter);
-    agent.shutdownTimeoutMs = shutdownTimeoutMs ?? 30_000;
+    agent.shutdownTimeoutMs = shutdownTimeoutMs === undefined ? 30_000 : shutdownTimeoutMs;
     return agent;
   }
 
@@ -122,7 +122,7 @@ export class Agent {
 
     if (useSignals) {
       await runWithGracefulShutdown(this, {
-        timeoutMs: this.shutdownTimeoutMs ?? undefined,
+        timeoutMs: this.shutdownTimeoutMs,
       });
     } else {
       await this.start();

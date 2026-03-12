@@ -6,20 +6,22 @@ interface StoppableAgent {
 }
 
 interface GracefulShutdownOptions {
-  timeoutMs?: number;
+  timeoutMs?: number | null;
   onSignal?: (signal: NodeJS.Signals) => void;
 }
 
 export class GracefulShutdown {
   private readonly agent: StoppableAgent;
-  private readonly timeoutMs: number;
+  private readonly timeoutMs: number | null;
   private readonly onSignal?: (signal: NodeJS.Signals) => void;
   private readonly handlers = new Map<NodeJS.Signals, () => void>();
   private shuttingDown = false;
 
   public constructor(agent: StoppableAgent, options?: GracefulShutdownOptions) {
     this.agent = agent;
-    this.timeoutMs = options?.timeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
+    this.timeoutMs = options?.timeoutMs === undefined
+      ? DEFAULT_SHUTDOWN_TIMEOUT_MS
+      : options.timeoutMs;
     this.onSignal = options?.onSignal;
   }
 
@@ -74,7 +76,7 @@ export async function runWithGracefulShutdown(
   const shutdown = new GracefulShutdown(agent, options);
   await shutdown.withSignals(async () => {
     await agent.run({
-      shutdownTimeoutMs: options?.timeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
+      shutdownTimeoutMs: options?.timeoutMs === undefined ? DEFAULT_SHUTDOWN_TIMEOUT_MS : options.timeoutMs,
       signals: false,
     });
   });

@@ -176,6 +176,36 @@ const fakeMessage: PlatformMessage = {
 };
 
 describe("ToolCallingAdapter", () => {
+  it("does not duplicate the current message when history already includes it", async () => {
+    class SingleTurnModel implements ToolCallingModel {
+      public seenMessages: Array<Record<string, unknown>> = [];
+
+      public async complete(
+        request: { messages?: Array<Record<string, unknown>> },
+      ): Promise<{ text?: string; toolCalls?: Array<{ id: string; name: string; input: Record<string, unknown> }> }> {
+        this.seenMessages = request.messages ?? [];
+        return { text: "ok" };
+      }
+    }
+
+    const model = new SingleTurnModel();
+    const adapter = new OpenAIAdapter({ model });
+    const tools = new FakeTools();
+    const historyWithCurrentMessage = {
+      raw: [fakeMessage],
+      convert: () => [],
+      length: 1,
+    } as unknown as HistoryProvider;
+
+    await adapter.onMessage(fakeMessage, tools, historyWithCurrentMessage, null, null, {
+      isSessionBootstrap: false,
+      roomId: "r1",
+    });
+
+    const helloCount = model.seenMessages.filter((entry) => entry.content === "hello").length;
+    expect(helloCount).toBe(1);
+  });
+
   it("runs tool rounds then sends final text", async () => {
     const model = new FakeModel();
     const adapter = new OpenAIAdapter({

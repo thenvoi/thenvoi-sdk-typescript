@@ -197,14 +197,17 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
     contactsMessage: string | null,
   ): ToolModelMessage[] {
     const base = formatHistoryForLlm(history.raw);
-    base.push({
-      role: message.senderType === "Agent" ? "assistant" : "user",
-      content: message.content,
-      sender_name: message.senderName,
-      sender_type: message.senderType,
-      message_type: message.messageType,
-      metadata: message.metadata,
-    });
+    const historyAlreadyContainsMessage = history.raw.some((entry) => entry.id === message.id);
+    if (!historyAlreadyContainsMessage) {
+      base.push({
+        role: message.senderType === "Agent" ? "assistant" : "user",
+        content: message.content,
+        sender_name: message.senderName,
+        sender_type: message.senderType,
+        message_type: message.messageType,
+        metadata: message.metadata,
+      });
+    }
 
     if (participantsMessage) {
       base.push({ role: "system", content: participantsMessage });

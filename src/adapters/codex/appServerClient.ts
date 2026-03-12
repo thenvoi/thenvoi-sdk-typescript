@@ -209,12 +209,10 @@ export class CodexAppServerStdioClient implements CodexClientLike {
       return;
     }
 
-    this.closed = true;
     const proc = this.process;
-    this.process = null;
-
     this.stdoutLines?.close();
     this.stdoutLines = null;
+    this.failAll("Codex app-server closed by client.");
 
     if (!proc) {
       return;
