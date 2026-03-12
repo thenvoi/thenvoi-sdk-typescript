@@ -49,14 +49,30 @@ export interface GatewayA2AStatusUpdateEvent {
 }
 
 export interface GatewayRequest {
+  /**
+   * Canonical Thenvoi peer id.
+   * Legacy clients may still send a slug in this field; adapter-side normalization handles that alias.
+   */
   peerId: string;
+  /**
+   * Optional gateway route slug for compatibility/diagnostics.
+   */
+  peerSlug?: string;
   taskId: string;
   contextId: string;
   message: GatewayA2AMessage;
 }
 
 export interface GatewayCancelRequest {
+  /**
+   * Canonical Thenvoi peer id.
+   * Legacy clients may still send a slug in this field; adapter-side normalization handles that alias.
+   */
   peerId: string;
+  /**
+   * Optional gateway route slug for compatibility/diagnostics.
+   */
+  peerSlug?: string;
   taskId: string;
 }
 
@@ -77,6 +93,7 @@ export interface PendingA2ATask {
   taskId: string;
   contextId: string;
   peerId: string;
+  peerSlug?: string;
   roomId: string;
   enqueue(event: GatewayA2AStatusUpdateEvent): void;
 }

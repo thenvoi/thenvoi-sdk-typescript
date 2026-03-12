@@ -329,8 +329,12 @@ export async function completeLinearSession(input: {
     },
   });
 
-  const existing = await input.store?.getBySessionId(input.agentSessionId);
-  if (!existing || !input.store) {
+  if (!input.store) {
+    return;
+  }
+
+  const existing = await input.store.getBySessionId(input.agentSessionId);
+  if (!existing) {
     return;
   }
 
@@ -462,7 +466,7 @@ async function handleCanceledAction(input: {
     updatedAt: new Date().toISOString(),
   });
 
-  if (existing && !input.skipRoomWrite) {
+  if (!input.skipRoomWrite) {
     await input.deps.thenvoiRest.createChatEvent(existing.thenvoiRoomId, {
       content: "[Linear]: Agent session canceled. Stop in-room execution and await new instructions.",
       messageType: "task",

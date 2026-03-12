@@ -625,4 +625,150 @@ describe("CodexAdapter", () => {
       }),
     );
   });
+
+  it("rejects malformed item/tool/call payloads", async () => {
+    const tools = new ToolSchemaFakeTools();
+    const fakeClient = new FakeCodexClient({
+      events: [
+        {
+          kind: "request",
+          id: 1,
+          method: "item/tool/call",
+          params: {
+            tool: "thenvoi_send_message",
+            arguments: {
+              content: "hello",
+            },
+          },
+        },
+        {
+          kind: "notification",
+          method: "turn/completed",
+          params: {
+            turn: {
+              id: "turn-1",
+              status: "completed",
+              error: null,
+            },
+          },
+        },
+      ],
+    });
+
+    const adapter = new CodexAdapter({
+      factory: async () => fakeClient,
+    });
+
+    await adapter.onMessage(
+      makeMessage("hello"),
+      tools,
+      new HistoryProvider([]),
+      null,
+      null,
+      { isSessionBootstrap: true, roomId: "room-invalid-tool-call" },
+    );
+
+    expect(tools.toolCalls).toEqual([]);
+    expect(fakeClient.responses).toContainEqual({
+      id: 1,
+      error: {
+        code: -32602,
+        message: "Invalid params for item/tool/call",
+      },
+    });
+  });
+
+  it("reports custom tool failures with structured output while returning compatible text to Codex", async () => {
+    const tools = new ToolSchemaFakeTools();
+    const fakeClient = new FakeCodexClient({
+      events: [
+        {
+          kind: "request",
+          id: 1,
+          method: "item/tool/call",
+          params: {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            callId: "call-custom-fail",
+            tool: "post_action",
+            arguments: {
+              text: "boom",
+            },
+          },
+        },
+        {
+          kind: "notification",
+          method: "turn/completed",
+          params: {
+            turn: {
+              id: "turn-1",
+              status: "completed",
+              error: null,
+            },
+          },
+        },
+      ],
+    });
+
+    const adapter = new CodexAdapter({
+      config: {
+        enableExecutionReporting: true,
+      },
+      customTools: [
+        {
+          name: "post_action",
+          description: "Post an action.",
+          schema: z.object({
+            text: z.string(),
+          }),
+          handler: async () => {
+            throw new Error("custom boom");
+          },
+        },
+      ],
+      factory: async () => fakeClient,
+    });
+
+    await adapter.onMessage(
+      makeMessage("run custom"),
+      tools,
+      new HistoryProvider([]),
+      null,
+      null,
+      { isSessionBootstrap: true, roomId: "room-custom-failure" },
+    );
+
+    expect(fakeClient.responses).toContainEqual({
+      id: 1,
+      result: {
+        contentItems: [{ type: "inputText", text: "Error: Custom tool post_action failed: custom boom" }],
+        success: false,
+      },
+    });
+
+    const toolResultEvent = tools.events.find((event) => event.messageType === "tool_result");
+    expect(toolResultEvent).toBeDefined();
+    if (!toolResultEvent) {
+      throw new Error("Expected a tool_result event");
+    }
+
+    const payload = JSON.parse(toolResultEvent.content) as {
+      name: string;
+      output: {
+        ok: false;
+        errorType: string;
+        toolName: string;
+        message: string;
+      };
+      tool_call_id: string;
+    };
+    expect(payload.name).toBe("post_action");
+    expect(payload.tool_call_id).toBe("call-custom-fail");
+    expect(payload.output).toMatchObject({
+      ok: false,
+      toolName: "post_action",
+      message: "Custom tool post_action failed: custom boom",
+    });
+    expect(["CustomToolExecutionError", "CustomToolUnknownError"]).toContain(payload.output.errorType);
+  });
 });

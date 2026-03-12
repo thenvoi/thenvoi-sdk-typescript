@@ -291,4 +291,87 @@ describe("FernRestAdapter contact and memory parity", () => {
       status: "archived",
     });
   });
+
+  it("normalizes next-message payload shape and rejects invalid entries", async () => {
+    const rest = new RestFacade({
+      api: new FernRestAdapter({
+        agentApiMessages: {
+          getAgentNextMessage: async (_chatId: string) => ({
+            data: {
+              id: "message-camel",
+              content: "Next",
+              senderId: "user-2",
+              senderType: "User",
+              messageType: "text",
+              insertedAt: "2026-03-09T00:00:00.000Z",
+              senderName: "Jane",
+              updatedAt: "2026-03-09T00:01:00.000Z",
+              metadata: { source: "fallback" },
+            },
+          }),
+        },
+      }),
+    });
+
+    await expect(rest.getNextMessage({ chatId: "room-1" })).resolves.toEqual({
+      id: "message-camel",
+      content: "Next",
+      sender_id: "user-2",
+      sender_type: "User",
+      sender_name: "Jane",
+      message_type: "text",
+      metadata: { source: "fallback" },
+      inserted_at: "2026-03-09T00:00:00.000Z",
+      updated_at: "2026-03-09T00:01:00.000Z",
+    });
+
+    const invalidRest = new RestFacade({
+      api: new FernRestAdapter({
+        agentApiMessages: {
+          getAgentNextMessage: async (_chatId: string) => ({
+            data: {
+              id: "message-invalid",
+              content: "Next",
+            },
+          }),
+        },
+      }),
+    });
+
+    await expect(invalidRest.getNextMessage({ chatId: "room-1" })).resolves.toBeNull();
+  });
+
+  it("supports both participant listing endpoint variants", async () => {
+    const primaryRest = new RestFacade({
+      api: new FernRestAdapter({
+        chatParticipants: {
+          listChatParticipants: async () => ({
+            data: [{ id: "user-1", name: "Jane", type: "User", handle: "@jane" }],
+          }),
+          addChatParticipant: async () => ({ data: {} }),
+          removeChatParticipant: async () => ({ data: {} }),
+        },
+      }),
+    });
+
+    await expect(primaryRest.listChatParticipants("room-1")).resolves.toEqual([
+      { id: "user-1", name: "Jane", type: "User", handle: "@jane" },
+    ]);
+
+    const fallbackRest = new RestFacade({
+      api: new FernRestAdapter({
+        agentApiParticipants: {
+          listAgentChatParticipants: async () => ({
+            data: [{ id: "agent-1", name: "Weather", type: "Agent", handle: "@sam/weather" }],
+          }),
+          addAgentChatParticipant: async () => ({ data: {} }),
+          removeAgentChatParticipant: async () => ({ data: {} }),
+        },
+      }),
+    });
+
+    await expect(fallbackRest.listChatParticipants("room-2")).resolves.toEqual([
+      { id: "agent-1", name: "Weather", type: "Agent", handle: "@sam/weather" },
+    ]);
+  });
 });

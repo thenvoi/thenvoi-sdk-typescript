@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  createInProcessLinearBridgeDispatcher,
   createLinearWebhookHandler,
   type LinearBridgeDispatcher,
   type LinearThenvoiBridgeConfig,
@@ -230,5 +231,68 @@ describe("createLinearWebhookHandler", () => {
     expect(second.status).toBe(200);
     expect(dispatcher.dispatch).toHaveBeenCalledOnce();
     expect(linearClient.createAgentActivity).toHaveBeenCalledOnce();
+  });
+
+  it("signals terminal async dispatch failures and surfaces them via waitForIdle", async () => {
+    const store = new MemorySessionRoomStore();
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const linearClient = {
+      createAgentActivity: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("initial error reporting failed"))
+        .mockResolvedValueOnce({ ok: true }),
+    };
+    const thenvoiRest = {
+      getAgentMe: vi.fn(async () => ({ id: "agent-1", handle: "linear-host" })),
+      createChat: vi.fn(async () => {
+        throw new Error("createChat failed");
+      }),
+    };
+    const dispatcher = createInProcessLinearBridgeDispatcher({ logger });
+
+    dispatcher.dispatch({
+      eventKey: "session-1:created:terminal-failure",
+      input: {
+        payload: makePayload() as never,
+        config,
+        deps: {
+          thenvoiRest: thenvoiRest as never,
+          linearClient: linearClient as never,
+          store,
+          logger,
+        },
+      },
+    });
+
+    if (!dispatcher.waitForIdle) {
+      throw new Error("Expected in-process dispatcher to expose waitForIdle()");
+    }
+
+    await expect(dispatcher.waitForIdle()).rejects.toThrow(
+      "Linear bridge async dispatch failed for 1 event(s)",
+    );
+
+    expect(linearClient.createAgentActivity).toHaveBeenCalledTimes(2);
+    expect(linearClient.createAgentActivity).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        agentSessionId: "session-1",
+        content: expect.objectContaining({
+          type: "error",
+          body: expect.stringContaining("could not recover automatically"),
+        }),
+      }),
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      "linear_thenvoi_bridge.async_dispatch_terminal_failure_signaled",
+      expect.objectContaining({
+        eventKey: "session-1:created:terminal-failure",
+        signal: "linear_activity_error",
+      }),
+    );
   });
 });

@@ -14,7 +14,9 @@ import type {
   A2AGatewayAdapterOptions,
   GatewayA2AMessage,
   GatewayA2AStatusUpdateEvent,
+  GatewayCancelRequest,
   GatewayPeer,
+  GatewayRequest,
   GatewayServerFactory,
   GatewaySessionState,
   GatewayTaskState,
@@ -90,7 +92,8 @@ export class A2AGatewayAdapter
       allowUnauthenticatedLoopback: this.allowUnauthenticatedLoopback,
       onRequest: (request) => this.handleGatewayRequest(request),
       onCancel: async (request) => {
-        this.cancelPendingTask(request.taskId, request.peerId);
+        const canonicalPeerId = this.resolveCanonicalPeerId(request);
+        this.cancelPendingTask(request.taskId, canonicalPeerId ?? request.peerId);
       },
     });
 
@@ -196,13 +199,10 @@ export class A2AGatewayAdapter
     }
   }
 
-  private async *handleGatewayRequest(request: {
-    peerId: string;
-    taskId: string;
-    contextId: string;
-    message: GatewayA2AMessage;
-  }): AsyncGenerator<GatewayA2AStatusUpdateEvent, void, undefined> {
-    const peer = this.resolvePeer(request.peerId);
+  private async *handleGatewayRequest(
+    request: GatewayRequest,
+  ): AsyncGenerator<GatewayA2AStatusUpdateEvent, void, undefined> {
+    const peer = this.resolveGatewayPeer(request);
     if (!peer) {
       yield buildStatusEvent({
         taskId: request.taskId,
@@ -226,6 +226,7 @@ export class A2AGatewayAdapter
       taskId: request.taskId,
       contextId,
       peerId: peer.id,
+      peerSlug: peer.slug,
       roomId,
       requireTaskMetadata: Boolean(existing) || hadContext,
       queue,
@@ -270,6 +271,8 @@ export class A2AGatewayAdapter
           gateway_context_id: contextId,
           gateway_room_id: roomId,
           gateway_task_id: request.taskId,
+          gateway_peer_id: peer.id,
+          gateway_peer_slug: peer.slug,
         },
       });
     } catch (error) {
@@ -326,8 +329,34 @@ export class A2AGatewayAdapter
     );
   }
 
-  private resolvePeer(peerId: string): GatewayPeer | null {
-    return this.peersBySlug.get(peerId) ?? this.peersById.get(peerId) ?? null;
+  private resolveGatewayPeer(
+    request: Pick<GatewayRequest, "peerId" | "peerSlug">,
+  ): GatewayPeer | null {
+    const canonicalPeerId = this.resolveCanonicalPeerId(request);
+    if (!canonicalPeerId) {
+      return null;
+    }
+
+    return this.peersById.get(canonicalPeerId) ?? null;
+  }
+
+  private resolveCanonicalPeerId(
+    request: Pick<GatewayRequest, "peerId" | "peerSlug">
+      | Pick<GatewayCancelRequest, "peerId" | "peerSlug">,
+  ): string | null {
+    // Canonical contract is peerId=Thenvoi peer id; keep legacy slug aliasing at this edge.
+    const byId = this.peersById.get(request.peerId);
+    if (byId) {
+      return byId.id;
+    }
+
+    const legacySlug = request.peerSlug ?? request.peerId;
+    const bySlug = this.peersBySlug.get(legacySlug);
+    if (bySlug) {
+      return bySlug.id;
+    }
+
+    return null;
   }
 
   private async getOrCreateRoom(
@@ -586,10 +615,22 @@ function shouldRouteToPendingTask(
 
   const gatewayPeerId = asNonEmptyString(metadata.gateway_peer_id);
   if (gatewayPeerId) {
-    return gatewayPeerId === pending.peerId;
+    return peerMatchesPendingIdentifier(gatewayPeerId, pending);
   }
 
-  return message.senderId === pending.peerId;
+  const gatewayPeerSlug = asNonEmptyString(metadata.gateway_peer_slug);
+  if (gatewayPeerSlug) {
+    return gatewayPeerSlug === pending.peerSlug;
+  }
+
+  return peerMatchesPendingIdentifier(message.senderId, pending);
+}
+
+function peerMatchesPendingIdentifier(
+  identifier: string,
+  pending: PendingTaskRecord,
+): boolean {
+  return identifier === pending.peerId || identifier === pending.peerSlug;
 }
 
 function extractMessageText(message: GatewayA2AMessage): string | null {

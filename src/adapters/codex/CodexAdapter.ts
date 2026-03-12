@@ -1,13 +1,19 @@
 import type { ModelReasoningEffort, WebSearchMode } from "@openai/codex-sdk";
 
 import { SimpleAdapter } from "../../core/simpleAdapter";
-import type { AgentToolsProtocol } from "../../contracts/protocols";
+import {
+  type AgentToolsProtocol,
+  isToolExecutorError,
+  toLegacyToolExecutorErrorMessage,
+} from "../../contracts/protocols";
 import type { MentionInput } from "../../contracts/dtos";
 import type { Logger } from "../../core/logger";
 import { NoopLogger } from "../../core/logger";
 import type { HistoryProvider, PlatformMessage } from "../../runtime/types";
 import { renderSystemPrompt } from "../../runtime/prompts";
 import {
+  CustomToolExecutionError,
+  CustomToolValidationError,
   type CustomToolDef,
   buildCustomToolIndex,
   customToolToOpenAISchema,
@@ -27,7 +33,6 @@ import type {
   CodexSandboxMode,
   CommandExecutionItem,
   ContextCompactionItem,
-  DynamicToolCallParams,
   FileChangeItem,
   ImageViewItem,
   McpToolCallItem,
@@ -242,10 +247,13 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
       roomId: context.roomId,
       threadId,
     });
-    const turnStarted = await client.request<TurnStartResponse>(
+    const turnStarted = parseTurnStartResponse(await client.request<unknown>(
       "turn/start",
-      turnParams as unknown as Record<string, unknown>,
-    );
+      toRpcParams(turnParams),
+    ));
+    if (!turnStarted) {
+      throw new Error("Codex returned an invalid turn/start payload");
+    }
     this.debug("codex_adapter.turn.started", {
       roomId: context.roomId,
       threadId,
@@ -266,7 +274,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
         if (turnId) {
           try {
             const interrupt: TurnInterruptParams = { threadId, turnId };
-            await client.request("turn/interrupt", interrupt as unknown as Record<string, unknown>);
+            await client.request("turn/interrupt", toRpcParams(interrupt));
           } catch (interruptError) {
             this.logger.warn("codex_adapter.turn_interrupt_failed", {
               threadId,
@@ -325,8 +333,8 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
       }
 
       if (event.method === "item/completed") {
-        const item = params.item as ThreadItem | undefined;
-        if (!item || typeof item !== "object") {
+        const item = parseThreadItem(params.item);
+        if (!item) {
           continue;
         }
 
@@ -346,14 +354,22 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
       }
 
       if (event.method === "turn/completed") {
-        const turn = asRecord(params.turn);
+        const turn = parseTurnRef(params.turn);
+        if (!turn) {
+          this.logger.warn("codex_adapter.invalid_turn_completed_payload", {
+            roomId: context.roomId,
+            threadId,
+            turnId,
+          });
+          continue;
+        }
         const eventTurnId = asNonEmptyString(turn.id);
         if (eventTurnId && eventTurnId !== turnId) {
           continue;
         }
 
-        turnStatus = (asNonEmptyString(turn.status) as TurnStatus | null) ?? "failed";
-        turnError = this.extractTurnError(turn.error as TurnErrorInfo | null | undefined);
+        turnStatus = turn.status;
+        turnError = this.extractTurnError(turn.error);
         break;
       }
     }
@@ -514,10 +530,13 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
 
       if (resumeThreadId) {
         try {
-          const resumed = await client.request<ThreadResumeResponse>(
+          const resumed = parseThreadResponse(await client.request<unknown>(
             "thread/resume",
-            this.buildThreadResumeParams(resumeThreadId, config) as unknown as Record<string, unknown>,
-          );
+            toRpcParams(this.buildThreadResumeParams(resumeThreadId, config)),
+          ));
+          if (!resumed) {
+            throw new Error("Codex returned an invalid thread/resume payload");
+          }
           const threadId = resumed.thread.id;
           this.roomThreadIds.set(roomId, threadId);
           await this.sendThreadMappingEvent(tools, roomId, threadId, "resumed");
@@ -532,10 +551,13 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
         }
       }
 
-      const started = await client.request<ThreadStartResponse>(
+      const started = parseThreadResponse(await client.request<unknown>(
         "thread/start",
-        this.buildThreadStartParams(tools, config) as unknown as Record<string, unknown>,
-      );
+        toRpcParams(this.buildThreadStartParams(tools, config)),
+      ));
+      if (!started) {
+        throw new Error("Codex returned an invalid thread/start payload");
+      }
       const threadId = started.thread.id;
       this.roomThreadIds.set(roomId, threadId);
       await this.sendThreadMappingEvent(tools, roomId, threadId, "mapped");
@@ -732,10 +754,14 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
     const { client, tools, event } = input;
 
     if (event.method === "item/tool/call") {
-      const params = asRecord(event.params) as unknown as DynamicToolCallParams;
-      const toolName = asNonEmptyString(params.tool) ?? "";
-      const callId = asNonEmptyString(params.callId) ?? "";
-      const arguments_ = asRecord(params.arguments);
+      const params = parseDynamicToolCallParams(event.params);
+      if (!params) {
+        await client.respondError(event.id, -32602, "Invalid params for item/tool/call");
+        return false;
+      }
+      const toolName = params.tool;
+      const callId = params.callId;
+      const arguments_ = params.arguments;
       const shouldReport = input.enableExecutionReporting && !SILENT_REPORTING_TOOLS.has(toolName);
 
       if (shouldReport) {
@@ -748,32 +774,47 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
 
       try {
         const customTool = findCustomToolInIndex(this.customToolIndex, toolName);
-        const result = customTool
-          ? await executeCustomTool(customTool, arguments_)
-          : await tools.executeToolCall(toolName, arguments_);
-        const textResult = toWireString(result);
+        let output: unknown;
+        if (customTool) {
+          try {
+            output = await executeCustomTool(customTool, arguments_);
+          } catch (error) {
+            output = normalizeCustomToolError(toolName, error);
+          }
+        } else {
+          output = await tools.executeToolCall(toolName, arguments_);
+        }
+
+        const isError = isCodexToolOutputError(output);
+        const responseText = renderCodexToolOutput(output);
 
         await client.respond(event.id, {
           contentItems: [
             {
               type: "inputText",
-              text: textResult,
+              text: responseText,
             },
           ],
-          success: true,
+          success: !isError,
         });
 
         if (shouldReport) {
           await this.safeSendEvent(tools, JSON.stringify({
             name: toolName,
-            output: textResult,
+            output,
             tool_call_id: callId,
           }), "tool_result");
         }
 
-        return toolName === "thenvoi_send_message";
+        return !isError && toolName === "thenvoi_send_message";
       } catch (error) {
-        const errorText = `Error: ${asErrorMessage(error)}`;
+        const output = {
+          ok: false,
+          errorType: "ToolExecutionUnhandledError",
+          message: asErrorMessage(error),
+          toolName,
+        };
+        const errorText = renderCodexToolOutput(output);
         await client.respond(event.id, {
           contentItems: [
             {
@@ -787,7 +828,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
         if (shouldReport) {
           await this.safeSendEvent(tools, JSON.stringify({
             name: toolName,
-            output: errorText,
+            output,
             tool_call_id: callId,
           }), "tool_result");
         }
@@ -1023,7 +1064,11 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
 
       if (arg === "list" || arg === "ls") {
         const client = await this.ensureClient();
-        const result = await client.request<ModelListResponse>("model/list", {});
+        const result = parseModelListResponse(await client.request<unknown>("model/list", {}));
+        if (!result) {
+          await input.tools.sendMessage("Received an invalid model list from Codex.", mention);
+          return true;
+        }
         const visible = result.data.filter((entry) => !entry.hidden);
         if (visible.length === 0) {
           await input.tools.sendMessage("No visible models returned by Codex.", mention);
@@ -1186,4 +1231,213 @@ function loadCodexFactory(
       logger,
     });
   };
+}
+
+const TURN_STATUS_VALUES = new Set<TurnStatus>([
+  "completed",
+  "interrupted",
+  "failed",
+  "inProgress",
+]);
+
+function isStructuredToolFailure(value: unknown): value is { ok: false; message: string } {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const payload = value as Record<string, unknown>;
+  return payload.ok === false && typeof payload.message === "string";
+}
+
+function isCodexToolOutputError(value: unknown): boolean {
+  return isToolExecutorError(value) || isStructuredToolFailure(value);
+}
+
+function renderCodexToolOutput(value: unknown): string {
+  if (isToolExecutorError(value)) {
+    return toLegacyToolExecutorErrorMessage(value) ?? value.message;
+  }
+
+  if (isStructuredToolFailure(value)) {
+    return `Error: ${value.message}`;
+  }
+
+  return toWireString(value);
+}
+
+function normalizeCustomToolError(
+  toolName: string,
+  error: unknown,
+): {
+  ok: false;
+  errorType: string;
+  message: string;
+  toolName: string;
+} {
+  if (error instanceof CustomToolValidationError || error instanceof CustomToolExecutionError) {
+    return {
+      ok: false,
+      errorType: error.name,
+      message: error.message,
+      toolName: error.toolName,
+    };
+  }
+
+  return {
+    ok: false,
+    errorType: "CustomToolUnknownError",
+    message: asErrorMessage(error),
+    toolName,
+  };
+}
+
+function toRpcParams(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Codex RPC params must be an object");
+  }
+  return value as Record<string, unknown>;
+}
+
+function parseDynamicToolCallParams(
+  value: unknown,
+): {
+  threadId: string;
+  turnId: string;
+  callId: string;
+  tool: string;
+  arguments: Record<string, unknown>;
+} | null {
+  const record = asRecord(value);
+  const threadId = asNonEmptyString(record.threadId);
+  const turnId = asNonEmptyString(record.turnId);
+  const callId = asNonEmptyString(record.callId);
+  const tool = asNonEmptyString(record.tool);
+  if (!threadId || !turnId || !callId || !tool) {
+    return null;
+  }
+
+  return {
+    threadId,
+    turnId,
+    callId,
+    tool,
+    arguments: asRecord(record.arguments),
+  };
+}
+
+function parseThreadItem(value: unknown): ThreadItem | null {
+  const record = asRecord(value);
+  const type = asNonEmptyString(record.type);
+  if (!type) {
+    return null;
+  }
+  const id = asNonEmptyString(record.id);
+  return {
+    ...record,
+    type,
+    ...(id ? { id } : {}),
+  };
+}
+
+function parseTurnErrorInfo(value: unknown): TurnErrorInfo | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    const message = value.trim();
+    if (!message) {
+      return null;
+    }
+    return { message, additionalDetails: null };
+  }
+
+  const record = asRecord(value);
+  const message = asNonEmptyString(record.message);
+  if (!message) {
+    return null;
+  }
+
+  return {
+    message,
+    additionalDetails: asNonEmptyString(record.additionalDetails) ?? null,
+  };
+}
+
+function parseTurnStatus(value: unknown): TurnStatus | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  return TURN_STATUS_VALUES.has(value as TurnStatus)
+    ? (value as TurnStatus)
+    : null;
+}
+
+function parseTurnRef(value: unknown): {
+  id: string;
+  status: TurnStatus;
+  error: TurnErrorInfo | null;
+} | null {
+  const record = asRecord(value);
+  const id = asNonEmptyString(record.id);
+  const status = parseTurnStatus(record.status);
+  if (!id || !status) {
+    return null;
+  }
+
+  return {
+    id,
+    status,
+    error: parseTurnErrorInfo(record.error),
+  };
+}
+
+function parseTurnStartResponse(value: unknown): TurnStartResponse | null {
+  const record = asRecord(value);
+  const turn = parseTurnRef(record.turn);
+  if (!turn) {
+    return null;
+  }
+  return { turn };
+}
+
+function parseThreadResponse(value: unknown): ThreadStartResponse | ThreadResumeResponse | null {
+  const record = asRecord(value);
+  const thread = asRecord(record.thread);
+  const threadId = asNonEmptyString(thread.id);
+  const model = asNonEmptyString(record.model);
+  if (!threadId || !model) {
+    return null;
+  }
+
+  return {
+    thread: { id: threadId },
+    model,
+  };
+}
+
+function parseModelListResponse(value: unknown): ModelListResponse | null {
+  const record = asRecord(value);
+  if (!Array.isArray(record.data)) {
+    return null;
+  }
+
+  const data = record.data
+    .map((entry) => {
+      const item = asRecord(entry);
+      const id = asNonEmptyString(item.id);
+      if (!id) {
+        return null;
+      }
+      return {
+        id,
+        displayName: asNonEmptyString(item.displayName) ?? id,
+        description: asNonEmptyString(item.description) ?? "",
+        hidden: item.hidden === true,
+        isDefault: item.isDefault === true,
+      };
+    })
+    .filter((entry): entry is ModelListResponse["data"][number] => entry !== null);
+
+  return { data };
 }

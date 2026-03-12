@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   ClaudeSDKAdapter,
-  type ClaudeSdkQuery,
+  type ClaudeSDKQuery,
 } from "../src/adapters/claude-sdk/ClaudeSDKAdapter";
 import { HistoryProvider } from "../src/runtime/types";
 import { FakeTools, makeMessage } from "./testUtils";
@@ -20,7 +20,7 @@ describe("ClaudeSDKAdapter", () => {
     const calls: Array<{ prompt: string; options?: Record<string, unknown> }> = [];
     let turn = 0;
 
-    const queryFn: ClaudeSdkQuery = ({ prompt, options }) => {
+    const queryFn: ClaudeSDKQuery = ({ prompt, options }) => {
       calls.push({ prompt, options: options as Record<string, unknown> });
       turn += 1;
 
@@ -107,7 +107,7 @@ describe("ClaudeSDKAdapter", () => {
   });
 
   it("reports tool summary events when execution reporting is enabled", async () => {
-    const queryFn: ClaudeSdkQuery = () =>
+    const queryFn: ClaudeSDKQuery = () =>
       streamFrom([
         {
           type: "tool_use_summary",
@@ -150,7 +150,7 @@ describe("ClaudeSDKAdapter", () => {
 
   it("rehydrates session id from bootstrap task metadata", async () => {
     const calls: Array<{ options?: Record<string, unknown> }> = [];
-    const queryFn: ClaudeSdkQuery = ({ options }) => {
+    const queryFn: ClaudeSDKQuery = ({ options }) => {
       calls.push({ options: options as Record<string, unknown> });
       return streamFrom([
         {
@@ -194,7 +194,7 @@ describe("ClaudeSDKAdapter", () => {
       warn: vi.fn(),
       error: vi.fn(),
     };
-    const queryFn: ClaudeSdkQuery = () =>
+    const queryFn: ClaudeSDKQuery = () =>
       streamFrom([
         {
           type: "assistant",

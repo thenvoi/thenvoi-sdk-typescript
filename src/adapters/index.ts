@@ -68,8 +68,6 @@ export {
   type ClaudePermissionMode,
   type ClaudeSDKQuery,
   type ClaudeSDKQueryParams,
-  type ClaudeSdkQuery,
-  type ClaudeSdkQueryParams,
 } from "./claude-sdk";
 export {
   CODEX_REASONING_EFFORTS,

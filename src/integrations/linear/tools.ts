@@ -28,13 +28,13 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     session_id: z.string().describe("The Linear agent session ID"),
     body: z.string().describe("The message body in Markdown format"),
   });
-  const issueIdAliasSchema = z.object({
+  const issueIdInputSchema = z.object({
     issue_id: z.string().optional().describe("The Linear issue ID (UUID) from the session context"),
-    issueId: z.string().optional().describe("Alias for issue_id"),
-    id: z.string().optional().describe("Alias for issue_id"),
-  });
-  const requiredIssueIdSchema = issueIdAliasSchema;
-  const optionalIssueIdSchema = issueIdAliasSchema;
+  }).passthrough();
+  const issueCommentLimitSchema = z.number().int().min(1).max(50).optional()
+    .describe("Maximum number of recent comments to return");
+  const requiredIssueIdSchema = issueIdInputSchema;
+  const optionalIssueIdSchema = issueIdInputSchema;
 
   const tools: CustomToolDef[] = [];
   const addSessionBodyTool = (
@@ -183,7 +183,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
       name: "list_comments",
       description: "Compatibility alias for linear_list_issue_comments. Requires the exact Linear issue UUID from the session context.",
       schema: requiredIssueIdSchema.extend({
-        limit: z.number().int().min(1).max(50).optional().describe("Maximum number of recent comments to return"),
+        limit: issueCommentLimitSchema,
       }),
       handler: async (args: Record<string, unknown>) => {
         const issueId = resolveIssueId("list_comments", args);
@@ -203,7 +203,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
       name: "linear_list_issue_comments",
       description: "List recent comments for the current Linear issue using the exact issue UUID from the session context.",
       schema: requiredIssueIdSchema.extend({
-        limit: z.number().int().min(1).max(50).optional().describe("Maximum number of recent comments to return"),
+        limit: issueCommentLimitSchema,
       }),
       handler: async (args: Record<string, unknown>) => {
         const issueId = resolveIssueId("linear_list_issue_comments", args);
@@ -311,23 +311,40 @@ function assertUuid(toolName: string, value: string): void {
 function resolveIssueId(toolName: string, args: Record<string, unknown>): string {
   const issueId = resolveOptionalIssueId(toolName, args);
   if (!issueId) {
-    throw new Error(`${toolName} requires issue_id (or legacy aliases issueId/id).`);
+    throw new Error(`${toolName} requires issue_id (legacy aliases issueId/id are deprecated).`);
   }
 
   return issueId;
+}
+
+const LEGACY_ISSUE_ID_ALIASES = ["issueId", "id"] as const;
+type LegacyIssueIdAlias = (typeof LEGACY_ISSUE_ID_ALIASES)[number];
+
+const LEGACY_ISSUE_ID_CANONICAL_KEY: Record<LegacyIssueIdAlias, "issue_id"> = {
+  issueId: "issue_id",
+  id: "issue_id",
+};
+
+function normalizeIssueIdentifierInput(args: Record<string, unknown>): { issue_id?: string } {
+  if (typeof args.issue_id === "string") {
+    return { issue_id: args.issue_id };
+  }
+
+  for (const alias of LEGACY_ISSUE_ID_ALIASES) {
+    const legacyValue = args[alias];
+    if (typeof legacyValue === "string") {
+      return { [LEGACY_ISSUE_ID_CANONICAL_KEY[alias]]: legacyValue };
+    }
+  }
+
+  return {};
 }
 
 function resolveOptionalIssueId(
   toolName: string,
   args: Record<string, unknown>,
 ): string | undefined {
-  const raw = typeof args.issue_id === "string"
-    ? args.issue_id
-    : typeof args.issueId === "string"
-      ? args.issueId
-      : typeof args.id === "string"
-        ? args.id
-        : undefined;
+  const { issue_id: raw } = normalizeIssueIdentifierInput(args);
 
   if (!raw) {
     return undefined;

@@ -35,20 +35,46 @@ async function postActivity(
   });
 }
 
-function createBodyActivityPoster(type: L.AgentActivityType) {
-  return async (
-    client: LinearActivityClient,
-    sessionId: string,
-    body: string,
-  ): Promise<void> => {
-    await postActivity(client, sessionId, { type, body });
-  };
+async function postBodyActivity(
+  client: LinearActivityClient,
+  sessionId: string,
+  type: L.AgentActivityType,
+  body: string,
+): Promise<void> {
+  await postActivity(client, sessionId, { type, body });
 }
 
-export const postThought = createBodyActivityPoster(L.AgentActivityType.Thought);
-export const postError = createBodyActivityPoster(L.AgentActivityType.Error);
-export const postResponse = createBodyActivityPoster(L.AgentActivityType.Response);
-export const postElicitation = createBodyActivityPoster(L.AgentActivityType.Elicitation);
+export async function postThought(
+  client: LinearActivityClient,
+  sessionId: string,
+  body: string,
+): Promise<void> {
+  await postBodyActivity(client, sessionId, L.AgentActivityType.Thought, body);
+}
+
+export async function postError(
+  client: LinearActivityClient,
+  sessionId: string,
+  body: string,
+): Promise<void> {
+  await postBodyActivity(client, sessionId, L.AgentActivityType.Error, body);
+}
+
+export async function postResponse(
+  client: LinearActivityClient,
+  sessionId: string,
+  body: string,
+): Promise<void> {
+  await postBodyActivity(client, sessionId, L.AgentActivityType.Response, body);
+}
+
+export async function postElicitation(
+  client: LinearActivityClient,
+  sessionId: string,
+  body: string,
+): Promise<void> {
+  await postBodyActivity(client, sessionId, L.AgentActivityType.Elicitation, body);
+}
 
 export async function postAction(
   client: LinearActivityClient,

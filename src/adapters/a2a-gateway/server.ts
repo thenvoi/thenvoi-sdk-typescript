@@ -108,7 +108,8 @@ class GatewayPeerExecutor {
 
     try {
       for await (const event of this.onRequest({
-        peerId: this.peer.slug,
+        peerId: this.peer.id,
+        peerSlug: this.peer.slug,
         taskId,
         contextId,
         message,
@@ -144,7 +145,8 @@ class GatewayPeerExecutor {
     },
   ): Promise<void> {
     const request: GatewayCancelRequest = {
-      peerId: this.peer.slug,
+      peerId: this.peer.id,
+      peerSlug: this.peer.slug,
       taskId,
     };
     await this.onCancel?.(request);
@@ -296,6 +298,7 @@ async function loadA2AServerModules(): Promise<RuntimeA2AServerModules> {
   ]).catch((error: unknown) => {
     throw new Error(
       `A2AGatewayAdapter requires optional dependency @a2a-js/sdk and express. (${error instanceof Error ? error.message : String(error)})`,
+      { cause: error },
     );
   });
 

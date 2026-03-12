@@ -35,6 +35,27 @@ interface ContactEventHandlerOptions {
   onHubInit?: (roomId: string, systemPrompt: string) => Promise<void>;
 }
 
+type ContactEventFailureStage = "callback" | "hub_room_init" | "hub_room_persist" | "hub_room_dispatch";
+
+export class ContactEventHandlerError extends Error {
+  public readonly retryable: boolean;
+  public readonly stage: ContactEventFailureStage;
+  public readonly eventType: ContactEvent["type"];
+
+  public constructor(input: {
+    eventType: ContactEvent["type"];
+    stage: ContactEventFailureStage;
+    retryable: boolean;
+    cause: unknown;
+  }) {
+    super(`Contact event ${input.eventType} failed during ${input.stage}`, { cause: input.cause });
+    this.name = "ContactEventHandlerError";
+    this.retryable = input.retryable;
+    this.stage = input.stage;
+    this.eventType = input.eventType;
+  }
+}
+
 export class ContactEventHandler {
   private readonly config: ContactEventConfig;
   private readonly rest: Pick<ChatMessagingRestApi, "createChatEvent"> & Pick<ChatRoomRestApi, "createChat">;
@@ -74,27 +95,32 @@ export class ContactEventHandler {
     }
     this.recordDedup(dedupKey);
 
-    // Cache request info for enriching updates
-    if (event.type === "contact_request_received") {
-      this.cacheRequestInfo(event.payload.id, {
-        fromHandle: event.payload.from_handle,
-        fromName: event.payload.from_name,
-        message: event.payload.message ?? null,
-      });
-    }
-
-    // Broadcast for contact_added and contact_removed
-    if (this.config.broadcastChanges && this.onBroadcast) {
-      if (event.type === "contact_added" || event.type === "contact_removed") {
-        const broadcastMsg = this.formatBroadcast(event);
-        this.onBroadcast(broadcastMsg);
+    try {
+      // Cache request info for enriching updates
+      if (event.type === "contact_request_received") {
+        this.cacheRequestInfo(event.payload.id, {
+          fromHandle: event.payload.from_handle,
+          fromName: event.payload.from_name,
+          message: event.payload.message ?? null,
+        });
       }
-    }
 
-    if (strategy === "callback") {
-      await this.handleCallback(event, tools);
-    } else if (strategy === "hub_room") {
-      await this.handleHubRoom(event);
+      // Broadcast for contact_added and contact_removed
+      if (this.config.broadcastChanges && this.onBroadcast) {
+        if (event.type === "contact_added" || event.type === "contact_removed") {
+          const broadcastMsg = this.formatBroadcast(event);
+          this.onBroadcast(broadcastMsg);
+        }
+      }
+
+      if (strategy === "callback") {
+        await this.handleCallback(event, tools);
+      } else if (strategy === "hub_room") {
+        await this.handleHubRoom(event);
+      }
+    } catch (error) {
+      this.rollbackDedup(dedupKey);
+      throw error;
     }
   }
 
@@ -113,10 +139,9 @@ export class ContactEventHandler {
     try {
       await callback(event, tools);
     } catch (error) {
-      this.logger.error("Contact event callback error", {
-        type: event.type,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      const failure = this.buildHandlerError(event, "callback", error, false);
+      this.logFailure(event, failure.stage, failure.retryable, error);
+      throw failure;
     }
   }
 
@@ -136,14 +161,14 @@ export class ContactEventHandler {
         this.hubRoomId = await this.hubRoomInitPromise;
       } catch (error) {
         this.hubRoomInitPromise = null;
-        this.logger.error("Failed to create hub room", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return;
+        const failure = this.buildHandlerError(event, "hub_room_init", error, true);
+        this.logFailure(event, failure.stage, failure.retryable, error);
+        throw failure;
       }
     }
 
     const formattedMessage = this.formatEventMessage(event);
+    let persistFailure: ContactEventHandlerError | null = null;
 
     // Persist as a task event
     try {
@@ -153,12 +178,12 @@ export class ContactEventHandler {
         metadata: { contactEventType: event.type, payload: event.payload },
       });
     } catch (error) {
-      this.logger.error("Failed to persist contact event to hub room", {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      persistFailure = this.buildHandlerError(event, "hub_room_persist", error, true);
+      this.logFailure(event, persistFailure.stage, persistFailure.retryable, error);
     }
 
     // Push synthetic message to hub for LLM processing
+    let dispatchFailure: ContactEventHandlerError | null = null;
     if (this.onHubEvent) {
       const now = new Date().toISOString();
       const syntheticEvent: MessageEvent = {
@@ -179,10 +204,17 @@ export class ContactEventHandler {
       try {
         await this.onHubEvent(this.hubRoomId, syntheticEvent);
       } catch (error) {
-        this.logger.error("Failed to push contact event to hub", {
-          error: error instanceof Error ? error.message : String(error),
-        });
+        dispatchFailure = this.buildHandlerError(event, "hub_room_dispatch", error, true);
+        this.logFailure(event, dispatchFailure.stage, dispatchFailure.retryable, error);
       }
+    }
+
+    if (persistFailure) {
+      throw persistFailure;
+    }
+
+    if (dispatchFailure) {
+      throw dispatchFailure;
     }
   }
 
@@ -258,6 +290,70 @@ export class ContactEventHandler {
         this.dedup.delete(evicted);
       }
     }
+  }
+
+  private rollbackDedup(key: string): void {
+    if (!this.dedup.delete(key)) {
+      return;
+    }
+
+    const index = this.dedupOrder.lastIndexOf(key);
+    if (index >= 0) {
+      this.dedupOrder.splice(index, 1);
+    }
+  }
+
+  private buildHandlerError(
+    event: ContactEvent,
+    stage: ContactEventFailureStage,
+    cause: unknown,
+    defaultRetryable: boolean,
+  ): ContactEventHandlerError {
+    return new ContactEventHandlerError({
+      eventType: event.type,
+      stage,
+      retryable: this.resolveRetryable(cause, defaultRetryable),
+      cause,
+    });
+  }
+
+  private resolveRetryable(error: unknown, defaultRetryable: boolean): boolean {
+    if (typeof error === "object" && error !== null && "retryable" in error) {
+      return (error as { retryable?: unknown }).retryable === true;
+    }
+
+    return defaultRetryable;
+  }
+
+  private logFailure(
+    event: ContactEvent,
+    stage: ContactEventFailureStage,
+    retryable: boolean,
+    error: unknown,
+  ): void {
+    this.logger.error("contact_event.failure", {
+      type: event.type,
+      stage,
+      retryable,
+      error: this.serializeError(error),
+    });
+  }
+
+  private serializeError(error: unknown): Record<string, unknown> {
+    if (error instanceof Error) {
+      const payload: Record<string, unknown> = {
+        name: error.name,
+        message: error.message,
+      };
+
+      if (typeof (error as { retryable?: unknown }).retryable !== "undefined") {
+        payload.retryable = (error as { retryable?: unknown }).retryable;
+      }
+
+      return payload;
+    }
+
+    return { message: String(error) };
   }
 }
 

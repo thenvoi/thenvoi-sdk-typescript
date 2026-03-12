@@ -6,7 +6,11 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { z, type ZodTypeAny } from "zod";
 
-import type { AdapterToolsProtocol } from "../../contracts/protocols";
+import {
+  type AdapterToolsProtocol,
+  isToolExecutorError,
+  toLegacyToolExecutorErrorMessage,
+} from "../../contracts/protocols";
 import { toWireString } from "../shared/coercion";
 import {
   BASE_TOOL_NAMES,
@@ -78,6 +82,9 @@ export function createThenvoiMcpBridge(
 
           try {
             const result = await roomTools.executeToolCall(toolName, toolArgs);
+            if (isToolExecutorError(result)) {
+              return asErrorResult(toLegacyToolExecutorErrorMessage(result) ?? result.message);
+            }
             return asSuccessResult(result);
           } catch (error) {
             return asErrorResult(error instanceof Error ? error.message : String(error));

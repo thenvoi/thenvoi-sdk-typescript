@@ -180,7 +180,7 @@ export class ExecutionContext {
     return value;
   }
 
-  public consumeBootstrap(): boolean {
+  public consumeBootstrapAndMarkLlmInitialized(): boolean {
     if (!this._llmInitialized) {
       this._llmInitialized = true;
       this.bootstrap = false;
@@ -189,6 +189,11 @@ export class ExecutionContext {
     const value = this.bootstrap;
     this.bootstrap = false;
     return value;
+  }
+
+  /** @deprecated Use consumeBootstrapAndMarkLlmInitialized(). */
+  public consumeBootstrap(): boolean {
+    return this.consumeBootstrapAndMarkLlmInitialized();
   }
 
   public async getHydratedHistory(excludeMessageId?: string): Promise<MetadataMap[]> {

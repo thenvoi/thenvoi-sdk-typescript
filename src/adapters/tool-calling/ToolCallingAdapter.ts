@@ -1,5 +1,10 @@
 import { SimpleAdapter } from "../../core/simpleAdapter";
-import type { MessagingTools, ToolExecutor, ToolSchemaProvider } from "../../contracts/protocols";
+import {
+  isToolExecutorError,
+  type MessagingTools,
+  type ToolExecutor,
+  type ToolSchemaProvider,
+} from "../../contracts/protocols";
 import type { ToolModelMessage } from "../../contracts/dtos";
 import type { Logger } from "../../core/logger";
 import { NoopLogger } from "../../core/logger";
@@ -227,6 +232,10 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
 }
 
 function isToolOutputError(output: unknown): boolean {
+  if (isToolExecutorError(output)) {
+    return true;
+  }
+
   if (typeof output === "string") {
     const lower = output.toLowerCase();
     return lower.startsWith("error:") || lower.startsWith("error executing ");

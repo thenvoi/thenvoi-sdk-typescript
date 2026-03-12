@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ContactEventHandler, HUB_ROOM_SYSTEM_PROMPT } from "../src/runtime/ContactEventHandler";
+import {
+  ContactEventHandler,
+  ContactEventHandlerError,
+  HUB_ROOM_SYSTEM_PROMPT,
+} from "../src/runtime/ContactEventHandler";
 import type { ContactEvent, MessageEvent } from "../src/platform/events";
 import type { ContactEventConfig } from "../src/runtime/types";
 import { FakeTools } from "./testUtils";
@@ -9,6 +13,15 @@ function makeRest() {
   return {
     createChat: vi.fn().mockResolvedValue({ id: "hub-room-1" }),
     createChatEvent: vi.fn().mockResolvedValue({}),
+  };
+}
+
+function makeLogger() {
+  return {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
   };
 }
 
@@ -85,13 +98,31 @@ describe("ContactEventHandler", () => {
       expect(onEvent).toHaveBeenCalledWith(event, tools);
     });
 
-    it("catches and logs callback errors without re-throwing", async () => {
+    it("rethrows callback errors with retry signal and deterministic logging", async () => {
       const onEvent = vi.fn().mockRejectedValue(new Error("callback failed"));
       const tools = new FakeTools();
+      const logger = makeLogger();
       const config: ContactEventConfig = { strategy: "callback", onEvent };
-      const handler = new ContactEventHandler({ config, rest: makeRest() });
+      const handler = new ContactEventHandler({ config, rest: makeRest(), logger });
 
-      await expect(handler.handle(makeContactAdded(), tools)).resolves.toBeUndefined();
+      await expect(handler.handle(makeContactAdded(), tools)).rejects.toMatchObject({
+        name: "ContactEventHandlerError",
+        stage: "callback",
+        retryable: false,
+        eventType: "contact_added",
+      });
+      expect(logger.error).toHaveBeenCalledWith(
+        "contact_event.failure",
+        expect.objectContaining({
+          type: "contact_added",
+          stage: "callback",
+          retryable: false,
+          error: expect.objectContaining({
+            name: "Error",
+            message: "callback failed",
+          }),
+        }),
+      );
     });
   });
 
@@ -134,6 +165,65 @@ describe("ContactEventHandler", () => {
 
       expect(rest.createChat).toHaveBeenCalledTimes(1);
       expect(rest.createChatEvent).toHaveBeenCalledTimes(2);
+    });
+
+    it("throws persist failures but still attempts hub dispatch", async () => {
+      const rest = makeRest();
+      const logger = makeLogger();
+      const onHubEvent = vi.fn().mockResolvedValue(undefined);
+      rest.createChatEvent.mockRejectedValueOnce(Object.assign(new Error("persist failed"), { retryable: true }));
+
+      const handler = new ContactEventHandler({
+        config: { strategy: "hub_room", hubTaskId: "task-1" },
+        rest,
+        onHubEvent,
+        logger,
+      });
+
+      await expect(handler.handle(makeContactRequestReceived())).rejects.toMatchObject({
+        name: "ContactEventHandlerError",
+        stage: "hub_room_persist",
+        retryable: true,
+        eventType: "contact_request_received",
+      });
+      expect(onHubEvent).toHaveBeenCalledTimes(1);
+      expect(logger.error).toHaveBeenCalledWith(
+        "contact_event.failure",
+        expect.objectContaining({
+          type: "contact_request_received",
+          stage: "hub_room_persist",
+          retryable: true,
+        }),
+      );
+    });
+
+    it("throws dispatch failures with retryable signal", async () => {
+      const rest = makeRest();
+      const logger = makeLogger();
+      const onHubEvent = vi.fn().mockRejectedValueOnce(new Error("dispatch failed"));
+
+      const handler = new ContactEventHandler({
+        config: { strategy: "hub_room", hubTaskId: "task-1" },
+        rest,
+        onHubEvent,
+        logger,
+      });
+
+      await expect(handler.handle(makeContactRequestReceived())).rejects.toMatchObject({
+        name: "ContactEventHandlerError",
+        stage: "hub_room_dispatch",
+        retryable: true,
+        eventType: "contact_request_received",
+      });
+      expect(rest.createChatEvent).toHaveBeenCalledTimes(1);
+      expect(logger.error).toHaveBeenCalledWith(
+        "contact_event.failure",
+        expect.objectContaining({
+          type: "contact_request_received",
+          stage: "hub_room_dispatch",
+          retryable: true,
+        }),
+      );
     });
   });
 
@@ -181,6 +271,19 @@ describe("ContactEventHandler", () => {
       rest.createChatEvent.mockClear();
       await handler.handle(makeContactAdded("contact-0"));
       expect(rest.createChatEvent).toHaveBeenCalledTimes(1);
+    });
+
+    it("allows retry of same event after a handling failure", async () => {
+      const rest = makeRest();
+      rest.createChatEvent.mockRejectedValueOnce(new Error("transient failure")).mockResolvedValueOnce({});
+      const handler = new ContactEventHandler({
+        config: { strategy: "hub_room", hubTaskId: "task-1" },
+        rest,
+      });
+
+      await expect(handler.handle(makeContactAdded("retry-me"))).rejects.toBeInstanceOf(ContactEventHandlerError);
+      await expect(handler.handle(makeContactAdded("retry-me"))).resolves.toBeUndefined();
+      expect(rest.createChatEvent).toHaveBeenCalledTimes(2);
     });
   });
 

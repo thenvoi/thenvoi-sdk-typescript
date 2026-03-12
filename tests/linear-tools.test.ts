@@ -7,9 +7,10 @@ import {
   type SessionRoomRecord,
   type SessionRoomStore,
 } from "../src/linear";
-import { executeCustomTool } from "../src/runtime/tools/customTools";
+import { customToolToOpenAISchema, executeCustomTool } from "../src/runtime/tools/customTools";
 
 const TEST_ISSUE_ID = "11111111-1111-4111-8111-111111111111";
+const OTHER_TEST_ISSUE_ID = "22222222-2222-4222-8222-222222222222";
 
 class MemorySessionRoomStore implements SessionRoomStore {
   private readonly records = new Map<string, SessionRoomRecord>();
@@ -310,6 +311,23 @@ describe("createLinearTools", () => {
     expect(client.issue).toHaveBeenCalledWith(TEST_ISSUE_ID);
   });
 
+  it("issue tools expose issue_id as the canonical input key", () => {
+    const tools = createLinearTools({ client: makeMockClient() });
+    const tool = tools.find((entry) => entry.name === "linear_get_issue")!;
+    const schema = customToolToOpenAISchema(tool) as {
+      function?: {
+        parameters?: {
+          properties?: Record<string, unknown>;
+        };
+      };
+    };
+    const properties = schema.function?.parameters?.properties ?? {};
+
+    expect(properties).toHaveProperty("issue_id");
+    expect(properties).not.toHaveProperty("issueId");
+    expect(properties).not.toHaveProperty("id");
+  });
+
   it("get_issue alias returns normalized issue details", async () => {
     const client = makeMockClient();
     const tools = createLinearTools({ client });
@@ -325,6 +343,36 @@ describe("createLinearTools", () => {
         identifier: "SOF-1",
       }),
     });
+  });
+
+  it("accepts deprecated issue id aliases through the normalization shim", async () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_get_issue")!;
+
+    await executeCustomTool(tool, {
+      issueId: TEST_ISSUE_ID,
+    });
+    await executeCustomTool(tool, {
+      id: OTHER_TEST_ISSUE_ID,
+    });
+
+    expect(client.issue).toHaveBeenNthCalledWith(1, TEST_ISSUE_ID);
+    expect(client.issue).toHaveBeenNthCalledWith(2, OTHER_TEST_ISSUE_ID);
+  });
+
+  it("prefers canonical issue_id when aliases are also present", async () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_get_issue")!;
+
+    await executeCustomTool(tool, {
+      issue_id: TEST_ISSUE_ID,
+      issueId: OTHER_TEST_ISSUE_ID,
+      id: OTHER_TEST_ISSUE_ID,
+    });
+
+    expect(client.issue).toHaveBeenCalledWith(TEST_ISSUE_ID);
   });
 
   it("linear_list_issue_comments returns recent comments", async () => {

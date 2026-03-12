@@ -56,11 +56,6 @@ export interface ClaudeSDKQueryParams {
 
 export type ClaudeSDKQuery = (params: ClaudeSDKQueryParams) => AsyncIterable<ClaudeSDKMessageLike>;
 
-/** @deprecated Use ClaudeSDKQueryParams instead. */
-export type ClaudeSdkQueryParams = ClaudeSDKQueryParams;
-/** @deprecated Use ClaudeSDKQuery instead. */
-export type ClaudeSdkQuery = ClaudeSDKQuery;
-
 export interface ClaudeSDKAdapterOptions {
   model?: string;
   customSection?: string;

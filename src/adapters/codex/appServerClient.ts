@@ -140,7 +140,7 @@ export class CodexAppServerStdioClient implements CodexClientLike {
   }
 
   public async initialize(params: InitializeParams): Promise<void> {
-    await this.request("initialize", params as unknown as Record<string, unknown>);
+    await this.request("initialize", toJsonRpcParams(params));
     await this.notify("initialized", {});
   }
 
@@ -268,15 +268,15 @@ export class CodexAppServerStdioClient implements CodexClientLike {
       return;
     }
 
-    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    const message = asObject(payload);
+    if (!message) {
       return;
     }
-
-    const message = payload as Record<string, unknown>;
-    const id = message.id as RequestId | undefined;
     const method = typeof message.method === "string" ? message.method : null;
+    const id = parseRequestId(message.id);
+    const hasId = Object.prototype.hasOwnProperty.call(message, "id");
 
-    if (method && id !== undefined) {
+    if (method && id !== null) {
       this.pushEvent({
         kind: "request",
         id,
@@ -287,6 +287,13 @@ export class CodexAppServerStdioClient implements CodexClientLike {
     }
 
     if (method) {
+      if (hasId) {
+        this.logger.warn("codex_app_server.invalid_request_id", {
+          method,
+          id: message.id,
+        });
+        return;
+      }
       this.pushEvent({
         kind: "notification",
         method,
@@ -295,7 +302,7 @@ export class CodexAppServerStdioClient implements CodexClientLike {
       return;
     }
 
-    if (id === undefined) {
+    if (id === null) {
       return;
     }
 
@@ -305,9 +312,8 @@ export class CodexAppServerStdioClient implements CodexClientLike {
     }
 
     this.pending.delete(id);
-    const errorValue = message.error;
-    if (errorValue && typeof errorValue === "object" && !Array.isArray(errorValue)) {
-      const errorRecord = errorValue as Record<string, unknown>;
+    const errorRecord = asObject(message.error);
+    if (errorRecord) {
       pending.reject(new CodexJsonRpcError(
         typeof errorRecord.code === "number" ? errorRecord.code : -32000,
         typeof errorRecord.message === "string" ? errorRecord.message : "Unknown JSON-RPC error",
@@ -369,4 +375,26 @@ export class CodexAppServerStdioClient implements CodexClientLike {
       },
     });
   }
+}
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function parseRequestId(value: unknown): RequestId | null {
+  if (typeof value === "string" || typeof value === "number") {
+    return value;
+  }
+  return null;
+}
+
+function toJsonRpcParams(value: unknown): Record<string, unknown> {
+  const record = asObject(value);
+  if (!record) {
+    throw new Error("JSON-RPC params must be an object");
+  }
+  return record;
 }

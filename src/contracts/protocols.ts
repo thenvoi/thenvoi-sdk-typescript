@@ -94,6 +94,72 @@ export interface ToolExecutor {
   executeToolCall(toolName: string, toolArgs: MetadataMap): Promise<unknown>;
 }
 
+export const TOOL_EXECUTOR_ERROR_TYPES = [
+  "ToolArgumentsValidationError",
+  "ToolNotFoundError",
+  "ToolExecutionError",
+] as const;
+
+export type ToolExecutorErrorType = (typeof TOOL_EXECUTOR_ERROR_TYPES)[number];
+
+export interface ToolExecutorError {
+  ok: false;
+  errorType: ToolExecutorErrorType;
+  toolName: string;
+  message: string;
+  /**
+   * Backward-compatible plain text rendering used by older adapter paths that
+   * still expect string errors.
+   */
+  legacyMessage: string;
+  details?: MetadataMap;
+}
+
+export function createToolExecutorError(input: {
+  errorType: ToolExecutorErrorType;
+  toolName: string;
+  message: string;
+  legacyMessage?: string;
+  details?: MetadataMap;
+}): ToolExecutorError {
+  return {
+    ok: false,
+    errorType: input.errorType,
+    toolName: input.toolName,
+    message: input.message,
+    legacyMessage: input.legacyMessage ?? input.message,
+    ...(input.details ? { details: input.details } : {}),
+  };
+}
+
+export function isToolExecutorError(value: unknown): value is ToolExecutorError {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return (
+    candidate.ok === false
+    && typeof candidate.errorType === "string"
+    && (TOOL_EXECUTOR_ERROR_TYPES as readonly string[]).includes(candidate.errorType)
+    && typeof candidate.toolName === "string"
+    && typeof candidate.message === "string"
+    && typeof candidate.legacyMessage === "string"
+  );
+}
+
+export function toLegacyToolExecutorErrorMessage(value: unknown): string | null {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (!isToolExecutorError(value)) {
+    return null;
+  }
+
+  return value.legacyMessage;
+}
+
 export interface ParticipantTools extends RoomParticipantTools, PeerLookupTools {}
 
 /** Full tool surface available to framework adapters during message handling. */
@@ -143,6 +209,7 @@ export interface PreprocessorContext {
   getHydratedHistory(excludeMessageId?: string): Promise<MetadataMap[]>;
   consumeParticipantsMessage(): string | null;
   consumeContactsMessage(): string | null;
+  consumeBootstrapAndMarkLlmInitialized(): boolean;
   consumeBootstrap(): boolean;
   readonly isLlmInitialized: boolean;
   markLlmInitialized(): void;

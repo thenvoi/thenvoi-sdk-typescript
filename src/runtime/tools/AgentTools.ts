@@ -24,9 +24,11 @@ import type {
 } from "../../contracts/dtos";
 import {
   type AdapterToolsProtocol,
+  createToolExecutorError,
   DEFAULT_AGENT_TOOLS_CAPABILITIES,
   type AgentToolsCapabilities,
   type AgentToolsProtocol,
+  type ToolExecutorError,
 } from "../../contracts/protocols";
 import { assertChatEventType, CHAT_EVENT_TYPES } from "../messages";
 import {
@@ -281,14 +283,24 @@ export class AgentTools implements AgentToolsProtocol {
 
     const handler = this.toolHandlers[toolName];
     if (!handler) {
-      return `Unknown tool: ${toolName}`;
+      return createToolExecutorError({
+        errorType: "ToolNotFoundError",
+        toolName,
+        message: `Tool '${toolName}' is not registered`,
+        legacyMessage: `Unknown tool: ${toolName}`,
+      });
     }
 
     try {
       return await handler(arguments_);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return `Error executing ${toolName}: ${message}`;
+      return createToolExecutorError({
+        errorType: "ToolExecutionError",
+        toolName,
+        message,
+        legacyMessage: `Error executing ${toolName}: ${message}`,
+      });
     }
   }
 
@@ -786,9 +798,9 @@ export class AgentTools implements AgentToolsProtocol {
 
 /**
  * Validate tool arguments before execution.
- * Returns an LLM-friendly error string if validation fails, or null if valid.
+ * Returns a normalized tool executor error if validation fails, or null if valid.
  */
-function validateToolArgs(toolName: string, args: Record<string, unknown>): string | null {
+function validateToolArgs(toolName: string, args: Record<string, unknown>): ToolExecutorError | null {
   const errors: string[] = [];
 
   const model = TOOL_MODELS[toolName as keyof typeof TOOL_MODELS];
@@ -845,7 +857,14 @@ function validateToolArgs(toolName: string, args: Record<string, unknown>): stri
   }
 
   if (errors.length > 0) {
-    return `Invalid arguments for ${toolName}: ${errors.join("; ")}`;
+    const message = `Invalid arguments for ${toolName}: ${errors.join("; ")}`;
+    return createToolExecutorError({
+      errorType: "ToolArgumentsValidationError",
+      toolName,
+      message,
+      legacyMessage: message,
+      details: { validationErrors: errors },
+    });
   }
 
   return null;

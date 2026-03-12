@@ -23,6 +23,7 @@ class FakeRestApi implements RestApi {
     chatId: string;
     content: string;
     mentions?: ChatMessageMention[];
+    metadata?: Record<string, unknown>;
   }> = [];
   public readonly createEventCalls: Array<{
     chatId: string;
@@ -50,6 +51,7 @@ class FakeRestApi implements RestApi {
       chatId,
       content: message.content,
       mentions: message.mentions,
+      metadata: message.metadata,
     });
     return { id: `msg-${this.createMessageCalls.length}` };
   }
@@ -172,7 +174,7 @@ describe("A2AGatewayAdapter", () => {
     expect(onRequest).not.toBeNull();
 
     const stream = onRequest!({
-      peerId: "weather-agent",
+      peerId: "peer-weather",
       taskId: "task-1",
       contextId: "ctx-1",
       message: {
@@ -225,7 +227,74 @@ describe("A2AGatewayAdapter", () => {
       chatId: "room-1",
       content: "@Weather Agent What is the weather in NYC?",
       mentions: [{ id: "peer-weather", handle: "weather-agent" }],
+      metadata: {
+        gateway_context_id: "ctx-1",
+        gateway_room_id: "room-1",
+        gateway_task_id: "task-1",
+        gateway_peer_id: "peer-weather",
+        gateway_peer_slug: "weather-agent",
+      },
     });
+  });
+
+  it("supports legacy slug peerId aliases in gateway requests", async () => {
+    const rest = new FakeRestApi();
+
+    let onRequest: ((request: GatewayRequest) => AsyncIterable<unknown>) | null = null;
+    const adapter = new A2AGatewayAdapter({
+      thenvoiRest: rest,
+      serverFactory: (options) => {
+        onRequest = options.onRequest;
+        return {
+          start: async () => undefined,
+          stop: async () => undefined,
+        };
+      },
+      responseTimeoutMs: 2_000,
+    });
+
+    await adapter.onStarted("Gateway", "A2A gateway");
+
+    const stream = onRequest!({
+      peerId: "weather-agent",
+      taskId: "task-legacy",
+      contextId: "ctx-legacy",
+      message: {
+        kind: "message",
+        messageId: "legacy-msg",
+        role: "user",
+        parts: [{ kind: "text", text: "Legacy slug" }],
+      },
+    });
+
+    const iterator = stream[Symbol.asyncIterator]();
+    await iterator.next(); // working
+
+    await adapter.onMessage(
+      makePeerMessage({
+        content: "legacy response",
+        roomId: "room-1",
+        senderId: "peer-weather",
+      }),
+      new FakeTools(),
+      {
+        contextToRoom: {},
+        roomParticipants: {},
+      },
+      null,
+      null,
+      { isSessionBootstrap: false, roomId: "room-1" },
+    );
+
+    const finalEvent = await iterator.next();
+    expect(finalEvent.value).toMatchObject({
+      kind: "status-update",
+      final: true,
+      status: { state: "completed" },
+    });
+    expect(rest.addParticipantCalls).toEqual([
+      { chatId: "room-1", participantId: "peer-weather" },
+    ]);
   });
 
   it("reuses a room for the same context and peer", async () => {
@@ -459,6 +528,60 @@ describe("A2AGatewayAdapter", () => {
     const finalEvent = await iterator.next();
     const text = finalEvent.value?.status?.message?.parts?.[0]?.text;
     expect(text).toBe("matched by task metadata");
+  });
+
+  it("accepts legacy slug values in gateway_peer_id metadata", async () => {
+    const rest = new FakeRestApi();
+
+    let onRequest: ((request: GatewayRequest) => AsyncIterable<unknown>) | null = null;
+    const adapter = new A2AGatewayAdapter({
+      thenvoiRest: rest,
+      serverFactory: (options) => {
+        onRequest = options.onRequest;
+        return {
+          start: async () => undefined,
+          stop: async () => undefined,
+        };
+      },
+      responseTimeoutMs: 2_000,
+    });
+
+    await adapter.onStarted("Gateway", "A2A gateway");
+
+    const stream = onRequest!({
+      peerId: "peer-weather",
+      taskId: "task-slug-metadata",
+      contextId: "ctx-slug-metadata",
+      message: {
+        kind: "message",
+        messageId: "m-slug-metadata",
+        role: "user",
+        parts: [{ kind: "text", text: "Metadata alias route" }],
+      },
+    });
+
+    const iterator = stream[Symbol.asyncIterator]();
+    await iterator.next(); // working
+
+    await adapter.onMessage(
+      makePeerMessage({
+        content: "matched by legacy gateway_peer_id slug",
+        roomId: "room-1",
+        senderId: "peer-data",
+        metadata: {
+          gateway_peer_id: "weather-agent",
+        },
+      }),
+      new FakeTools(),
+      { contextToRoom: {}, roomParticipants: {} },
+      null,
+      null,
+      { isSessionBootstrap: false, roomId: "room-1" },
+    );
+
+    const finalEvent = await iterator.next();
+    const text = finalEvent.value?.status?.message?.parts?.[0]?.text;
+    expect(text).toBe("matched by legacy gateway_peer_id slug");
   });
 
   it("does not let superseded legacy sender messages finalize the new pending task", async () => {

@@ -138,8 +138,13 @@ export class AgentRuntime {
     }
   }
 
-  public contextsList(): ExecutionContext[] {
+  public getContexts(): ExecutionContext[] {
     return [...this.contexts.values()];
+  }
+
+  /** @deprecated Use getContexts(). */
+  public contextsList(): ExecutionContext[] {
+    return this.getContexts();
   }
 
   private async consumeLoop(signal: AbortSignal): Promise<void> {

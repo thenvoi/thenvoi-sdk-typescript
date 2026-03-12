@@ -1,6 +1,7 @@
 import { UnsupportedFeatureError } from "../../core/errors";
 import type { Logger } from "../../core/logger";
 import { NoopLogger } from "../../core/logger";
+import { asNullableString, asOptionalRecord, asString } from "../../adapters/shared/coercion";
 import type {
   AddContactArgs,
   ContactRecord,
@@ -36,7 +37,7 @@ function mergeOptions(options?: RestRequestOptions): RestRequestOptions {
 }
 
 function unwrapData<T>(value: unknown): T {
-  const record = asRecord(value);
+  const record = asMetadataMap(value);
   if (record?.data !== undefined) {
     return record.data as T;
   }
@@ -44,12 +45,8 @@ function unwrapData<T>(value: unknown): T {
   return value as T;
 }
 
-function isMetadataMap(value: unknown): value is MetadataMap {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function asRecord(value: unknown): MetadataMap | undefined {
-  return isMetadataMap(value) ? value : undefined;
+function asMetadataMap(value: unknown): MetadataMap | undefined {
+  return asOptionalRecord(value) as MetadataMap | undefined;
 }
 
 function asRecordArray<T = MetadataMap>(value: unknown): T[] | undefined {
@@ -57,11 +54,11 @@ function asRecordArray<T = MetadataMap>(value: unknown): T[] | undefined {
     return undefined;
   }
 
-  return value.filter((entry): entry is T => isMetadataMap(entry));
+  return value.filter((entry): entry is T => asOptionalRecord(entry) !== undefined);
 }
 
 function extractEnvelopeData(value: unknown): unknown {
-  const record = asRecord(value);
+  const record = asMetadataMap(value);
   if (!record || record.data === undefined) {
     return value;
   }
@@ -70,12 +67,12 @@ function extractEnvelopeData(value: unknown): unknown {
 }
 
 function extractEnvelopeMetadata(value: unknown): MetadataMap | undefined {
-  const record = asRecord(value);
+  const record = asMetadataMap(value);
   if (!record) {
     return undefined;
   }
 
-  return asRecord(record.metadata) ?? asRecord(record.meta);
+  return asMetadataMap(record.metadata) ?? asMetadataMap(record.meta);
 }
 
 function normalizePaginatedResponse<T = MetadataMap>(
@@ -93,7 +90,7 @@ function normalizePaginatedResponse<T = MetadataMap>(
 }
 
 function normalizeContactRequestDirection(value: unknown): MetadataMap | undefined {
-  const direction = asRecord(value);
+  const direction = asMetadataMap(value);
   if (!direction) {
     return undefined;
   }
@@ -110,7 +107,7 @@ function normalizeContactRequestDirection(value: unknown): MetadataMap | undefin
 }
 
 function normalizeContactRequestsResult(result: ContactRequestsResult): ContactRequestsResult {
-  const metadata = asRecord(result.metadata);
+  const metadata = asMetadataMap(result.metadata);
   return {
     received: Array.isArray(result.received) ? result.received : [],
     sent: Array.isArray(result.sent) ? result.sent : [],
@@ -137,7 +134,7 @@ function normalizeContactRequestsResult(result: ContactRequestsResult): ContactR
 }
 
 function normalizeContactRequestsResponse(response: unknown): ContactRequestsResult {
-  const payload = asRecord(extractEnvelopeData(response));
+  const payload = asMetadataMap(extractEnvelopeData(response));
   return normalizeContactRequestsResult({
     received: asRecordArray(payload?.received) ?? [],
     sent: asRecordArray(payload?.sent) ?? [],
@@ -146,20 +143,20 @@ function normalizeContactRequestsResponse(response: unknown): ContactRequestsRes
 }
 
 function normalizeToolOperationResult(response: unknown): ToolOperationResult {
-  return asRecord(extractEnvelopeData(response)) ?? {};
+  return asMetadataMap(extractEnvelopeData(response)) ?? {};
 }
 
 function normalizeMemoryRecord(response: unknown): MemoryRecord {
-  return asRecord(extractEnvelopeData(response)) ?? {};
+  return asMetadataMap(extractEnvelopeData(response)) ?? {};
 }
 
 function extractChatId(response: unknown): string | undefined {
-  const payload = asRecord(extractEnvelopeData(response));
+  const payload = asMetadataMap(extractEnvelopeData(response));
   return typeof payload?.id === "string" ? payload.id : undefined;
 }
 
 function isChatParticipant(value: unknown): value is ChatParticipant {
-  const record = asRecord(value);
+  const record = asMetadataMap(value);
   if (!record) {
     return false;
   }
@@ -173,6 +170,39 @@ function isChatParticipant(value: unknown): value is ChatParticipant {
 function normalizeChatParticipantsResponse(response: unknown): ChatParticipant[] {
   const payload = extractEnvelopeData(response);
   return Array.isArray(payload) ? payload.filter(isChatParticipant) : [];
+}
+
+function normalizePlatformChatMessage(value: unknown): PlatformChatMessage | null {
+  const payload = asMetadataMap(value);
+  if (!payload) {
+    return null;
+  }
+
+  const id = asString(payload.id);
+  const content = asString(payload.content);
+  const senderId = asString(payload.sender_id) ?? asString(payload.senderId);
+  const senderType = asString(payload.sender_type) ?? asString(payload.senderType);
+  const messageType = asString(payload.message_type) ?? asString(payload.messageType);
+  const insertedAt = asString(payload.inserted_at) ?? asString(payload.insertedAt);
+  if (!id || !content || !senderId || !senderType || !messageType || !insertedAt) {
+    return null;
+  }
+
+  const senderName = asNullableString(payload.sender_name ?? payload.senderName);
+  const updatedAt = asNullableString(payload.updated_at ?? payload.updatedAt);
+  const metadata = payload.metadata === null ? null : asMetadataMap(payload.metadata);
+
+  return {
+    id,
+    content,
+    sender_id: senderId,
+    sender_type: senderType,
+    sender_name: senderName,
+    message_type: messageType,
+    metadata: payload.metadata === null ? null : metadata,
+    inserted_at: insertedAt,
+    updated_at: updatedAt,
+  };
 }
 
 export class FernRestAdapter implements RestApi {
@@ -298,16 +328,22 @@ export class FernRestAdapter implements RestApi {
     chatId: string,
     options?: RestRequestOptions,
   ): Promise<ChatParticipant[]> {
-    const response = this.client.chatParticipants?.listChatParticipants
-      ? await this.client.chatParticipants.listChatParticipants(chatId, {}, mergeOptions(options))
-      : this.client.agentApiParticipants?.listAgentChatParticipants
-        ? await this.client.agentApiParticipants.listAgentChatParticipants(chatId, mergeOptions(options))
-        : undefined;
-    if (!response) {
+    const requestOptions = mergeOptions(options);
+    const listChatParticipantsApi = this.client.chatParticipants?.listChatParticipants;
+    if (listChatParticipantsApi) {
+      return normalizeChatParticipantsResponse(
+        await listChatParticipantsApi(chatId, {}, requestOptions),
+      );
+    }
+
+    const listAgentChatParticipantsApi = this.client.agentApiParticipants?.listAgentChatParticipants;
+    if (!listAgentChatParticipantsApi) {
       throw new UnsupportedFeatureError("Fern client missing chat participant list endpoint");
     }
 
-    return normalizeChatParticipantsResponse(response);
+    return normalizeChatParticipantsResponse(
+      await listAgentChatParticipantsApi(chatId, requestOptions),
+    );
   }
 
   public async addChatParticipant(
@@ -411,12 +447,7 @@ export class FernRestAdapter implements RestApi {
     }
 
     const response = await api(request.chatId, mergeOptions(options));
-    const payload = asRecord(extractEnvelopeData(response));
-    if (!payload) {
-      return null;
-    }
-
-    return payload as unknown as PlatformChatMessage;
+    return normalizePlatformChatMessage(extractEnvelopeData(response));
   }
 
   public async listPeers(
@@ -642,62 +673,55 @@ export class FernRestAdapter implements RestApi {
     request: { chatId: string; page: number; pageSize: number; status?: string },
     options?: RestRequestOptions,
   ): Promise<PaginatedResponse<PlatformChatMessage>> {
-    const response = this.client.chatMessages?.listMessages
-      ? await this.client.chatMessages.listMessages(
-        request.chatId,
-        {
-          page: request.page,
-          page_size: request.pageSize,
-          status: request.status,
-        },
-        mergeOptions(options),
-      )
-      : this.client.agentApiMessages?.listAgentMessages
-        ? await this.client.agentApiMessages.listAgentMessages(
-          request.chatId,
-          {
-            page: request.page,
-            page_size: request.pageSize,
-            status: request.status,
-          },
-          mergeOptions(options),
-        )
-        : undefined;
-    if (!response) {
+    const requestOptions = mergeOptions(options);
+    const listRequest = {
+      page: request.page,
+      page_size: request.pageSize,
+      status: request.status,
+    };
+
+    const listMessagesApi = this.client.chatMessages?.listMessages;
+    if (listMessagesApi) {
+      return normalizePaginatedResponse<PlatformChatMessage>(
+        await listMessagesApi(request.chatId, listRequest, requestOptions),
+      );
+    }
+
+    const listAgentMessagesApi = this.client.agentApiMessages?.listAgentMessages;
+    if (!listAgentMessagesApi) {
       throw new UnsupportedFeatureError("Fern client missing message list endpoint");
     }
 
-    return normalizePaginatedResponse<PlatformChatMessage>(response);
+    return normalizePaginatedResponse<PlatformChatMessage>(
+      await listAgentMessagesApi(request.chatId, listRequest, requestOptions),
+    );
   }
 
   public async getChatContext(
     request: { chatId: string; page?: number; pageSize?: number },
     options?: RestRequestOptions,
   ): Promise<PaginatedResponse<PlatformChatMessage>> {
-    const response = this.client.chatContext?.getChatContext
-      ? await this.client.chatContext.getChatContext(
-        request.chatId,
-        {
-          page: request.page,
-          page_size: request.pageSize,
-        },
-        mergeOptions(options),
-      )
-      : this.client.agentApiContext?.getAgentChatContext
-        ? await this.client.agentApiContext.getAgentChatContext(
-          request.chatId,
-          {
-            page: request.page,
-            page_size: request.pageSize,
-          },
-          mergeOptions(options),
-        )
-        : undefined;
-    if (!response) {
+    const requestOptions = mergeOptions(options);
+    const contextRequest = {
+      page: request.page,
+      page_size: request.pageSize,
+    };
+
+    const getChatContextApi = this.client.chatContext?.getChatContext;
+    if (getChatContextApi) {
+      return normalizePaginatedResponse<PlatformChatMessage>(
+        await getChatContextApi(request.chatId, contextRequest, requestOptions),
+      );
+    }
+
+    const getAgentChatContextApi = this.client.agentApiContext?.getAgentChatContext;
+    if (!getAgentChatContextApi) {
       throw new UnsupportedFeatureError("Fern client missing chat context endpoint");
     }
 
-    return normalizePaginatedResponse<PlatformChatMessage>(response);
+    return normalizePaginatedResponse<PlatformChatMessage>(
+      await getAgentChatContextApi(request.chatId, contextRequest, requestOptions),
+    );
   }
 }
 

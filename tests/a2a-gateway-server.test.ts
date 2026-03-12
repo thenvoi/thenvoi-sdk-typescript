@@ -3,10 +3,31 @@ import type { Server as HttpServer } from "node:http";
 import { describe, expect, it } from "vitest";
 
 import { createGatewayServer } from "../src/adapters/a2a-gateway/server";
-import type { GatewayServerOptions } from "../src/adapters/a2a-gateway/types";
+import type {
+  GatewayCancelRequest,
+  GatewayRequest,
+  GatewayServerOptions,
+} from "../src/adapters/a2a-gateway/types";
 
 interface RecordedUse {
   args: unknown[];
+}
+
+interface RecordedExecutor {
+  execute: (
+    requestContext: Record<string, unknown>,
+    eventBus: {
+      publish: (event: unknown) => void;
+      finished: () => void;
+    },
+  ) => Promise<void>;
+  cancelTask: (
+    taskId: string,
+    eventBus: {
+      publish: (event: unknown) => void;
+      finished: () => void;
+    },
+  ) => Promise<void>;
 }
 
 interface AuthResponse {
@@ -48,6 +69,7 @@ function makeServerOptions(
 
 function createModulesRecorder() {
   const recordedUses: RecordedUse[] = [];
+  const recordedExecutors: RecordedExecutor[] = [];
   const fakeServer = {
     once: () => fakeServer,
     close: (callback?: (error?: Error) => void) => callback?.(),
@@ -74,6 +96,14 @@ function createModulesRecorder() {
   const modules = {
     AGENT_CARD_PATH: ".well-known/agent-card.json",
     DefaultRequestHandler: class {
+      public constructor(
+        _agentCard: Record<string, unknown>,
+        _taskStore: unknown,
+        executor: RecordedExecutor,
+      ) {
+        recordedExecutors.push(executor);
+      }
+
       public async getAgentCard(): Promise<Record<string, unknown>> {
         return { ok: true };
       }
@@ -90,6 +120,7 @@ function createModulesRecorder() {
 
   return {
     recordedUses,
+    recordedExecutors,
     loadModules: async () => modules,
   };
 }
@@ -235,5 +266,72 @@ describe("GatewayServer", () => {
     });
 
     expect(nextCalled).toBe(true);
+  });
+
+  it("forwards canonical peer ids to adapter callbacks and includes slug aliases", async () => {
+    const { recordedExecutors, loadModules } = createModulesRecorder();
+    const requestCalls: GatewayRequest[] = [];
+    const cancelCalls: GatewayCancelRequest[] = [];
+    const server = createGatewayServer(makeServerOptions({
+      allowUnauthenticatedLoopback: true,
+      loadModules,
+      onRequest: async function* (request) {
+        requestCalls.push(request);
+        yield {
+          kind: "status-update",
+          taskId: request.taskId,
+          contextId: request.contextId,
+          final: true,
+          status: {
+            state: "completed",
+          },
+        };
+      },
+      onCancel: async (request) => {
+        cancelCalls.push(request);
+      },
+    }));
+
+    await server.start();
+    const executor = recordedExecutors[0];
+    expect(executor).toBeDefined();
+    if (!executor) {
+      throw new Error("Expected a recorded gateway executor");
+    }
+
+    await executor.execute(
+      {
+        taskId: "task-exec",
+        contextId: "ctx-exec",
+        userMessage: {
+          kind: "message",
+          messageId: "m-1",
+          role: "user",
+          parts: [],
+        },
+      },
+      {
+        publish: () => undefined,
+        finished: () => undefined,
+      },
+    );
+
+    await executor.cancelTask("task-cancel", {
+      publish: () => undefined,
+      finished: () => undefined,
+    });
+    await server.stop();
+
+    expect(requestCalls[0]).toMatchObject({
+      peerId: "peer-1",
+      peerSlug: "weather",
+      taskId: "task-exec",
+      contextId: "ctx-exec",
+    });
+    expect(cancelCalls[0]).toEqual({
+      peerId: "peer-1",
+      peerSlug: "weather",
+      taskId: "task-cancel",
+    });
   });
 });

@@ -136,7 +136,7 @@ export class PlatformRuntime {
         onBroadcast: (message) => {
           const runtime = this.runtime;
           if (!runtime) return;
-          for (const context of runtime.contextsList()) {
+          for (const context of runtime.getContexts()) {
             context.injectSystemMessage(message);
           }
         },
@@ -255,7 +255,7 @@ export class PlatformRuntime {
     }
 
     const message = this.formatContactBroadcast(event);
-    for (const context of runtime.contextsList()) {
+    for (const context of runtime.getContexts()) {
       context.injectSystemMessage(message);
     }
   }

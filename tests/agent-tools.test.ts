@@ -9,6 +9,10 @@ import type {
   RespondContactRequestArgs,
   StoreMemoryArgs,
 } from "../src/contracts/dtos";
+import {
+  isToolExecutorError,
+  toLegacyToolExecutorErrorMessage,
+} from "../src/contracts/protocols";
 import { UnsupportedFeatureError, ValidationError } from "../src/core/errors";
 import { AgentTools } from "../src/runtime/tools/AgentTools";
 
@@ -248,8 +252,14 @@ describe("AgentTools", () => {
       content: "hello",
       mentions: [],
     });
-    expect(result).toContain("Invalid arguments for thenvoi_send_message");
-    expect(result).toContain("mentions: At least one mention is required");
+    expect(isToolExecutorError(result)).toBe(true);
+    expect(result).toMatchObject({
+      ok: false,
+      errorType: "ToolArgumentsValidationError",
+      toolName: "thenvoi_send_message",
+    });
+    expect(toLegacyToolExecutorErrorMessage(result)).toContain("Invalid arguments for thenvoi_send_message");
+    expect(toLegacyToolExecutorErrorMessage(result)).toContain("mentions: At least one mention is required");
   });
 
   it("validates send_message requires content field", async () => {
@@ -261,8 +271,14 @@ describe("AgentTools", () => {
     const result = await tools.executeToolCall("thenvoi_send_message", {
       mentions: ["@jane"],
     });
-    expect(result).toContain("Invalid arguments for thenvoi_send_message");
-    expect(result).toContain("content: Field required");
+    expect(isToolExecutorError(result)).toBe(true);
+    expect(result).toMatchObject({
+      ok: false,
+      errorType: "ToolArgumentsValidationError",
+      toolName: "thenvoi_send_message",
+    });
+    expect(toLegacyToolExecutorErrorMessage(result)).toContain("Invalid arguments for thenvoi_send_message");
+    expect(toLegacyToolExecutorErrorMessage(result)).toContain("content: Field required");
   });
 
   it("validates send_event rejects invalid message_type", async () => {
@@ -275,8 +291,14 @@ describe("AgentTools", () => {
       content: "hello",
       message_type: "invalid_type",
     });
-    expect(result).toContain("Invalid arguments for thenvoi_send_event");
-    expect(result).toContain("message_type: Invalid value");
+    expect(isToolExecutorError(result)).toBe(true);
+    expect(result).toMatchObject({
+      ok: false,
+      errorType: "ToolArgumentsValidationError",
+      toolName: "thenvoi_send_event",
+    });
+    expect(toLegacyToolExecutorErrorMessage(result)).toContain("Invalid arguments for thenvoi_send_event");
+    expect(toLegacyToolExecutorErrorMessage(result)).toContain("message_type: Invalid value");
   });
 
   it("wraps execution errors as LLM-friendly strings", async () => {
@@ -290,7 +312,13 @@ describe("AgentTools", () => {
       content: "hello",
       mentions: ["@nonexistent"],
     });
-    expect(result).toContain("Error executing thenvoi_send_message");
+    expect(isToolExecutorError(result)).toBe(true);
+    expect(result).toMatchObject({
+      ok: false,
+      errorType: "ToolExecutionError",
+      toolName: "thenvoi_send_message",
+    });
+    expect(toLegacyToolExecutorErrorMessage(result)).toContain("Error executing thenvoi_send_message");
   });
 
   it("returns error string for unknown tools", async () => {
@@ -300,7 +328,13 @@ describe("AgentTools", () => {
     });
 
     const result = await tools.executeToolCall("unknown_tool", {});
-    expect(result).toBe("Unknown tool: unknown_tool");
+    expect(isToolExecutorError(result)).toBe(true);
+    expect(result).toMatchObject({
+      ok: false,
+      errorType: "ToolNotFoundError",
+      toolName: "unknown_tool",
+    });
+    expect(toLegacyToolExecutorErrorMessage(result)).toBe("Unknown tool: unknown_tool");
   });
 
   it("looks up peers across paginated pages when adding participant", async () => {

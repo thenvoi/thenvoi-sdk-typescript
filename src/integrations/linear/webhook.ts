@@ -8,7 +8,7 @@ import {
 } from "@linear/sdk/webhooks";
 
 import { NoopLogger, type Logger } from "../../core/logger";
-import { postThought } from "./activities";
+import { postError, postThought } from "./activities";
 import {
   getAgentSessionEventKey,
   handleAgentSessionEvent,
@@ -27,6 +27,7 @@ export interface LinearBridgeDispatchJob {
 export interface LinearBridgeDispatcher {
   dispatch(job: LinearBridgeDispatchJob): void;
   isQueued?(eventKey: string): boolean;
+  waitForIdle?(): Promise<void>;
 }
 
 export interface CreateLinearWebhookHandlerOptions {
@@ -42,22 +43,54 @@ type NodeRequestWithBody = IncomingMessage & {
 const DISPATCH_RETRY_LIMIT = 2;
 const DISPATCH_RETRY_BASE_DELAY_MS = 1_000;
 
+interface DispatchTerminalFailure {
+  eventKey: string;
+  sessionId: string;
+  attempts: number;
+  error: unknown;
+}
+
+type DispatchAttemptResult =
+  | { ok: true }
+  | { ok: false; attempts: number; error: unknown };
+
 export function createInProcessLinearBridgeDispatcher(
   options?: { logger?: Logger },
 ): LinearBridgeDispatcher {
   const logger = options?.logger ?? new NoopLogger();
   const queued = new Set<string>();
+  const inFlight = new Set<Promise<void>>();
+  const terminalFailures: DispatchTerminalFailure[] = [];
 
   return {
     isQueued: (eventKey: string) => queued.has(eventKey),
+    waitForIdle: async (): Promise<void> => {
+      while (inFlight.size > 0) {
+        await Promise.allSettled([...inFlight]);
+      }
+
+      if (terminalFailures.length === 0) {
+        return;
+      }
+
+      const failures = terminalFailures.splice(0, terminalFailures.length);
+      throw new AggregateError(
+        failures.map((failure) => toDispatchFailureError(failure)),
+        `Linear bridge async dispatch failed for ${failures.length} event(s)`,
+      );
+    },
     dispatch: (job: LinearBridgeDispatchJob) => {
       if (queued.has(job.eventKey)) {
         return;
       }
 
       queued.add(job.eventKey);
-      queueMicrotask(() => {
-        void runDispatchAttempt(async () => {
+      const dispatchTask = (async (): Promise<void> => {
+        await new Promise<void>((resolveMicrotask) => {
+          queueMicrotask(() => resolveMicrotask());
+        });
+
+        const result = await runDispatchAttempt(async () => {
           await handleAgentSessionEvent(job.input, {
             skipAcknowledgment: true,
             expectedEventKey: job.eventKey,
@@ -68,9 +101,36 @@ export function createInProcessLinearBridgeDispatcher(
           retryEvent: "linear_thenvoi_bridge.async_dispatch_retrying",
           eventKey: job.eventKey,
           sessionId: job.input.payload.agentSession.id,
-        }).finally(() => {
-          queued.delete(job.eventKey);
         });
+
+        if (result.ok) {
+          return;
+        }
+
+        const failure: DispatchTerminalFailure = {
+          eventKey: job.eventKey,
+          sessionId: job.input.payload.agentSession.id,
+          attempts: result.attempts,
+          error: result.error,
+        };
+        terminalFailures.push(failure);
+        await signalTerminalDispatchFailure({
+          logger,
+          job,
+          failure,
+        });
+      })();
+
+      inFlight.add(dispatchTask);
+      void dispatchTask.catch((error) => {
+        logger.error("linear_thenvoi_bridge.async_dispatch_failure_signal_crashed", {
+          eventKey: job.eventKey,
+          sessionId: job.input.payload.agentSession.id,
+          error: serializeError(error),
+        });
+      }).finally(() => {
+        queued.delete(job.eventKey);
+        inFlight.delete(dispatchTask);
       });
     },
   };
@@ -225,7 +285,7 @@ async function runDispatchAttempt(
     eventKey: string;
     sessionId: string;
   },
-): Promise<void> {
+): Promise<DispatchAttemptResult> {
   const retryLimit = Number(process.env.LINEAR_THENVOI_DISPATCH_RETRY_LIMIT ?? String(DISPATCH_RETRY_LIMIT));
   const retryBaseDelayMs = Number(
     process.env.LINEAR_THENVOI_DISPATCH_RETRY_BASE_DELAY_MS ?? String(DISPATCH_RETRY_BASE_DELAY_MS),
@@ -235,7 +295,7 @@ async function runDispatchAttempt(
   while (true) {
     try {
       await task();
-      return;
+      return { ok: true };
     } catch (error) {
       if (!isRetryableDispatchError(error) || attempt >= retryLimit) {
         context.logger.error(context.failureEvent, {
@@ -243,7 +303,11 @@ async function runDispatchAttempt(
           sessionId: context.sessionId,
           error: serializeError(error),
         });
-        return;
+        return {
+          ok: false,
+          attempts: attempt + 1,
+          error,
+        };
       }
 
       attempt += 1;
@@ -256,6 +320,63 @@ async function runDispatchAttempt(
       });
       await sleep(retryBaseDelayMs * attempt);
     }
+  }
+}
+
+async function signalTerminalDispatchFailure(input: {
+  logger: Logger;
+  job: LinearBridgeDispatchJob;
+  failure: DispatchTerminalFailure;
+}): Promise<void> {
+  const { logger, job, failure } = input;
+
+  try {
+    const existing = await job.input.deps.store.getBySessionId(failure.sessionId);
+    if (existing) {
+      await job.input.deps.store.upsert({
+        ...existing,
+        status: "errored",
+        lastEventKey: job.eventKey,
+        updatedAt: new Date().toISOString(),
+      });
+      logger.warn("linear_thenvoi_bridge.async_dispatch_terminal_failure_signaled", {
+        eventKey: failure.eventKey,
+        sessionId: failure.sessionId,
+        attempts: failure.attempts,
+        signal: "session_store_status_errored",
+      });
+      return;
+    }
+  } catch (storeError) {
+    logger.error("linear_thenvoi_bridge.async_dispatch_terminal_failure_store_signal_failed", {
+      eventKey: failure.eventKey,
+      sessionId: failure.sessionId,
+      attempts: failure.attempts,
+      dispatchError: serializeError(failure.error),
+      signalError: serializeError(storeError),
+    });
+  }
+
+  try {
+    await postError(
+      job.input.deps.linearClient,
+      failure.sessionId,
+      "Bridge dispatch failed and could not recover automatically. Retry this session event in Linear.",
+    );
+    logger.warn("linear_thenvoi_bridge.async_dispatch_terminal_failure_signaled", {
+      eventKey: failure.eventKey,
+      sessionId: failure.sessionId,
+      attempts: failure.attempts,
+      signal: "linear_activity_error",
+    });
+  } catch (signalError) {
+    logger.error("linear_thenvoi_bridge.async_dispatch_terminal_failure_signal_failed", {
+      eventKey: failure.eventKey,
+      sessionId: failure.sessionId,
+      attempts: failure.attempts,
+      dispatchError: serializeError(failure.error),
+      signalError: serializeError(signalError),
+    });
   }
 }
 
@@ -282,4 +403,11 @@ function serializeError(error: unknown): Record<string, unknown> {
   return {
     message: String(error),
   };
+}
+
+function toDispatchFailureError(failure: DispatchTerminalFailure): Error {
+  return new Error(
+    `Linear bridge async dispatch failed for event ${failure.eventKey} (session ${failure.sessionId})`,
+    { cause: failure.error },
+  );
 }
