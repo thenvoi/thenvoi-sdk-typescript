@@ -46,7 +46,8 @@ export interface PeerRecord {
   description?: string | null;
 }
 
-export interface ContactRecord {
+// Wire DTOs intentionally preserve API snake_case field names.
+export interface WireContactRecord {
   id?: string;
   handle?: string;
   name?: string | null;
@@ -55,29 +56,34 @@ export interface ContactRecord {
   is_external?: boolean | null;
   inserted_at?: string;
 }
+export type ContactRecord = WireContactRecord;
 
-export interface ContactRequestRecord {
+export interface WireContactRequestRecord {
   id?: string;
   status?: string;
   message?: string | null;
   inserted_at?: string | null;
 }
+export type ContactRequestRecord = WireContactRequestRecord;
 
-export interface ReceivedContactRequestRecord extends ContactRequestRecord {
+export interface WireReceivedContactRequestRecord extends WireContactRequestRecord {
   from_handle?: string | null;
   from_name?: string | null;
 }
+export type ReceivedContactRequestRecord = WireReceivedContactRequestRecord;
 
-export interface SentContactRequestRecord extends ContactRequestRecord {
+export interface WireSentContactRequestRecord extends WireContactRequestRecord {
   to_handle?: string | null;
   to_name?: string | null;
 }
+export type SentContactRequestRecord = WireSentContactRequestRecord;
 
-export interface ContactRequestsResult {
-  received: ReceivedContactRequestRecord[];
-  sent: SentContactRequestRecord[];
+export interface WireContactRequestsResult {
+  received: WireReceivedContactRequestRecord[];
+  sent: WireSentContactRequestRecord[];
   metadata?: MetadataMap;
 }
+export type ContactRequestsResult = WireContactRequestsResult;
 
 export type ContactRequestAction = "approve" | "reject" | "cancel";
 
@@ -118,7 +124,8 @@ export type MemoryType =
 export type MemorySegment = "user" | "agent" | "tool" | "guideline";
 export type MemoryStatus = "active" | "superseded" | "archived" | "all";
 
-export interface ListMemoriesArgs {
+// Wire DTOs intentionally preserve API snake_case field names.
+export interface WireListMemoriesArgs {
   subject_id?: string;
   scope?: MemoryScope;
   system?: MemorySystem;
@@ -128,8 +135,9 @@ export interface ListMemoriesArgs {
   page_size?: number;
   status?: MemoryStatus;
 }
+export type ListMemoriesArgs = WireListMemoriesArgs;
 
-export interface StoreMemoryArgs {
+export interface WireStoreMemoryArgs {
   content: string;
   system: MemorySystem;
   type: MemoryType;
@@ -139,8 +147,9 @@ export interface StoreMemoryArgs {
   subject_id?: string;
   metadata?: MetadataMap;
 }
+export type StoreMemoryArgs = WireStoreMemoryArgs;
 
-export interface MemoryRecord {
+export interface WireMemoryRecord {
   id?: string;
   content?: string;
   system?: string;
@@ -155,6 +164,7 @@ export interface MemoryRecord {
   metadata?: MetadataMap | null;
   inserted_at?: string | null;
 }
+export type MemoryRecord = WireMemoryRecord;
 
 /** Tool schema as returned by getToolSchemas(). Format depends on the requested format ("openai" or "anthropic"). */
 export interface ToolSchemaRecord {
