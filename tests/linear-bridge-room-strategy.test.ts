@@ -299,34 +299,44 @@ describe("linear bridge room strategy", () => {
   });
 
   it("retries the recreated room when the first post races room access propagation", async () => {
-    const restApi = new FlakyRecoveredRoomRestApi();
-    const store = new MemorySessionRoomStore();
+    const previousDelay = process.env.LINEAR_THENVOI_RECOVERED_ROOM_RETRY_BASE_DELAY_MS;
+    process.env.LINEAR_THENVOI_RECOVERED_ROOM_RETRY_BASE_DELAY_MS = "0";
+    try {
+      const restApi = new FlakyRecoveredRoomRestApi();
+      const store = new MemorySessionRoomStore();
 
-    await handleAgentSessionEvent({
-      payload: makePayload("session-1", "issue-1"),
-      config: makeConfig("issue"),
-      deps: {
-        thenvoiRest: restApi,
-        linearClient: makeLinearClient(),
-        store,
-      },
-    });
+      await handleAgentSessionEvent({
+        payload: makePayload("session-1", "issue-1"),
+        config: makeConfig("issue"),
+        deps: {
+          thenvoiRest: restApi,
+          linearClient: makeLinearClient(),
+          store,
+        },
+      });
 
-    await handleAgentSessionEvent({
-      payload: makePayload("session-2", "issue-1"),
-      config: makeConfig("issue"),
-      deps: {
-        thenvoiRest: restApi,
-        linearClient: makeLinearClient(),
-        store,
-      },
-    });
+      await handleAgentSessionEvent({
+        payload: makePayload("session-2", "issue-1"),
+        config: makeConfig("issue"),
+        deps: {
+          thenvoiRest: restApi,
+          linearClient: makeLinearClient(),
+          store,
+        },
+      });
 
-    expect(restApi.roomEvents).toHaveLength(2);
-    expect(restApi.roomEvents[0]?.roomId).not.toBe(restApi.roomEvents[1]?.roomId);
-    await expect(store.getBySessionId("session-2")).resolves.toMatchObject({
-      thenvoiRoomId: restApi.roomEvents[1]?.roomId,
-      status: "active",
-    });
+      expect(restApi.roomEvents).toHaveLength(2);
+      expect(restApi.roomEvents[0]?.roomId).not.toBe(restApi.roomEvents[1]?.roomId);
+      await expect(store.getBySessionId("session-2")).resolves.toMatchObject({
+        thenvoiRoomId: restApi.roomEvents[1]?.roomId,
+        status: "active",
+      });
+    } finally {
+      if (previousDelay === undefined) {
+        delete process.env.LINEAR_THENVOI_RECOVERED_ROOM_RETRY_BASE_DELAY_MS;
+      } else {
+        process.env.LINEAR_THENVOI_RECOVERED_ROOM_RETRY_BASE_DELAY_MS = previousDelay;
+      }
+    }
   });
 });

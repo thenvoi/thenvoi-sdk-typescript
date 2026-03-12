@@ -27,6 +27,7 @@ const MAX_PEER_LOOKUP_PAGES = 25;
 const PEER_PAGE_SIZE = 100;
 const RECOVERED_ROOM_EVENT_RETRY_LIMIT = 2;
 const RECOVERED_ROOM_EVENT_RETRY_BASE_DELAY_MS = 1_000;
+const RECOVERED_ROOM_EVENT_RETRY_BASE_DELAY_ENV = "LINEAR_THENVOI_RECOVERED_ROOM_RETRY_BASE_DELAY_MS";
 
 // Guards against concurrent room creation for the same session.
 const roomResolutionLocks = new Map<string, Promise<SessionRoomRecord>>();
@@ -656,18 +657,34 @@ async function forwardBridgeMessage(input: {
         }
 
         attempt += 1;
+        const retryBaseDelayMs = getRecoveredRoomRetryBaseDelayMs();
+        const delayMs = retryBaseDelayMs * attempt;
         input.logger.warn("linear_thenvoi_bridge.room_recreated_retrying", {
           sessionId: input.sessionId,
           issueId: input.issueId,
           roomId: recoveredRoom.thenvoiRoomId,
           attempt,
-          delayMs: RECOVERED_ROOM_EVENT_RETRY_BASE_DELAY_MS * attempt,
+          delayMs,
           error: recoveredError instanceof Error ? recoveredError.message : String(recoveredError),
         });
-        await sleep(RECOVERED_ROOM_EVENT_RETRY_BASE_DELAY_MS * attempt);
+        await sleep(delayMs);
       }
     }
   }
+}
+
+function getRecoveredRoomRetryBaseDelayMs(): number {
+  const override = process.env[RECOVERED_ROOM_EVENT_RETRY_BASE_DELAY_ENV];
+  if (override === undefined) {
+    return RECOVERED_ROOM_EVENT_RETRY_BASE_DELAY_MS;
+  }
+
+  const parsed = Number(override);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return RECOVERED_ROOM_EVENT_RETRY_BASE_DELAY_MS;
+  }
+
+  return parsed;
 }
 
 function isRecoverableRoomAccessError(error: unknown): boolean {
