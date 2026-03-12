@@ -1,4 +1,4 @@
-export interface LazyAsyncValueOptions<T> {
+interface LazyAsyncValueOptions<T> {
   load: () => Promise<T>;
   onRejected?: (error: unknown) => void;
 }

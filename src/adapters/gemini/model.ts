@@ -8,7 +8,7 @@ import type {
 import { toDisplayText, toWireString } from "../shared/coercion";
 import { LazyAsyncValue } from "../shared/lazyAsyncValue";
 import {
-  ensureToolCalls,
+  resolveToolRounds,
   normalizeConversationRole,
 } from "../tool-calling/valueUtils";
 
@@ -162,54 +162,26 @@ export class GeminiToolCallingModel implements ToolCallingModel {
     // Merge consecutive same-role entries before appending tool call/result blocks.
     const merged = mergeConsecutiveGeminiContents(contents);
 
-    const rounds = request.toolRounds ?? [];
-    if (rounds.length > 0) {
-      const partFromCall = this.createPartFromFunctionCall;
-      const partFromResponse = this.createPartFromFunctionResponse;
-      if (!partFromCall || !partFromResponse) {
-        throw new Error("Part factories not initialized. Call ensurePartFactories() first.");
-      }
+    const rounds = resolveToolRounds(request);
+    if (rounds.length === 0) {
+      return merged;
+    }
 
-      for (const round of rounds) {
-        merged.push({
-          role: "model",
-          parts: round.toolCalls.map((call) => partFromCall(call.name, call.input)),
-        });
+    const partFromCall = this.createPartFromFunctionCall;
+    const partFromResponse = this.createPartFromFunctionResponse;
+    if (!partFromCall || !partFromResponse) {
+      throw new Error("Part factories not initialized. Call ensurePartFactories() first.");
+    }
 
-        merged.push({
-          role: "user",
-          parts: round.toolResults.map((result) =>
-            partFromResponse(
-              result.toolCallId,
-              result.name,
-              asFunctionResponsePayload(result),
-            ),
-          ),
-        });
-      }
-    } else {
-      // Fall back to deprecated flat fields for backwards compatibility.
-      const legacyToolCalls = request.toolCalls ?? [];
-      const legacyToolResults = request.toolResults ?? [];
-      if (legacyToolCalls.length === 0 && legacyToolResults.length === 0) {
-        return merged;
-      }
-
-      const partFromCall = this.createPartFromFunctionCall;
-      const partFromResponse = this.createPartFromFunctionResponse;
-      if (!partFromCall || !partFromResponse) {
-        throw new Error("Part factories not initialized. Call ensurePartFactories() first.");
-      }
-
-      const toolCalls = ensureToolCalls(request);
+    for (const round of rounds) {
       merged.push({
         role: "model",
-        parts: toolCalls.map((call) => partFromCall(call.name, call.input)),
+        parts: round.toolCalls.map((call) => partFromCall(call.name, call.input)),
       });
 
       merged.push({
         role: "user",
-        parts: legacyToolResults.map((result) =>
+        parts: round.toolResults.map((result) =>
           partFromResponse(
             result.toolCallId,
             result.name,

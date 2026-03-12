@@ -10,7 +10,6 @@ export {
   postAction,
   postElicitation,
   postError,
-  postFinalResponseToLinearSession,
   postResponse,
   postThought,
   stripHandlePrefix,

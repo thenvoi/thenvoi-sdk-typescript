@@ -28,9 +28,8 @@ import { assertChatEventType, CHAT_EVENT_TYPES } from "../messages";
 import {
   CHAT_TOOL_NAMES,
   MEMORY_TOOL_NAMES,
-  assertFeatureEnabled,
   getToolDescription,
-  TOOL_MODELS,
+  TOOL_MODELS
 } from "./schemas";
 
 interface AgentToolsOptions {
@@ -39,6 +38,60 @@ interface AgentToolsOptions {
   participants?: ParticipantRecord[];
   capabilities?: Partial<AgentToolsCapabilities>;
 }
+
+type AdapterToolMethodName =
+  | "sendMessage"
+  | "sendEvent"
+  | "addParticipant"
+  | "removeParticipant"
+  | "getParticipants"
+  | "createChatroom"
+  | "getToolSchemas"
+  | "getAnthropicToolSchemas"
+  | "getOpenAIToolSchemas"
+  | "executeToolCall"
+  | "lookupPeers"
+  | "listContacts"
+  | "addContact"
+  | "removeContact"
+  | "listContactRequests"
+  | "respondContactRequest"
+  | "listMemories"
+  | "storeMemory"
+  | "getMemory"
+  | "supersedeMemory"
+  | "archiveMemory";
+
+const REQUIRED_ADAPTER_TOOL_METHODS = [
+  "sendMessage",
+  "sendEvent",
+  "addParticipant",
+  "removeParticipant",
+  "getParticipants",
+  "createChatroom",
+  "getToolSchemas",
+  "getAnthropicToolSchemas",
+  "getOpenAIToolSchemas",
+  "executeToolCall",
+] as const satisfies readonly AdapterToolMethodName[];
+
+const OPTIONAL_ADAPTER_TOOL_METHODS: Record<keyof AgentToolsCapabilities, readonly AdapterToolMethodName[]> = {
+  peers: ["lookupPeers"],
+  contacts: [
+    "listContacts",
+    "addContact",
+    "removeContact",
+    "listContactRequests",
+    "respondContactRequest",
+  ],
+  memory: [
+    "listMemories",
+    "storeMemory",
+    "getMemory",
+    "supersedeMemory",
+    "archiveMemory",
+  ],
+};
 
 export class AgentTools implements AgentToolsProtocol {
   public readonly roomId: string;
@@ -560,41 +613,30 @@ export class AgentTools implements AgentToolsProtocol {
   }
 
   private buildAdapterTools(): AdapterToolsProtocol {
-    const tools: AdapterToolsProtocol = {
+    const tools: Partial<AdapterToolsProtocol> = {
       capabilities: this.capabilities,
-      sendMessage: this.sendMessage.bind(this),
-      sendEvent: this.sendEvent.bind(this),
-      addParticipant: this.addParticipant.bind(this),
-      removeParticipant: this.removeParticipant.bind(this),
-      getParticipants: this.getParticipants.bind(this),
-      createChatroom: this.createChatroom.bind(this),
-      getToolSchemas: this.getToolSchemas.bind(this),
-      getAnthropicToolSchemas: this.getAnthropicToolSchemas.bind(this),
-      getOpenAIToolSchemas: this.getOpenAIToolSchemas.bind(this),
-      executeToolCall: this.executeToolCall.bind(this),
     };
 
-    if (this.capabilities.peers) {
-      tools.lookupPeers = this.lookupPeers.bind(this);
+    for (const methodName of REQUIRED_ADAPTER_TOOL_METHODS) {
+      (tools as Record<string, unknown>)[methodName] = this.bindAdapterToolMethod(methodName);
     }
 
-    if (this.capabilities.contacts) {
-      tools.listContacts = this.listContacts.bind(this);
-      tools.addContact = this.addContact.bind(this);
-      tools.removeContact = this.removeContact.bind(this);
-      tools.listContactRequests = this.listContactRequests.bind(this);
-      tools.respondContactRequest = this.respondContactRequest.bind(this);
+    for (const [capabilityKey, methodNames] of Object.entries(OPTIONAL_ADAPTER_TOOL_METHODS) as
+      Array<[keyof AgentToolsCapabilities, readonly AdapterToolMethodName[]]>) {
+      if (!this.capabilities[capabilityKey]) {
+        continue;
+      }
+      for (const methodName of methodNames) {
+        (tools as Record<string, unknown>)[methodName] = this.bindAdapterToolMethod(methodName);
+      }
     }
 
-    if (this.capabilities.memory) {
-      tools.listMemories = this.listMemories.bind(this);
-      tools.storeMemory = this.storeMemory.bind(this);
-      tools.getMemory = this.getMemory.bind(this);
-      tools.supersedeMemory = this.supersedeMemory.bind(this);
-      tools.archiveMemory = this.archiveMemory.bind(this);
-    }
+    return Object.freeze(tools) as AdapterToolsProtocol;
+  }
 
-    return Object.freeze(tools);
+  private bindAdapterToolMethod<K extends AdapterToolMethodName>(methodName: K): AdapterToolsProtocol[K] {
+    const method = this[methodName] as unknown as (...args: unknown[]) => unknown;
+    return method.bind(this) as AdapterToolsProtocol[K];
   }
 }
 

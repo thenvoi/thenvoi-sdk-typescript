@@ -1,6 +1,6 @@
-export type JsonPrimitive = string | number | boolean | null;
+type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
-export type JsonObject = { [key: string]: JsonValue };
+type JsonObject = { [key: string]: JsonValue };
 export type RequestId = number | string;
 
 export type CodexApprovalPolicy =
@@ -41,7 +41,7 @@ export interface ThreadRef {
   id: string;
 }
 
-export interface ThreadStartParams {
+interface ThreadStartParams {
   model?: string | null;
   cwd?: string | null;
   approvalPolicy?: CodexApprovalPolicy | null;
@@ -53,7 +53,7 @@ export interface ThreadStartParams {
   persistExtendedHistory: boolean;
 }
 
-export interface ThreadResumeParams {
+interface ThreadResumeParams {
   threadId: string;
   model?: string | null;
   cwd?: string | null;
@@ -64,12 +64,12 @@ export interface ThreadResumeParams {
   persistExtendedHistory: boolean;
 }
 
-export interface TextUserInput {
+interface TextUserInput {
   type: "text";
   text: string;
 }
 
-export interface LocalImageUserInput {
+interface LocalImageUserInput {
   type: "local_image";
   path: string;
 }
@@ -147,11 +147,11 @@ export interface DynamicToolCallResponse {
   success: boolean;
 }
 
-export interface CommandExecutionApprovalResponse {
+interface CommandExecutionApprovalResponse {
   decision: "accept" | "acceptForSession" | "decline" | "cancel";
 }
 
-export interface FileChangeApprovalResponse {
+interface FileChangeApprovalResponse {
   decision: "accept" | "acceptForSession" | "decline" | "cancel";
 }
 

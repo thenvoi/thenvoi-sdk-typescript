@@ -273,7 +273,7 @@ describe("createLinearTools", () => {
     const tool = tools.find((entry) => entry.name === "linear_update_issue")!;
 
     const result = await executeCustomTool(tool, {
-      issue_id: "issue-1",
+      issue_id: TEST_ISSUE_ID,
       title: "Updated title",
       priority: 2,
       assignee_id: null,
@@ -281,7 +281,7 @@ describe("createLinearTools", () => {
 
     expect(result).toEqual({ ok: true });
     expect(client.updateIssue).toHaveBeenCalledWith(
-      "issue-1",
+      TEST_ISSUE_ID,
       expect.objectContaining({
         title: "Updated title",
         priority: 2,
@@ -395,13 +395,13 @@ describe("createLinearTools", () => {
     const tool = tools.find((entry) => entry.name === "linear_add_issue_comment")!;
 
     const result = await executeCustomTool(tool, {
-      issue_id: "issue-1",
+      issue_id: TEST_ISSUE_ID,
       body: "Implemented and verified.",
     });
 
     expect(result).toEqual({ ok: true });
     expect(client.createComment).toHaveBeenCalledWith({
-      issueId: "issue-1",
+      issueId: TEST_ISSUE_ID,
       body: "Implemented and verified.",
     });
   });

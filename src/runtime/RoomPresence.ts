@@ -6,17 +6,17 @@ import { UnsupportedFeatureError } from "../core/errors";
 import type { Logger } from "../core/logger";
 import { NoopLogger } from "../core/logger";
 
-export interface RoomPresenceOptions {
+interface RoomPresenceOptions {
   link: ThenvoiLink;
   roomFilter?: (room: MetadataMap) => boolean;
   autoSubscribeExistingRooms?: boolean;
   logger?: Logger;
 }
 
-export type RoomPresenceJoinHandler = (roomId: string, payload: MetadataMap) => Promise<void>;
-export type RoomPresenceLeaveHandler = (roomId: string) => Promise<void>;
-export type RoomPresenceEventHandler = (roomId: string, event: PlatformEvent) => Promise<void>;
-export type RoomPresenceContactHandler = (event: ContactEvent) => Promise<void>;
+type RoomPresenceJoinHandler = (roomId: string, payload: MetadataMap) => Promise<void>;
+type RoomPresenceLeaveHandler = (roomId: string) => Promise<void>;
+type RoomPresenceEventHandler = (roomId: string, event: PlatformEvent) => Promise<void>;
+type RoomPresenceContactHandler = (event: ContactEvent) => Promise<void>;
 
 export class RoomPresence {
   public readonly rooms = new Set<string>();
@@ -141,7 +141,7 @@ export class RoomPresence {
 
   private async subscribeExistingRooms(): Promise<void> {
     try {
-      const rooms = await this.link.rest.listAllChats(
+      const rooms = await this.link.listAllChats(
         { pageSize: 100, maxPages: 100 },
         DEFAULT_REQUEST_OPTIONS,
       );

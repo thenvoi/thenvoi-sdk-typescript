@@ -37,7 +37,7 @@ interface ClaudeSdkMessageLike {
   [key: string]: unknown;
 }
 
-export interface ClaudeQueryOptions {
+interface ClaudeQueryOptions {
   model?: string;
   permissionMode?: ClaudePermissionMode;
   systemPrompt?: string;

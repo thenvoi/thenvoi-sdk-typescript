@@ -6,11 +6,13 @@ import { NoopLogger } from "../../core/logger";
 import type { HistoryProvider, PlatformMessage } from "../../runtime/types";
 import { formatHistoryForLlm } from "../../runtime/formatters";
 import {
+  CustomToolExecutionError,
+  CustomToolValidationError,
   type CustomToolDef,
   buildCustomToolIndex,
   customToolsToSchemas,
   executeCustomTool,
-  findCustomTool,
+  findCustomToolInIndex,
 } from "../../runtime/tools/customTools";
 import type {
   ToolCallingModel,
@@ -108,14 +110,27 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
           );
         }
 
-        const customTool = findCustomTool(this.customToolIndex, call.name);
+        const customTool = findCustomToolInIndex(this.customToolIndex, call.name);
         let output: unknown;
         if (customTool) {
           try {
             output = await executeCustomTool(customTool, call.input);
           } catch (error) {
-            const label = error instanceof Error ? error.message : String(error);
-            output = `Error executing ${call.name}: ${label}`;
+            if (error instanceof CustomToolValidationError || error instanceof CustomToolExecutionError) {
+              output = {
+                ok: false,
+                errorType: error.name,
+                message: error.message,
+                toolName: error.toolName,
+              };
+            } else {
+              output = {
+                ok: false,
+                errorType: "CustomToolUnknownError",
+                message: error instanceof Error ? error.message : String(error),
+                toolName: call.name,
+              };
+            }
           }
         } else {
           output = await tools.executeToolCall(call.name, call.input);
@@ -218,5 +233,8 @@ export function runSingleToolRound(
   model: ToolCallingModel,
   request: ToolCallingModelRequest,
 ): Promise<ToolCallingResponse> {
-  return model.complete(request);
+  return model.complete(request).catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Tool round failed: ${message}`);
+  });
 }

@@ -275,7 +275,7 @@ describe("ToolCallingAdapter", () => {
     expect(tools.messages).toEqual(["done"]);
   });
 
-  it("catches custom tool errors and returns error string", async () => {
+  it("catches custom tool errors and returns typed error output", async () => {
     const customTool: CustomToolDef = {
       schema: z.object({ query: z.string() }),
       handler: () => { throw new Error("API down"); },
@@ -291,9 +291,17 @@ describe("ToolCallingAdapter", () => {
             toolCalls: [{ id: "tc1", name: "search", input: { query: "test" } }],
           };
         }
-        // Verify the error was caught and passed as tool result (check toolRounds first, fall back to deprecated flat field)
-        const result = req.toolRounds?.[0]?.toolResults?.[0]?.output ?? req.toolResults?.[0]?.output;
-        return { text: typeof result === "string" && result.includes("API down") ? "error_caught" : "no_error" };
+        // Verify the error was caught and passed as tool result (prefer toolRounds, then flat fallback fields).
+        const toolOutput =
+          req.toolRounds?.[0]?.toolResults?.[0]?.output ?? req.toolResults?.[0]?.output;
+        const caughtAsTypedError = Boolean(
+          toolOutput
+          && typeof toolOutput === "object"
+          && (toolOutput as { ok?: unknown }).ok === false
+          && typeof (toolOutput as { message?: unknown }).message === "string"
+          && (toolOutput as { message: string }).message.includes("API down"),
+        );
+        return { text: caughtAsTypedError ? "error_caught" : "no_error" };
       }
     }
 

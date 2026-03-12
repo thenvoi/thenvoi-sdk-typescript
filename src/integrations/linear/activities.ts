@@ -24,71 +24,43 @@ export interface PlanStep {
   status: "pending" | "in_progress" | "completed" | "failed";
 }
 
-/** Post a thought activity to a Linear agent session. */
-export async function postThought(
+async function postActivity(
   client: LinearActivityClient,
   sessionId: string,
-  body: string,
+  content: Record<string, unknown>,
 ): Promise<void> {
   await client.createAgentActivity({
     agentSessionId: sessionId,
-    content: { type: L.AgentActivityType.Thought, body },
+    content,
   });
 }
 
-/** Post an action activity to a Linear agent session. */
+function createBodyActivityPoster(type: L.AgentActivityType) {
+  return async (
+    client: LinearActivityClient,
+    sessionId: string,
+    body: string,
+  ): Promise<void> => {
+    await postActivity(client, sessionId, { type, body });
+  };
+}
+
+export const postThought = createBodyActivityPoster(L.AgentActivityType.Thought);
+export const postError = createBodyActivityPoster(L.AgentActivityType.Error);
+export const postResponse = createBodyActivityPoster(L.AgentActivityType.Response);
+export const postElicitation = createBodyActivityPoster(L.AgentActivityType.Elicitation);
+
 export async function postAction(
   client: LinearActivityClient,
   sessionId: string,
   body: string,
 ): Promise<void> {
-  await client.createAgentActivity({
-    agentSessionId: sessionId,
-    content: {
-      type: L.AgentActivityType.Action,
-      action: body,
-      parameter: "",
-    },
+  await postActivity(client, sessionId, {
+    type: L.AgentActivityType.Action,
+    action: body,
+    parameter: "",
   });
 }
-
-/** Post an error activity to a Linear agent session. */
-export async function postError(
-  client: LinearActivityClient,
-  sessionId: string,
-  body: string,
-): Promise<void> {
-  await client.createAgentActivity({
-    agentSessionId: sessionId,
-    content: { type: L.AgentActivityType.Error, body },
-  });
-}
-
-/** Post a response activity to a Linear agent session. */
-export async function postResponse(
-  client: LinearActivityClient,
-  sessionId: string,
-  body: string,
-): Promise<void> {
-  await client.createAgentActivity({
-    agentSessionId: sessionId,
-    content: { type: L.AgentActivityType.Response, body },
-  });
-}
-
-/** Post an elicitation (user question) activity to a Linear agent session. */
-export async function postElicitation(
-  client: LinearActivityClient,
-  sessionId: string,
-  body: string,
-): Promise<void> {
-  await client.createAgentActivity({
-    agentSessionId: sessionId,
-    content: { type: L.AgentActivityType.Elicitation, body },
-  });
-}
-
-/** Update the visible plan steps for a Linear agent session. */
 export async function updatePlan(
   client: LinearActivityClient,
   sessionId: string,
@@ -105,11 +77,8 @@ export async function updatePlan(
     })
     .join("\n");
 
-  await client.createAgentActivity({
-    agentSessionId: sessionId,
-    content: {
-      type: L.AgentActivityType.Thought,
-      body: `**Plan:**\n${planSummary}`,
-    },
+  await postActivity(client, sessionId, {
+    type: L.AgentActivityType.Thought,
+    body: `**Plan:**\n${planSummary}`,
   });
 }

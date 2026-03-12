@@ -12,7 +12,7 @@ import {
 import { completeLinearSession } from "./bridge";
 import type { SessionRoomStore } from "./types";
 
-export interface CreateLinearToolsOptions {
+interface CreateLinearToolsOptions {
   client: LinearActivityClient;
   store?: SessionRoomStore;
   enableElicitation?: boolean;
@@ -28,6 +28,13 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     session_id: z.string().describe("The Linear agent session ID"),
     body: z.string().describe("The message body in Markdown format"),
   });
+  const issueIdAliasSchema = z.object({
+    issue_id: z.string().optional().describe("The Linear issue ID (UUID) from the session context"),
+    issueId: z.string().optional().describe("Alias for issue_id"),
+    id: z.string().optional().describe("Alias for issue_id"),
+  });
+  const requiredIssueIdSchema = issueIdAliasSchema;
+  const optionalIssueIdSchema = issueIdAliasSchema;
 
   const tools: CustomToolDef[] = [];
   const addSessionBodyTool = (
@@ -166,65 +173,51 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     {
       name: "get_issue",
       description: "Compatibility alias for linear_get_issue. Requires the exact Linear issue UUID from the session context.",
-      schema: z.object({
-        id: z.string().describe("The Linear issue ID (UUID) from the session context"),
-      }),
+      schema: requiredIssueIdSchema,
       handler: async (args: Record<string, unknown>) => {
-        const issueId = args.id as string;
-        assertUuid("get_issue", issueId);
+        const issueId = resolveIssueId("get_issue", args);
         return readIssue(client, issueId);
       },
     },
     {
       name: "list_comments",
       description: "Compatibility alias for linear_list_issue_comments. Requires the exact Linear issue UUID from the session context.",
-      schema: z.object({
-        issueId: z.string().describe("The Linear issue ID (UUID) from the session context"),
+      schema: requiredIssueIdSchema.extend({
         limit: z.number().int().min(1).max(50).optional().describe("Maximum number of recent comments to return"),
       }),
       handler: async (args: Record<string, unknown>) => {
-        const issueId = args.issueId as string;
-        assertUuid("list_comments", issueId);
+        const issueId = resolveIssueId("list_comments", args);
         return readIssueComments(client, issueId, typeof args.limit === "number" ? args.limit : 20);
       },
     },
     {
       name: "linear_get_issue",
       description: "Fetch the current Linear issue details using the exact issue UUID from the session context.",
-      schema: z.object({
-        issue_id: z.string().describe("The Linear issue ID (UUID) from the session context"),
-      }),
+      schema: requiredIssueIdSchema,
       handler: async (args: Record<string, unknown>) => {
-        const issueId = args.issue_id as string;
-        assertUuid("linear_get_issue", issueId);
+        const issueId = resolveIssueId("linear_get_issue", args);
         return readIssue(client, issueId);
       },
     },
     {
       name: "linear_list_issue_comments",
       description: "List recent comments for the current Linear issue using the exact issue UUID from the session context.",
-      schema: z.object({
-        issue_id: z.string().describe("The Linear issue ID (UUID) from the session context"),
+      schema: requiredIssueIdSchema.extend({
         limit: z.number().int().min(1).max(50).optional().describe("Maximum number of recent comments to return"),
       }),
       handler: async (args: Record<string, unknown>) => {
-        const issueId = args.issue_id as string;
-        assertUuid("linear_list_issue_comments", issueId);
+        const issueId = resolveIssueId("linear_list_issue_comments", args);
         return readIssueComments(client, issueId, typeof args.limit === "number" ? args.limit : 20);
       },
     },
     {
       name: "linear_list_workflow_states",
       description: "List workflow states for the current issue's team so the bridge can move the issue between Todo, In Progress, In Review, and Done.",
-      schema: z.object({
-        issue_id: z.string().optional().describe("The Linear issue ID (UUID) from the session context"),
+      schema: optionalIssueIdSchema.extend({
         team_id: z.string().optional().describe("The Linear team ID when already known from the issue context"),
       }),
       handler: async (args: Record<string, unknown>) => {
-        const issueId = typeof args.issue_id === "string" ? args.issue_id : undefined;
-        if (issueId !== undefined) {
-          assertUuid("linear_list_workflow_states", issueId);
-        }
+        const issueId = resolveOptionalIssueId("linear_list_workflow_states", args);
 
         const teamId = typeof args.team_id === "string" && args.team_id.trim().length > 0
           ? args.team_id
@@ -239,8 +232,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     {
       name: "linear_update_issue",
       description: "Update a Linear issue (title/description/state/assignee/priority/etc.) from the session workflow.",
-      schema: z.object({
-        issue_id: z.string().describe("The Linear issue ID (UUID)"),
+      schema: requiredIssueIdSchema.extend({
         title: z.string().optional().describe("New issue title"),
         description: z.string().optional().describe("New issue description (Markdown)"),
         priority: z.number().int().min(0).max(4).optional().describe("Priority 0-4"),
@@ -253,6 +245,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
         if (typeof client.updateIssue !== "function") {
           throw new Error("linear_update_issue is unavailable: Linear client does not support updateIssue().");
         }
+        const issueId = resolveIssueId("linear_update_issue", args);
 
         const hasUpdates = (
           args.title !== undefined
@@ -268,7 +261,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
         }
 
         await client.updateIssue(
-          args.issue_id as string,
+          issueId,
           {
             ...(args.title !== undefined ? { title: args.title } : {}),
             ...(args.description !== undefined ? { description: args.description } : {}),
@@ -286,17 +279,17 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     {
       name: "linear_add_issue_comment",
       description: "Add a new comment to a Linear issue.",
-      schema: z.object({
-        issue_id: z.string().describe("The Linear issue ID (UUID)"),
+      schema: requiredIssueIdSchema.extend({
         body: z.string().describe("Comment body (Markdown)"),
       }),
       handler: async (args: Record<string, unknown>) => {
         if (typeof client.createComment !== "function") {
           throw new Error("linear_add_issue_comment is unavailable: Linear client does not support createComment().");
         }
+        const issueId = resolveIssueId("linear_add_issue_comment", args);
 
         await client.createComment({
-          issueId: args.issue_id as string,
+          issueId,
           body: args.body as string,
         });
 
@@ -313,6 +306,35 @@ function assertUuid(toolName: string, value: string): void {
   if (!uuidPattern.test(value)) {
     throw new Error(`${toolName} requires the exact Linear issue UUID from the session context. Received "${value}".`);
   }
+}
+
+function resolveIssueId(toolName: string, args: Record<string, unknown>): string {
+  const issueId = resolveOptionalIssueId(toolName, args);
+  if (!issueId) {
+    throw new Error(`${toolName} requires issue_id (or legacy aliases issueId/id).`);
+  }
+
+  return issueId;
+}
+
+function resolveOptionalIssueId(
+  toolName: string,
+  args: Record<string, unknown>,
+): string | undefined {
+  const raw = typeof args.issue_id === "string"
+    ? args.issue_id
+    : typeof args.issueId === "string"
+      ? args.issueId
+      : typeof args.id === "string"
+        ? args.id
+        : undefined;
+
+  if (!raw) {
+    return undefined;
+  }
+
+  assertUuid(toolName, raw);
+  return raw;
 }
 
 async function readIssue(client: LinearActivityClient, issueId: string): Promise<unknown> {

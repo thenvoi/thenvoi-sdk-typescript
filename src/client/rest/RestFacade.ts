@@ -687,7 +687,7 @@ export class FernRestAdapter implements RestApi {
   }
 }
 
-export interface RestFacadeOptions {
+interface RestFacadeOptions {
   api: RestApi;
   logger?: Logger;
 }

@@ -1,4 +1,3 @@
-import { UnsupportedFeatureError } from "../../core/errors";
 import { CHAT_EVENT_TYPES } from "../messages";
 
 export const TOOL_MODELS = {
@@ -392,12 +391,4 @@ export function mcpToolNames(names: Set<string>): string[] {
 export function getToolDescription(name: string): string {
   const model = TOOL_MODELS[name as keyof typeof TOOL_MODELS];
   return model?.description ?? `Execute ${name}`;
-}
-
-export function assertFeatureEnabled(enabled: boolean, feature: string): void {
-  if (!enabled) {
-    throw new UnsupportedFeatureError(
-      `${feature} is not yet available in this SDK version`,
-    );
-  }
 }

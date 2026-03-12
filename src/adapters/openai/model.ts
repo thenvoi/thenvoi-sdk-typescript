@@ -7,7 +7,8 @@ import type {
 import { toDisplayText, toWireString } from "../shared/coercion";
 import { LazyAsyncValue } from "../shared/lazyAsyncValue";
 import {
-  ensureToolCalls,
+  resolveToolCalls,
+  resolveToolRounds,
   mapConversationMessages,
   normalizeConversationRole,
 } from "../tool-calling/valueUtils";
@@ -86,38 +87,8 @@ function toOpenAIMessages(request: ToolCallingModelRequest): Array<Record<string
     });
   }
 
-  const rounds = request.toolRounds ?? [];
+  const rounds = resolveToolRounds(request);
   if (rounds.length === 0) {
-    // Fall back to deprecated flat fields for backwards compatibility.
-    const legacyToolCalls = request.toolCalls ?? [];
-    const legacyToolResults = request.toolResults ?? [];
-    if (legacyToolCalls.length === 0 && legacyToolResults.length === 0) {
-      return messages;
-    }
-
-    const toolCalls = ensureToolCalls(request);
-    messages.push({
-      role: "assistant",
-      content: "",
-      tool_calls: toolCalls.map((call) => ({
-        id: call.id,
-        type: "function",
-        function: {
-          name: call.name,
-          arguments: serializeArguments(call.input),
-        },
-      })),
-    });
-
-    for (const result of legacyToolResults) {
-      messages.push({
-        role: "tool",
-        tool_call_id: result.toolCallId,
-        name: result.name,
-        content: toWireString(result.output),
-      });
-    }
-
     return messages;
   }
 

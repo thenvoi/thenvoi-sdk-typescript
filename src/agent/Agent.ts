@@ -68,22 +68,6 @@ export class Agent {
     return this.platformRuntime;
   }
 
-  public get agentName(): string {
-    return this.platformRuntime.name;
-  }
-
-  public get agentDescription(): string {
-    return this.platformRuntime.description;
-  }
-
-  public get contactConfig() {
-    return this.platformRuntime.contactConfiguration;
-  }
-
-  public get isContactsSubscribed(): boolean {
-    return this.platformRuntime.isContactsSubscribed;
-  }
-
   public async start(): Promise<void> {
     if (this.startPromise) {
       return this.startPromise;
@@ -143,7 +127,7 @@ export class Agent {
       await shutdown.withSignals(async () => {
         await this.start();
         try {
-          await this.runForever();
+          await this.platformRuntime.runForever();
         } finally {
           await this.stop(this.shutdownTimeoutMs);
         }
@@ -151,7 +135,7 @@ export class Agent {
     } else {
       await this.start();
       try {
-        await this.runForever();
+        await this.platformRuntime.runForever();
       } finally {
         await this.stop(this.shutdownTimeoutMs);
       }

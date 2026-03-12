@@ -1,16 +1,18 @@
 export { GenericAdapter, type GenericAdapterHandler } from "./GenericAdapter";
-export { OpenAIAdapter, type OpenAIAdapterOptions } from "./openai/OpenAIAdapter";
 export {
+  OpenAIAdapter,
   OpenAIToolCallingModel,
+  type OpenAIAdapterOptions,
   type OpenAIToolCallingModelOptions,
   type OpenAIClientFactory,
-} from "./openai/model";
-export { AnthropicAdapter, type AnthropicAdapterOptions } from "./anthropic/AnthropicAdapter";
+} from "./openai";
 export {
+  AnthropicAdapter,
   AnthropicToolCallingModel,
+  type AnthropicAdapterOptions,
   type AnthropicToolCallingModelOptions,
   type AnthropicClientFactory,
-} from "./anthropic/model";
+} from "./anthropic";
 export {
   GeminiAdapter,
   type GeminiAdapterOptions,

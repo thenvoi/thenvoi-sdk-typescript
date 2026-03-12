@@ -254,7 +254,7 @@ function resolveBridgeApiKey(logger: Logger): string {
   );
 }
 
-export function resolveEmbeddedBridgeRuntimeConfigKey(): string {
+function resolveEmbeddedBridgeRuntimeConfigKey(): string {
   return process.env.LINEAR_THENVOI_BRIDGE_RUNTIME_CONFIG_KEY?.trim() ?? "linear_thenvoi_bridge";
 }
 

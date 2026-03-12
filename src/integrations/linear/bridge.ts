@@ -306,22 +306,6 @@ export async function handleAgentSessionEvent(
   }
 }
 
-export async function postFinalResponseToLinearSession(input: {
-  linearClient: {
-    createAgentActivity: (request: {
-      agentSessionId: string;
-      content: {
-        type: L.AgentActivityType;
-        body: string;
-      };
-    }) => Promise<unknown>;
-  };
-  agentSessionId: string;
-  body: string;
-}): Promise<void> {
-  await completeLinearSession(input);
-}
-
 export async function completeLinearSession(input: {
   linearClient: {
     createAgentActivity: (request: {

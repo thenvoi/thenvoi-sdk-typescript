@@ -1,10 +1,13 @@
-import { ValidationError } from "../core/errors";
 import type { Logger } from "../core/logger";
 import { NoopLogger } from "../core/logger";
-import { FernRestAdapter, RestFacade, type RestFacadeOptions } from "../client/rest/RestFacade";
+import { FernRestAdapter } from "../client/rest/RestFacade";
+import type { RestRequestOptions } from "../client/rest/requestOptions";
+import { fetchPaginated, type PaginationOptions } from "../client/rest/pagination";
 import type { PlatformChatMessage, ThenvoiLinkRestApi } from "../client/rest/types";
 import type { PlatformEvent } from "./events";
+import { UnsupportedFeatureError } from "../core/errors";
 import { assertCapability } from "../runtime/capabilities";
+import type { MetadataMap } from "../contracts/dtos";
 import type { PlatformMessage } from "../runtime/types";
 import {
   type SupportedSocketEvent,
@@ -61,7 +64,7 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
   private readonly apiKey: string;
   public readonly wsUrl: string;
   public readonly restUrl: string;
-  public readonly rest: RestFacade;
+  public readonly rest: ThenvoiLinkRestApi;
   public readonly capabilities: AgentToolsCapabilities;
 
   private readonly logger: Logger;
@@ -89,10 +92,7 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
       }),
     );
 
-    this.rest = new RestFacade({
-      api: restApi,
-      logger: this.logger,
-    } satisfies RestFacadeOptions);
+    this.rest = restApi;
 
     this.transport =
       options.transport ??
@@ -270,13 +270,32 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
   }
 
   public async getNextMessage(roomId: string): Promise<PlatformMessage | null> {
-    try {
-      const message = await this.rest.getNextMessage({ chatId: roomId });
-      return message ? toPlatformMessage(roomId, message) : null;
-    } catch (error: unknown) {
-      this.logger.warn("getNextMessage failed (best-effort)", { roomId, error });
-      return null;
+    if (!this.rest.getNextMessage) {
+      throw new UnsupportedFeatureError("Message queue access is not available in current REST adapter");
     }
+
+    const message = await this.rest.getNextMessage({ chatId: roomId });
+    return message ? toPlatformMessage(roomId, message) : null;
+  }
+
+  public async listAllChats(
+    options?: PaginationOptions,
+    requestOptions?: RestRequestOptions,
+  ): Promise<MetadataMap[]> {
+    if (!this.rest.listChats) {
+      throw new UnsupportedFeatureError("Chat listing is not available in current REST adapter");
+    }
+
+    return fetchPaginated({
+      fetchPage: ({ page, pageSize }) => this.rest.listChats!(
+        { page, pageSize },
+        requestOptions,
+      ),
+      pageSize: options?.pageSize,
+      maxPages: options?.maxPages,
+      strategy: options?.strategy,
+      metadataValidation: options?.metadataValidation,
+    });
   }
 
   private emit(eventType: SupportedSocketEvent, payload: Record<string, unknown>, roomId: string | null): void {

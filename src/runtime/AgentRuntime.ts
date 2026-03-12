@@ -313,7 +313,7 @@ export class AgentRuntime {
     }
 
     try {
-      const rooms = await this.link.rest.listAllChats({
+      const rooms = await this.link.listAllChats({
         pageSize: 100,
         maxPages: 100,
       });

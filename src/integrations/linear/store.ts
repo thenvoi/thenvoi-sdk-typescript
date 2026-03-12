@@ -197,7 +197,7 @@ class SqliteSessionRoomStore implements SessionRoomStore {
       thenvoiRoomId: row.thenvoi_room_id,
       expectedContent: row.expected_content,
       messageType: row.message_type,
-      metadata: row.metadata_json ? JSON.parse(row.metadata_json) as Record<string, unknown> : undefined,
+      metadata: this.parseMetadata(row.metadata_json),
       createdAt: row.created_at,
       expiresAt: row.expires_at,
     }));
@@ -315,6 +315,18 @@ class SqliteSessionRoomStore implements SessionRoomStore {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
+  }
+
+  private parseMetadata(metadataJson: string | null): Record<string, unknown> | undefined {
+    if (!metadataJson) {
+      return undefined;
+    }
+
+    try {
+      return JSON.parse(metadataJson) as Record<string, unknown>;
+    } catch {
+      return undefined;
+    }
   }
 }
 

@@ -7,7 +7,7 @@ import type {
 import { toDisplayText, toWireString } from "../shared/coercion";
 import { LazyAsyncValue } from "../shared/lazyAsyncValue";
 import {
-  ensureToolCalls,
+  resolveToolRounds,
   mapConversationMessages,
   mergeConsecutiveSameRole,
   normalizeConversationRole,
@@ -79,38 +79,8 @@ function toAnthropicMessages(
     mapConversationMessages(request, toBaseAnthropicMessage),
   );
 
-  const rounds = request.toolRounds ?? [];
+  const rounds = resolveToolRounds(request);
   if (rounds.length === 0) {
-    // Fall back to deprecated flat fields for backwards compatibility.
-    const legacyToolCalls = request.toolCalls ?? [];
-    const legacyToolResults = request.toolResults ?? [];
-    if (legacyToolCalls.length === 0 && legacyToolResults.length === 0) {
-      return messages;
-    }
-
-    const toolCalls = ensureToolCalls(request);
-    messages.push({
-      role: "assistant",
-      content: toolCalls.map((call) => ({
-        type: "tool_use",
-        id: call.id,
-        name: call.name,
-        input: call.input,
-      })),
-    });
-
-    const toolResultBlocks = legacyToolResults.map((result) => ({
-      type: "tool_result",
-      tool_use_id: result.toolCallId,
-      content: toWireString(result.output),
-      is_error: result.isError ?? false,
-    }));
-
-    messages.push({
-      role: "user",
-      content: toolResultBlocks,
-    });
-
     return messages;
   }
 

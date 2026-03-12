@@ -12,7 +12,7 @@ import {
   buildCustomToolIndex,
   customToolToOpenAISchema,
   executeCustomTool,
-  findCustomTool,
+  findCustomToolInIndex,
 } from "../../runtime/tools/customTools";
 import { asErrorMessage, asNonEmptyString, asRecord, toWireString } from "../shared/coercion";
 import { findLatestTaskMetadata } from "../shared/history";
@@ -89,7 +89,7 @@ export interface CodexAdapterConfig {
   codexEnv?: Record<string, string>;
 }
 
-export interface CodexFactory {
+interface CodexFactory {
   (): Promise<CodexClientLike>;
 }
 
@@ -747,7 +747,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
       }
 
       try {
-        const customTool = findCustomTool(this.customToolIndex, toolName);
+        const customTool = findCustomToolInIndex(this.customToolIndex, toolName);
         const result = customTool
           ? await executeCustomTool(customTool, arguments_)
           : await tools.executeToolCall(toolName, arguments_);
