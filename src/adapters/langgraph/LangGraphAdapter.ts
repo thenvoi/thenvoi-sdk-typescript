@@ -126,12 +126,12 @@ export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
     if (!this.graph || this.graphFactory) {
       sdk = await this.sdkLoader.get();
       langGraphTools = [
-        ...(await buildLangGraphTools({
+        ...buildLangGraphTools({
           sdk,
           tools,
           includeMemoryTools: this.includeMemoryTools,
           logger: this.logger,
-        })),
+        }),
         ...this.additionalTools,
       ];
     }
@@ -289,12 +289,12 @@ export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
   }
 }
 
-async function buildLangGraphTools(input: {
+function buildLangGraphTools(input: {
   sdk: LangGraphSdk;
   tools: AdapterToolsProtocol;
   includeMemoryTools: boolean;
   logger: Logger;
-}): Promise<unknown[]> {
+}): unknown[] {
   const schemas = input.tools.getToolSchemas("openai", {
     includeMemory: input.includeMemoryTools,
   });

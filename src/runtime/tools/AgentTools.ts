@@ -99,6 +99,12 @@ const OPTIONAL_ADAPTER_TOOL_METHODS: Record<keyof AgentToolsCapabilities, readon
   ],
 };
 
+const CONTACT_REQUEST_ACTIONS: ReadonlySet<RespondContactRequestArgs["action"]> = new Set([
+  "approve",
+  "reject",
+  "cancel",
+]);
+
 export class AgentTools implements AgentToolsProtocol {
   public readonly roomId: string;
   public readonly capabilities: Readonly<AgentToolsCapabilities>;
@@ -738,7 +744,11 @@ export class AgentTools implements AgentToolsProtocol {
   }
 
   private toRespondContactRequestArgs(arguments_: MetadataMap): RespondContactRequestArgs {
-    const action = String(arguments_.action ?? "") as RespondContactRequestArgs["action"];
+    const action = this.normalizeOptionalString(arguments_.action);
+    if (!action || !CONTACT_REQUEST_ACTIONS.has(action as RespondContactRequestArgs["action"])) {
+      throw new ValidationError("action must be one of: approve, reject, cancel");
+    }
+
     const handle = this.normalizeOptionalString(arguments_.handle);
     const requestId = this.normalizeOptionalString(arguments_.request_id);
     if ((handle && requestId) || (!handle && !requestId)) {
@@ -747,14 +757,14 @@ export class AgentTools implements AgentToolsProtocol {
 
     if (handle) {
       return {
-        action,
+        action: action as RespondContactRequestArgs["action"],
         target: "handle",
         handle,
       };
     }
 
     return {
-      action,
+      action: action as RespondContactRequestArgs["action"],
       target: "requestId",
       requestId: requestId as string,
     };
