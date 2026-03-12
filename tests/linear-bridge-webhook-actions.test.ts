@@ -166,12 +166,17 @@ describe("linear bridge webhook actions", () => {
 
     expect(restApi.roomEvents).toHaveLength(2);
     expect(restApi.createChatCalls).toEqual([undefined]);
-    expect(restApi.roomEvents[0]?.content).toContain("Agent session created");
-    expect(restApi.roomEvents[1]?.content).toContain("Agent session updated");
-    expect(restApi.roomEvents[0]?.content).toContain("session_id: session-1");
-    expect(restApi.roomEvents[0]?.content).toContain("issue_state: In Progress");
-    expect(restApi.roomEvents[0]?.content).toContain("issue_state_type: started");
-    expect(restApi.roomEvents[0]?.content).toContain("issue_assignee: Thenvoi");
+    expect(restApi.roomEvents[0]?.metadata).toMatchObject({
+      linear_event_action: "created",
+      linear_session_id: "session-1",
+      linear_issue_id: "issue-1",
+      linear_host_handle: "linear-host",
+    });
+    expect(restApi.roomEvents[1]?.metadata).toMatchObject({
+      linear_event_action: "updated",
+      linear_session_id: "session-1",
+      linear_issue_id: "issue-1",
+    });
     await expect(store.listPendingBootstrapRequests()).resolves.toEqual([]);
     await expect(store.getBySessionId("session-1")).resolves.toMatchObject({
       status: "active",
@@ -214,7 +219,6 @@ describe("linear bridge webhook actions", () => {
       expect.arrayContaining([
         expect.objectContaining({
           roomId,
-          content: expect.stringContaining("implement the requested deliverable"),
           mentions: expect.arrayContaining([
             expect.objectContaining({ handle: "feature-implementer" }),
           ]),
@@ -277,7 +281,6 @@ describe("linear bridge webhook actions", () => {
       expect.arrayContaining([
         expect.objectContaining({
           roomId,
-          content: expect.stringContaining("sharpen the ticket into execution-ready scope"),
           mentions: expect.arrayContaining([
             expect.objectContaining({ handle: "ticket-planner" }),
           ]),
@@ -311,7 +314,11 @@ describe("linear bridge webhook actions", () => {
     });
 
     expect(restApi.roomEvents).toHaveLength(2);
-    expect(restApi.roomEvents[1]?.content).toContain("session canceled");
+    expect(restApi.roomEvents[1]?.metadata).toMatchObject({
+      linear_event_action: "canceled",
+      linear_session_id: "session-1",
+      linear_issue_id: "issue-1",
+    });
 
     await expect(store.getBySessionId("session-1")).resolves.toMatchObject({
       status: "canceled",
@@ -429,7 +436,11 @@ describe("linear bridge webhook actions", () => {
     });
 
     expect(restApi.roomEvents).toHaveLength(2);
-    expect(restApi.roomEvents[1]?.content).toContain("[Linear User Response]");
+    expect(restApi.roomEvents[1]?.messageType).toBe("text");
+    expect(restApi.roomEvents[1]?.metadata).toMatchObject({
+      linear_event_action: "prompted",
+      linear_session_id: "session-1",
+    });
     expect(restApi.roomEvents[1]?.content).toContain("Yes, please proceed with option A");
     await expect(store.listPendingBootstrapRequests()).resolves.toEqual([
       expect.objectContaining({ messageType: "task" }),
@@ -493,7 +504,10 @@ describe("linear bridge webhook actions", () => {
     });
 
     expect(restApi.roomEvents).toHaveLength(1);
-    expect(restApi.roomEvents[0]?.content).toContain("@linear-host");
+    expect(restApi.roomEvents[0]?.metadata).toMatchObject({
+      linear_host_handle: "linear-host",
+      linear_event_action: "created",
+    });
     await expect(store.listPendingBootstrapRequests()).resolves.toEqual([]);
   });
 });
