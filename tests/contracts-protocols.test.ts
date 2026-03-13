@@ -25,11 +25,11 @@ describe("contracts/protocols", () => {
 
     expectTypeOf(capabilities.peers).toEqualTypeOf<boolean>();
     expect(DEFAULT_AGENT_TOOLS_CAPABILITIES).toEqual({
-      peers: false,
-      contacts: false,
-      memory: false,
+      peers: true,
+      contacts: true,
+      memory: true,
     });
-    expect(Object.values(DEFAULT_AGENT_TOOLS_CAPABILITIES)).toEqual([false, false, false]);
+    expect(Object.values(DEFAULT_AGENT_TOOLS_CAPABILITIES)).toEqual([true, true, true]);
     expect(Object.keys(DEFAULT_AGENT_TOOLS_CAPABILITIES)).toEqual([
       "peers",
       "contacts",

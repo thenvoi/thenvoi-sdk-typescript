@@ -185,9 +185,9 @@ export interface AgentToolsCapabilities {
 }
 
 export const DEFAULT_AGENT_TOOLS_CAPABILITIES: AgentToolsCapabilities = {
-  peers: false,
-  contacts: false,
-  memory: false,
+  peers: true,
+  contacts: true,
+  memory: true,
 };
 
 export interface FrameworkAdapterInput {
