@@ -77,6 +77,7 @@ function normalizeAgentIdentityRecord(
     name: requireNonEmptyStringField(record.name, "name", source),
     description: normalizeOptionalStringField(record.description, "description", source),
     handle: normalizeOptionalStringField(record.handle, "handle", source),
+    ownerUuid: normalizeOptionalStringField(record.owner_uuid, "owner_uuid", source),
   };
 }
 
@@ -364,9 +365,9 @@ export class FernRestAdapter implements RestApi {
     },
     options?: RestRequestOptions,
   ): Promise<ToolOperationResult> {
-    const api = this.client.chatMessages?.createChatMessage
-      ?? this.client.agentApiMessages?.createAgentChatMessage
-      ?? this.client.myChatMessages?.createMyChatMessage;
+    const api = this.client.chatMessages?.createChatMessage?.bind(this.client.chatMessages)
+      ?? this.client.agentApiMessages?.createAgentChatMessage?.bind(this.client.agentApiMessages)
+      ?? this.client.myChatMessages?.createMyChatMessage?.bind(this.client.myChatMessages);
     if (!api) {
       throw new UnsupportedFeatureError("Fern client missing chat message creation endpoint");
     }
@@ -414,7 +415,7 @@ export class FernRestAdapter implements RestApi {
   }
 
   public async createChat(taskId?: string, options?: RestRequestOptions): Promise<{ id: string }> {
-    const api = this.client.chatRooms?.createChat ?? this.client.agentApiChats?.createAgentChat;
+    const api = this.client.chatRooms?.createChat?.bind(this.client.chatRooms) ?? this.client.agentApiChats?.createAgentChat?.bind(this.client.agentApiChats);
     if (!api) {
       throw new UnsupportedFeatureError("Fern client missing chat creation endpoint");
     }
@@ -441,14 +442,14 @@ export class FernRestAdapter implements RestApi {
     options?: RestRequestOptions,
   ): Promise<ChatParticipant[]> {
     const requestOptions = mergeOptions(options);
-    const listChatParticipantsApi = this.client.chatParticipants?.listChatParticipants;
+    const listChatParticipantsApi = this.client.chatParticipants?.listChatParticipants?.bind(this.client.chatParticipants);
     if (listChatParticipantsApi) {
       return normalizeChatParticipantsResponse(
         await listChatParticipantsApi(chatId, {}, requestOptions),
       );
     }
 
-    const listAgentChatParticipantsApi = this.client.agentApiParticipants?.listAgentChatParticipants;
+    const listAgentChatParticipantsApi = this.client.agentApiParticipants?.listAgentChatParticipants?.bind(this.client.agentApiParticipants);
     if (!listAgentChatParticipantsApi) {
       throw new UnsupportedFeatureError("Fern client missing chat participant list endpoint");
     }
@@ -463,8 +464,8 @@ export class FernRestAdapter implements RestApi {
     participant: { participantId: string; role: string },
     options?: RestRequestOptions,
   ): Promise<ToolOperationResult> {
-    const api = this.client.chatParticipants?.addChatParticipant
-      ?? this.client.agentApiParticipants?.addAgentChatParticipant;
+    const api = this.client.chatParticipants?.addChatParticipant?.bind(this.client.chatParticipants)
+      ?? this.client.agentApiParticipants?.addAgentChatParticipant?.bind(this.client.agentApiParticipants);
     if (!api) {
       throw new UnsupportedFeatureError("Fern client missing chat participant add endpoint");
     }
@@ -487,8 +488,8 @@ export class FernRestAdapter implements RestApi {
     participantId: string,
     options?: RestRequestOptions,
   ): Promise<ToolOperationResult> {
-    const api = this.client.chatParticipants?.removeChatParticipant
-      ?? this.client.agentApiParticipants?.removeAgentChatParticipant;
+    const api = this.client.chatParticipants?.removeChatParticipant?.bind(this.client.chatParticipants)
+      ?? this.client.agentApiParticipants?.removeAgentChatParticipant?.bind(this.client.agentApiParticipants);
     if (!api) {
       throw new UnsupportedFeatureError("Fern client missing chat participant remove endpoint");
     }
@@ -502,8 +503,8 @@ export class FernRestAdapter implements RestApi {
     messageId: string,
     options?: RestRequestOptions,
   ): Promise<ToolOperationResult> {
-    const api = this.client.chatMessages?.markMessageProcessing
-      ?? this.client.agentApiMessages?.markAgentMessageProcessing;
+    const api = this.client.chatMessages?.markMessageProcessing?.bind(this.client.chatMessages)
+      ?? this.client.agentApiMessages?.markAgentMessageProcessing?.bind(this.client.agentApiMessages);
     if (!api) {
       throw new UnsupportedFeatureError("Fern client missing mark message processing endpoint");
     }
@@ -517,8 +518,8 @@ export class FernRestAdapter implements RestApi {
     messageId: string,
     options?: RestRequestOptions,
   ): Promise<ToolOperationResult> {
-    const api = this.client.chatMessages?.markMessageProcessed
-      ?? this.client.agentApiMessages?.markAgentMessageProcessed;
+    const api = this.client.chatMessages?.markMessageProcessed?.bind(this.client.chatMessages)
+      ?? this.client.agentApiMessages?.markAgentMessageProcessed?.bind(this.client.agentApiMessages);
     if (!api) {
       throw new UnsupportedFeatureError("Fern client missing mark message processed endpoint");
     }
@@ -533,8 +534,8 @@ export class FernRestAdapter implements RestApi {
     error: string,
     options?: RestRequestOptions,
   ): Promise<ToolOperationResult> {
-    const api = this.client.chatMessages?.markMessageFailed
-      ?? this.client.agentApiMessages?.markAgentMessageFailed;
+    const api = this.client.chatMessages?.markMessageFailed?.bind(this.client.chatMessages)
+      ?? this.client.agentApiMessages?.markAgentMessageFailed?.bind(this.client.agentApiMessages);
     if (!api) {
       throw new UnsupportedFeatureError("Fern client missing mark message failed endpoint");
     }
@@ -552,8 +553,8 @@ export class FernRestAdapter implements RestApi {
     request: { chatId: string },
     options?: RestRequestOptions,
   ): Promise<PlatformChatMessage | null> {
-    const api = this.client.chatMessages?.getNextMessage
-      ?? this.client.agentApiMessages?.getAgentNextMessage;
+    const api = this.client.chatMessages?.getNextMessage?.bind(this.client.chatMessages)
+      ?? this.client.agentApiMessages?.getAgentNextMessage?.bind(this.client.agentApiMessages);
     if (!api) {
       throw new UnsupportedFeatureError("Fern client missing next-message endpoint");
     }
@@ -566,7 +567,7 @@ export class FernRestAdapter implements RestApi {
     request: { page: number; pageSize: number; notInChat: string },
     options?: RestRequestOptions,
   ): Promise<{ data: PeerRecord[]; metadata?: MetadataMap }> {
-    const api = this.client.agentPeers?.listAgentPeers ?? this.client.agentApiPeers?.listAgentPeers;
+    const api = this.client.agentPeers?.listAgentPeers?.bind(this.client.agentPeers) ?? this.client.agentApiPeers?.listAgentPeers?.bind(this.client.agentApiPeers);
     if (!api) {
       throw new UnsupportedFeatureError("Fern client missing peer list endpoint");
     }
@@ -586,7 +587,7 @@ export class FernRestAdapter implements RestApi {
     request: { page: number; pageSize: number },
     options?: RestRequestOptions,
   ): Promise<PaginatedResponse<MetadataMap>> {
-    const api = this.client.chatRooms?.listChats ?? this.client.agentApiChats?.listAgentChats;
+    const api = this.client.chatRooms?.listChats?.bind(this.client.chatRooms) ?? this.client.agentApiChats?.listAgentChats?.bind(this.client.agentApiChats);
     if (!api) {
       throw new UnsupportedFeatureError("Fern client missing chat list endpoint");
     }
@@ -606,7 +607,7 @@ export class FernRestAdapter implements RestApi {
     request: ListContactsArgs,
     options?: RestRequestOptions,
   ): Promise<PaginatedResponse<ContactRecord>> {
-    const api = this.client.agentContacts?.listAgentContacts ?? this.client.agentApiContacts?.listAgentContacts;
+    const api = this.client.agentContacts?.listAgentContacts?.bind(this.client.agentContacts) ?? this.client.agentApiContacts?.listAgentContacts?.bind(this.client.agentApiContacts);
     if (!api) {
       throw new UnsupportedFeatureError("Fern client missing contact list endpoint");
     }
@@ -629,7 +630,7 @@ export class FernRestAdapter implements RestApi {
     request: AddContactArgs,
     options?: RestRequestOptions,
   ): Promise<ToolOperationResult> {
-    const api = this.client.agentContacts?.addAgentContact ?? this.client.agentApiContacts?.addAgentContact;
+    const api = this.client.agentContacts?.addAgentContact?.bind(this.client.agentContacts) ?? this.client.agentApiContacts?.addAgentContact?.bind(this.client.agentApiContacts);
     if (!api) {
       throw new UnsupportedFeatureError("Fern client missing add contact endpoint");
     }
@@ -646,7 +647,7 @@ export class FernRestAdapter implements RestApi {
     request: RemoveContactArgs,
     options?: RestRequestOptions,
   ): Promise<ToolOperationResult> {
-    const api = this.client.agentContacts?.removeAgentContact ?? this.client.agentApiContacts?.removeAgentContact;
+    const api = this.client.agentContacts?.removeAgentContact?.bind(this.client.agentContacts) ?? this.client.agentApiContacts?.removeAgentContact?.bind(this.client.agentApiContacts);
     if (!api) {
       throw new UnsupportedFeatureError("Fern client missing remove contact endpoint");
     }
@@ -665,8 +666,8 @@ export class FernRestAdapter implements RestApi {
     request: ListContactRequestsArgs,
     options?: RestRequestOptions,
   ): Promise<ContactRequestsResult> {
-    const api = this.client.agentContacts?.listAgentContactRequests
-      ?? this.client.agentApiContacts?.listAgentContactRequests;
+    const api = this.client.agentContacts?.listAgentContactRequests?.bind(this.client.agentContacts)
+      ?? this.client.agentApiContacts?.listAgentContactRequests?.bind(this.client.agentApiContacts);
     if (!api) {
       throw new UnsupportedFeatureError("Fern client missing contact request list endpoint");
     }
@@ -691,8 +692,8 @@ export class FernRestAdapter implements RestApi {
     request: RespondContactRequestArgs,
     options?: RestRequestOptions,
   ): Promise<ToolOperationResult> {
-    const api = this.client.agentContacts?.respondToAgentContactRequest
-      ?? this.client.agentApiContacts?.respondToAgentContactRequest;
+    const api = this.client.agentContacts?.respondToAgentContactRequest?.bind(this.client.agentContacts)
+      ?? this.client.agentApiContacts?.respondToAgentContactRequest?.bind(this.client.agentApiContacts);
     if (!api) {
       throw new UnsupportedFeatureError("Fern client missing contact request response endpoint");
     }
@@ -711,7 +712,7 @@ export class FernRestAdapter implements RestApi {
     request: ListMemoriesArgs,
     options?: RestRequestOptions,
   ): Promise<PaginatedResponse<MemoryRecord>> {
-    const api = this.client.agentMemories?.listAgentMemories ?? this.client.agentApiMemories?.listAgentMemories;
+    const api = this.client.agentMemories?.listAgentMemories?.bind(this.client.agentMemories) ?? this.client.agentApiMemories?.listAgentMemories?.bind(this.client.agentApiMemories);
     if (!api) {
       throw new UnsupportedFeatureError("Fern client missing memory list endpoint");
     }
@@ -724,7 +725,7 @@ export class FernRestAdapter implements RestApi {
     request: StoreMemoryArgs,
     options?: RestRequestOptions,
   ): Promise<MemoryRecord> {
-    const api = this.client.agentMemories?.createAgentMemory ?? this.client.agentApiMemories?.createAgentMemory;
+    const api = this.client.agentMemories?.createAgentMemory?.bind(this.client.agentMemories) ?? this.client.agentApiMemories?.createAgentMemory?.bind(this.client.agentApiMemories);
     if (!api) {
       throw new UnsupportedFeatureError("Fern client missing create memory endpoint");
     }
@@ -741,7 +742,7 @@ export class FernRestAdapter implements RestApi {
     memoryId: string,
     options?: RestRequestOptions,
   ): Promise<MemoryRecord> {
-    const api = this.client.agentMemories?.getAgentMemory ?? this.client.agentApiMemories?.getAgentMemory;
+    const api = this.client.agentMemories?.getAgentMemory?.bind(this.client.agentMemories) ?? this.client.agentApiMemories?.getAgentMemory?.bind(this.client.agentApiMemories);
     if (!api) {
       throw new UnsupportedFeatureError("Fern client missing get memory endpoint");
     }
@@ -755,8 +756,8 @@ export class FernRestAdapter implements RestApi {
     memoryId: string,
     options?: RestRequestOptions,
   ): Promise<ToolOperationResult> {
-    const api = this.client.agentMemories?.supersedeAgentMemory
-      ?? this.client.agentApiMemories?.supersedeAgentMemory;
+    const api = this.client.agentMemories?.supersedeAgentMemory?.bind(this.client.agentMemories)
+      ?? this.client.agentApiMemories?.supersedeAgentMemory?.bind(this.client.agentApiMemories);
     if (!api) {
       throw new UnsupportedFeatureError("Fern client missing supersede memory endpoint");
     }
@@ -770,8 +771,8 @@ export class FernRestAdapter implements RestApi {
     memoryId: string,
     options?: RestRequestOptions,
   ): Promise<ToolOperationResult> {
-    const api = this.client.agentMemories?.archiveAgentMemory
-      ?? this.client.agentApiMemories?.archiveAgentMemory;
+    const api = this.client.agentMemories?.archiveAgentMemory?.bind(this.client.agentMemories)
+      ?? this.client.agentApiMemories?.archiveAgentMemory?.bind(this.client.agentApiMemories);
     if (!api) {
       throw new UnsupportedFeatureError("Fern client missing archive memory endpoint");
     }
