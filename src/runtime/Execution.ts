@@ -4,6 +4,7 @@ import type { ThenvoiLink } from "../platform/ThenvoiLink";
 import type { PlatformEvent } from "../platform/events";
 import type { PlatformMessage } from "./types";
 import type { ExecutionContext } from "./ExecutionContext";
+import type { MessageRetryTracker } from "./retryTracker";
 
 interface ExecutionOptions {
   roomId: string;
@@ -38,6 +39,7 @@ export class Execution {
   private readonly roomId: string;
   private readonly link: ThenvoiLink;
   private readonly context: ExecutionContext;
+  private readonly retryTracker: MessageRetryTracker;
   private readonly onExecute: (context: ExecutionContext, event: PlatformEvent) => Promise<void>;
   private readonly onFailure?: (error: unknown, event: PlatformEvent) => void | Promise<void>;
   private readonly logger: Logger;
@@ -45,6 +47,7 @@ export class Execution {
   private readonly waiters: Array<(event: PlatformEvent | null) => void> = [];
   private readonly idleWaiters = new Set<() => void>();
   private readonly drainedWsMessageIds = new Set<string>();
+  private readonly syncProcessedIds = new Set<string>();
   private processTask: Promise<void>;
   private firstWsMessageId: string | null = null;
   private syncComplete = false;
@@ -55,6 +58,7 @@ export class Execution {
     this.roomId = options.roomId;
     this.link = options.link;
     this.context = options.context;
+    this.retryTracker = this.context.getRetryTracker();
     this.onExecute = options.onExecute;
     this.onFailure = options.onFailure;
     this.logger = options.logger ?? new NoopLogger();
@@ -135,6 +139,7 @@ export class Execution {
   }
 
   private async processLoop(): Promise<void> {
+    await this.recoverStaleProcessingMessages();
     await this.synchronizeWithNext();
 
     while (this.running) {
@@ -153,6 +158,44 @@ export class Execution {
     }
   }
 
+  private async recoverStaleProcessingMessages(): Promise<void> {
+    let staleMessages: PlatformMessage[];
+    try {
+      staleMessages = await this.link.getStaleProcessingMessages(this.roomId);
+    } catch {
+      this.logger.warn("Failed to fetch stale processing messages, skipping recovery", {
+        roomId: this.roomId,
+      });
+      return;
+    }
+
+    if (staleMessages.length === 0) {
+      return;
+    }
+
+    this.logger.info("Recovering stale processing messages", {
+      roomId: this.roomId,
+      count: staleMessages.length,
+    });
+
+    for (const message of staleMessages) {
+      if (!this.running) {
+        break;
+      }
+
+      if (this.retryTracker.isPermanentlyFailed(message.id)) {
+        this.logger.warn("Skipping permanently failed stale message", {
+          roomId: this.roomId,
+          messageId: message.id,
+        });
+        continue;
+      }
+
+      await this.executeSyncMessage(toMessageEvent(message), message.id);
+      this.syncProcessedIds.add(message.id);
+    }
+  }
+
   private async synchronizeWithNext(): Promise<void> {
     while (this.running) {
       const nextMessage = await this.link.getNextMessage(this.roomId);
@@ -160,8 +203,34 @@ export class Execution {
         break;
       }
 
+      if (this.syncProcessedIds.has(nextMessage.id)) {
+        const isSyncPoint = this.firstWsMessageId !== null && nextMessage.id === this.firstWsMessageId;
+        if (isSyncPoint) {
+          this.drainedWsMessageIds.add(nextMessage.id);
+          this.firstWsMessageId = null;
+          break;
+        }
+        continue;
+      }
+
+      if (this.retryTracker.isPermanentlyFailed(nextMessage.id)) {
+        this.logger.warn("Skipping permanently failed message during sync", {
+          roomId: this.roomId,
+          messageId: nextMessage.id,
+        });
+        await this.markMessageFailed(nextMessage.id, "Message permanently failed after max retries");
+        const isSyncPoint = this.firstWsMessageId !== null && nextMessage.id === this.firstWsMessageId;
+        if (isSyncPoint) {
+          this.drainedWsMessageIds.add(nextMessage.id);
+          this.firstWsMessageId = null;
+          break;
+        }
+        continue;
+      }
+
       const isSyncPoint = this.firstWsMessageId !== null && nextMessage.id === this.firstWsMessageId;
-      await this.executeEvent(toMessageEvent(nextMessage));
+      await this.executeSyncMessage(toMessageEvent(nextMessage), nextMessage.id);
+      this.syncProcessedIds.add(nextMessage.id);
 
       if (isSyncPoint) {
         this.drainedWsMessageIds.add(nextMessage.id);
@@ -170,8 +239,40 @@ export class Execution {
       }
     }
 
+    this.syncProcessedIds.clear();
     this.syncComplete = true;
     this.notifyIfIdle();
+  }
+
+  private async executeSyncMessage(event: PlatformEvent, messageId: string): Promise<void> {
+    const [, exceeded] = this.retryTracker.recordAttempt(messageId);
+    if (exceeded) {
+      this.logger.error("Message exceeded max retries during sync, marking permanently failed", {
+        roomId: this.roomId,
+        messageId,
+        maxRetries: this.retryTracker.maxRetries,
+      });
+      await this.markMessageFailed(messageId, "Message permanently failed after max retries");
+      return;
+    }
+
+    this.inFlight += 1;
+    this.context.setState("processing");
+
+    try {
+      await this.onExecute(this.context, event);
+      this.retryTracker.markSuccess(messageId);
+    } catch (error: unknown) {
+      const label = error instanceof Error ? error.message : String(error);
+      this.logger.error("Sync message execution failed", {
+        roomId: this.roomId,
+        messageId,
+        error: label,
+      });
+    } finally {
+      this.inFlight -= 1;
+      this.context.setState("idle");
+    }
   }
 
   private async executeEvent(event: PlatformEvent): Promise<void> {
@@ -232,6 +333,17 @@ export class Execution {
     const waiters = this.waiters.splice(0, this.waiters.length);
     for (const waiter of waiters) {
       waiter(event);
+    }
+  }
+
+  private async markMessageFailed(messageId: string, error: string): Promise<void> {
+    try {
+      await this.link.markFailed(this.roomId, messageId, error, { bestEffort: true });
+    } catch {
+      this.logger.warn("Failed to mark message as failed on server", {
+        roomId: this.roomId,
+        messageId,
+      });
     }
   }
 }

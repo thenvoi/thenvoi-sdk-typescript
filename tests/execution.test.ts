@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PlatformEvent } from "../src/platform/events";
 import { Execution } from "../src/runtime/Execution";
 import type { ExecutionState } from "../src/runtime/ExecutionContext";
+import { MessageRetryTracker } from "../src/runtime/retryTracker";
 
 interface BacklogMessage {
   id: string;
@@ -34,26 +35,50 @@ function makeEvent(id: string): PlatformEvent {
   };
 }
 
-function makeContext() {
+function makeBacklogMessage(id: string, content = "backlog"): BacklogMessage {
+  return {
+    id,
+    roomId: "room-1",
+    content,
+    senderId: "user-1",
+    senderType: "User",
+    senderName: "User One",
+    messageType: "text",
+    metadata: {},
+    createdAt: new Date("2026-03-05T00:00:00.000Z"),
+  };
+}
+
+function makeContext(maxRetries = 1) {
   const states: ExecutionState[] = [];
+  const retryTracker = new MessageRetryTracker(maxRetries);
   return {
     setState(state: ExecutionState) {
       states.push(state);
     },
+    getRetryTracker() {
+      return retryTracker;
+    },
     states,
+    retryTracker,
   };
 }
 
 function createExecution(options?: {
   onExecute?: (event: PlatformEvent) => Promise<void>;
   getNextMessage?: () => Promise<BacklogMessage | null>;
+  getStaleProcessingMessages?: () => Promise<BacklogMessage[]>;
+  markFailed?: (roomId: string, messageId: string, error: string, opts?: unknown) => Promise<void>;
+  maxRetries?: number;
 }) {
-  const context = makeContext();
+  const context = makeContext(options?.maxRetries);
   const processed: string[] = [];
   const execution = new Execution({
     roomId: "room-1",
     link: {
       getNextMessage: options?.getNextMessage ?? (async () => null),
+      getStaleProcessingMessages: options?.getStaleProcessingMessages ?? (async () => []),
+      markFailed: options?.markFailed ?? (async () => {}),
     } as never,
     context: context as never,
     onExecute: async (_context, event) => {
@@ -155,28 +180,8 @@ describe("Execution", () => {
     });
     const getNextMessage = vi.fn<() => Promise<BacklogMessage | null>>();
     const backlogMessages: BacklogMessage[] = [
-      {
-        id: "m-backlog",
-        roomId: "room-1",
-        content: "backlog",
-        senderId: "user-1",
-        senderType: "User",
-        senderName: "User One",
-        messageType: "text",
-        metadata: {},
-        createdAt: new Date("2026-03-05T00:00:00.000Z"),
-      },
-      {
-        id: "m-sync",
-        roomId: "room-1",
-        content: "sync",
-        senderId: "user-1",
-        senderType: "User",
-        senderName: "User One",
-        messageType: "text",
-        metadata: {},
-        createdAt: new Date("2026-03-05T00:00:01.000Z"),
-      },
+      makeBacklogMessage("m-backlog", "backlog"),
+      makeBacklogMessage("m-sync", "sync"),
     ];
     getNextMessage.mockImplementation(async () => {
       await syncGate;
@@ -191,6 +196,224 @@ describe("Execution", () => {
 
     await execution.waitForIdle();
     expect(processed).toEqual(["m-backlog", "m-sync", "m-live"]);
+    await execution.stop();
+  });
+});
+
+describe("Execution crash recovery", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("recovers stale processing messages before /next sync", async () => {
+    const staleMessages = [
+      makeBacklogMessage("stale-1", "stale first"),
+      makeBacklogMessage("stale-2", "stale second"),
+    ];
+    const nextMessages = [makeBacklogMessage("next-1", "from next")];
+
+    const { execution, processed } = createExecution({
+      getStaleProcessingMessages: async () => staleMessages,
+      getNextMessage: vi.fn<() => Promise<BacklogMessage | null>>()
+        .mockResolvedValueOnce(nextMessages[0])
+        .mockResolvedValueOnce(null),
+    });
+
+    await execution.enqueue(makeEvent("ws-1"));
+    await execution.waitForIdle();
+    expect(processed).toEqual(["stale-1", "stale-2", "next-1", "ws-1"]);
+    await execution.stop();
+  });
+
+  it("skips permanently failed messages during stale recovery", async () => {
+    const context = makeContext(1);
+    // Pre-mark a message as permanently failed
+    context.retryTracker.markPermanentlyFailed("stale-poison");
+
+    const staleMessages = [
+      makeBacklogMessage("stale-poison", "poison"),
+      makeBacklogMessage("stale-good", "good"),
+    ];
+
+    const processed: string[] = [];
+    const execution = new Execution({
+      roomId: "room-1",
+      link: {
+        getNextMessage: async () => null,
+        getStaleProcessingMessages: async () => staleMessages,
+        markFailed: async () => {},
+      } as never,
+      context: context as never,
+      onExecute: async (_context, event) => {
+        if (event.type === "message_created") {
+          processed.push(event.payload.id);
+        }
+      },
+    });
+
+    await execution.waitForIdle();
+    expect(processed).toEqual(["stale-good"]);
+    expect(processed).not.toContain("stale-poison");
+    await execution.stop();
+  });
+
+  it("skips permanently failed messages during /next sync and marks them failed on server", async () => {
+    const context = makeContext(1);
+    context.retryTracker.markPermanentlyFailed("next-poison");
+
+    const markFailed = vi.fn(async () => {});
+
+    const processed: string[] = [];
+    const execution = new Execution({
+      roomId: "room-1",
+      link: {
+        getNextMessage: vi.fn<() => Promise<BacklogMessage | null>>()
+          .mockResolvedValueOnce(makeBacklogMessage("next-poison"))
+          .mockResolvedValueOnce(makeBacklogMessage("next-good"))
+          .mockResolvedValueOnce(null),
+        getStaleProcessingMessages: async () => [],
+        markFailed,
+      } as never,
+      context: context as never,
+      onExecute: async (_context, event) => {
+        if (event.type === "message_created") {
+          processed.push(event.payload.id);
+        }
+      },
+    });
+
+    await execution.waitForIdle();
+    expect(processed).toEqual(["next-good"]);
+    expect(markFailed).toHaveBeenCalledWith(
+      "room-1",
+      "next-poison",
+      "Message permanently failed after max retries",
+      { bestEffort: true },
+    );
+    await execution.stop();
+  });
+
+  it("deduplicates messages between stale recovery and /next sync", async () => {
+    const sharedId = "msg-shared";
+    const staleMessages = [makeBacklogMessage(sharedId, "from stale")];
+
+    const { execution, processed } = createExecution({
+      getStaleProcessingMessages: async () => staleMessages,
+      getNextMessage: vi.fn<() => Promise<BacklogMessage | null>>()
+        .mockResolvedValueOnce(makeBacklogMessage(sharedId, "from next"))
+        .mockResolvedValueOnce(makeBacklogMessage("next-only", "unique"))
+        .mockResolvedValueOnce(null),
+    });
+
+    await execution.waitForIdle();
+    // sharedId processed once (from stale), then skipped in /next, then next-only processed
+    expect(processed).toEqual([sharedId, "next-only"]);
+    await execution.stop();
+  });
+
+  it("sync failures do not crash the execution", async () => {
+    const staleMessages = [
+      makeBacklogMessage("fail-msg", "will fail"),
+      makeBacklogMessage("ok-msg", "will succeed"),
+    ];
+
+    const context = makeContext(2);
+    const processed: string[] = [];
+    const execution = new Execution({
+      roomId: "room-1",
+      link: {
+        getNextMessage: async () => null,
+        getStaleProcessingMessages: async () => staleMessages,
+        markFailed: async () => {},
+      } as never,
+      context: context as never,
+      onExecute: async (_context, event) => {
+        if (event.type === "message_created") {
+          const id = event.payload.id;
+          if (id === "fail-msg") {
+            throw new Error("sync failure");
+          }
+          processed.push(id);
+        }
+      },
+    });
+
+    await execution.enqueue(makeEvent("ws-1"));
+    await execution.waitForIdle();
+    // fail-msg threw during sync but didn't crash; ok-msg and ws-1 succeeded
+    expect(processed).toEqual(["ok-msg", "ws-1"]);
+    await execution.stop();
+  });
+
+  it("marks message permanently failed when retries exceeded during sync", async () => {
+    const markFailed = vi.fn(async () => {});
+    const context = makeContext(1);
+    // Record one attempt already so next attempt exceeds
+    context.retryTracker.recordAttempt("retry-msg");
+
+    const staleMessages = [makeBacklogMessage("retry-msg", "will exceed")];
+
+    const processed: string[] = [];
+    const execution = new Execution({
+      roomId: "room-1",
+      link: {
+        getNextMessage: async () => null,
+        getStaleProcessingMessages: async () => staleMessages,
+        markFailed,
+      } as never,
+      context: context as never,
+      onExecute: async (_context, event) => {
+        if (event.type === "message_created") {
+          processed.push(event.payload.id);
+        }
+      },
+    });
+
+    await execution.waitForIdle();
+    expect(processed).toEqual([]);
+    expect(markFailed).toHaveBeenCalledWith(
+      "room-1",
+      "retry-msg",
+      "Message permanently failed after max retries",
+      { bestEffort: true },
+    );
+    expect(context.retryTracker.isPermanentlyFailed("retry-msg")).toBe(true);
+    await execution.stop();
+  });
+
+  it("after sync, normal WebSocket processing continues and crashes propagate", async () => {
+    let wsCallCount = 0;
+    const { execution, processed } = createExecution({
+      onExecute: async (event) => {
+        // Only fail on ws events (after sync)
+        if (event.type === "message_created" && (event.payload as { id: string }).id === "ws-fail") {
+          wsCallCount += 1;
+          throw new Error("ws boom");
+        }
+      },
+    });
+
+    await execution.enqueue(makeEvent("ws-ok"));
+    await execution.enqueue(makeEvent("ws-fail"));
+    await expect(execution.waitUntilStopped()).rejects.toThrow("ws boom");
+    expect(processed).toEqual(["ws-ok", "ws-fail"]);
+    expect(wsCallCount).toBe(1);
+  });
+
+  it("gracefully handles getStaleProcessingMessages failure", async () => {
+    const { execution, processed } = createExecution({
+      getStaleProcessingMessages: async () => {
+        throw new Error("network error");
+      },
+      getNextMessage: vi.fn<() => Promise<BacklogMessage | null>>()
+        .mockResolvedValueOnce(makeBacklogMessage("next-1"))
+        .mockResolvedValueOnce(null),
+    });
+
+    await execution.enqueue(makeEvent("ws-1"));
+    await execution.waitForIdle();
+    // Recovery failed gracefully, /next sync and ws events still processed
+    expect(processed).toEqual(["next-1", "ws-1"]);
     await execution.stop();
   });
 });

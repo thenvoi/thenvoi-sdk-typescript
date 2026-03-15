@@ -333,6 +333,21 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
     return message ? toPlatformMessage(roomId, message) : null;
   }
 
+  public async getStaleProcessingMessages(roomId: string): Promise<PlatformMessage[]> {
+    if (!this.rest.listMessages) {
+      return [];
+    }
+
+    const response = await this.rest.listMessages({
+      chatId: roomId,
+      page: 1,
+      pageSize: 50,
+      status: "processing",
+    });
+
+    return (response.data ?? []).map((msg) => toPlatformMessage(roomId, msg));
+  }
+
   public async listChats(
     request: { page: number; pageSize: number },
     requestOptions?: RestRequestOptions,
