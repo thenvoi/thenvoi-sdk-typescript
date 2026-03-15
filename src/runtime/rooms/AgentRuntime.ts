@@ -14,6 +14,8 @@ interface AgentRuntimeOptions {
   agentId: string;
   onExecute: (context: ExecutionContext, event: PlatformEvent) => Promise<void>;
   onSessionCleanup?: (roomId: string) => Promise<void>;
+  onRoomJoined?: (roomId: string, payload: MetadataMap) => Promise<void> | void;
+  onRoomLeft?: (roomId: string) => Promise<void> | void;
   onContactEvent?: (event: ContactEvent) => Promise<void>;
   onError?: (error: unknown, event: PlatformEvent) => void;
   sessionConfig?: SessionConfig;
@@ -26,6 +28,8 @@ export class AgentRuntime {
   private readonly agentId: string;
   private readonly onExecute: (context: ExecutionContext, event: PlatformEvent) => Promise<void>;
   private readonly onSessionCleanup: (roomId: string) => Promise<void>;
+  private readonly onRoomJoined?: (roomId: string, payload: MetadataMap) => Promise<void> | void;
+  private readonly onRoomLeft?: (roomId: string) => Promise<void> | void;
   private readonly onContactEvent?: (event: ContactEvent) => Promise<void>;
   private readonly onError?: (error: unknown, event: PlatformEvent) => void;
   private readonly sessionConfig: Required<SessionConfig>;
@@ -46,6 +50,8 @@ export class AgentRuntime {
     this.agentId = options.agentId;
     this.onExecute = options.onExecute;
     this.onSessionCleanup = options.onSessionCleanup ?? (async () => undefined);
+    this.onRoomJoined = options.onRoomJoined;
+    this.onRoomLeft = options.onRoomLeft;
     this.onError = options.onError;
     this.logger = options.logger ?? new NoopLogger();
     this.onContactEvent = options.onContactEvent;
@@ -173,12 +179,14 @@ export class AgentRuntime {
           trackedRooms: this.subscribedRooms,
           onJoined: async (roomId) => {
             this.getOrCreateExecution(roomId);
+            await this.onRoomJoined?.(roomId, event.payload as MetadataMap);
           },
         });
         return;
       case "room_removed":
       case "room_deleted":
         if (event.roomId) {
+          await this.onRoomLeft?.(event.roomId);
           await this.leaveTrackedRoom(event.roomId);
         }
         return;
@@ -323,8 +331,9 @@ export class AgentRuntime {
     await hydrateTrackedRooms({
       link: this.link,
       trackedRooms: this.subscribedRooms,
-      onJoined: async (roomId) => {
+      onJoined: async (roomId, payload) => {
         this.getOrCreateExecution(roomId);
+        await this.onRoomJoined?.(roomId, payload);
       },
       onError: async (error) => {
         this.logger.warn("AgentRuntime failed to subscribe existing rooms", {

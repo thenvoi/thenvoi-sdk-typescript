@@ -93,7 +93,7 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
       new ThenvoiClient({
         apiKey: this.apiKey,
         baseUrl: this.restUrl,
-      }),
+      }) as any, // eslint-disable-line @typescript-eslint/no-explicit-any -- bind() wrappers widen method signatures
     );
 
     this.rest = restApi;

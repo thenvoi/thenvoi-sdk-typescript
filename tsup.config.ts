@@ -13,6 +13,7 @@ const EXTERNAL = [
   "@linear/sdk",
   "@linear/sdk/webhooks",
   "@openai/codex-sdk",
+  "@thenvoi/rest-client",
   "express",
   "openai",
   "parlant-client",
