@@ -63,6 +63,17 @@ export {
   type ParlantMessages,
 } from "./parlant";
 export {
+  LettaAdapter,
+  LettaHistoryConverter,
+  type LettaAdapterOptions,
+  type LettaClientFactory,
+  type LettaClientLike,
+  type LettaMessage,
+  type LettaMessages,
+  type LettaResponse,
+  type LettaResponseMessage,
+} from "./letta";
+export {
   ClaudeSDKAdapter,
   type ClaudeSDKAdapterOptions,
   type ClaudePermissionMode,

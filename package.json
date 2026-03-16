@@ -87,6 +87,7 @@
     "@openai/codex-sdk": "^0.107.0",
     "express": "^5.2.1",
     "openai": "^6.27.0",
+    "@letta-ai/letta-client": "^1.7.0",
     "parlant-client": "^3.2.0"
   },
   "peerDependenciesMeta": {
@@ -118,6 +119,9 @@
       "optional": true
     },
     "openai": {
+      "optional": true
+    },
+    "@letta-ai/letta-client": {
       "optional": true
     },
     "parlant-client": {

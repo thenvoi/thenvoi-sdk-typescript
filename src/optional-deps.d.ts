@@ -8,3 +8,4 @@ declare module "@langchain/langgraph/prebuilt";
 declare module "@langchain/core/tools";
 declare module "openai";
 declare module "parlant-client";
+declare module "@letta-ai/letta-client";

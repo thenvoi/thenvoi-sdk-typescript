@@ -42,6 +42,7 @@ export {
   A2AAdapter,
   A2AGatewayAdapter,
   ParlantAdapter,
+  LettaAdapter,
   ClaudeSDKAdapter,
   CodexAdapter,
 } from "./adapters";
@@ -57,6 +58,7 @@ export type {
   A2AGatewayAdapterOptions,
   A2AAuth,
   ParlantAdapterOptions,
+  LettaAdapterOptions,
   ClaudeSDKAdapterOptions,
   ClaudePermissionMode,
   CodexAdapterConfig,
