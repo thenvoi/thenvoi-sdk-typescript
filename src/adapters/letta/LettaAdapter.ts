@@ -7,11 +7,8 @@ import type { PlatformMessage } from "../../runtime/types";
 import { renderSystemPrompt } from "../../runtime/prompts";
 import { asErrorMessage, toWireString } from "../shared/coercion";
 import { LazyAsyncValue } from "../shared/lazyAsyncValue";
-import {
-  LettaHistoryConverter,
-  type LettaMessage,
-  type LettaMessages,
-} from "./types";
+import type { LettaMessage, LettaMessages } from "./types";
+import { LettaHistoryConverter } from "./types";
 
 // ---------------------------------------------------------------------------
 // Minimal Letta client surface
@@ -149,11 +146,15 @@ function extractAssistantText(messages: LettaResponseMessage[]): string | null {
   return null;
 }
 
+interface ApprovalRequestMessage extends LettaResponseMessage {
+  tool_call: NonNullable<LettaResponseMessage["tool_call"]>;
+}
+
 function extractApprovalRequests(
   messages: LettaResponseMessage[],
-): LettaResponseMessage[] {
+): ApprovalRequestMessage[] {
   return messages.filter(
-    (msg) =>
+    (msg): msg is ApprovalRequestMessage =>
       msg.message_type === "approval_request_message" && msg.tool_call != null,
   );
 }
@@ -192,7 +193,7 @@ export interface LettaAdapterOptions {
   includeBaseInstructions?: boolean;
   maxHistoryMessages?: number;
   emitReasoningEvents?: boolean;
-  historyConverter?: LettaHistoryConverter;
+  historyConverter?: InstanceType<typeof LettaHistoryConverter>;
   clientFactory?: LettaClientFactory;
   logger?: Logger;
 }
@@ -234,6 +235,7 @@ export class LettaAdapter extends SimpleAdapter<
   private systemPrompt = "";
 
   private readonly roomAgents = new Map<string, string>();
+  private readonly roomClientTools = new Map<string, LettaClientTool[]>();
   private readonly bootstrappedRooms = new Set<string>();
   private readonly roomAgentInitPromises = new Map<string, Promise<string>>();
   private readonly roomBootstrapInitPromises = new Map<
@@ -323,7 +325,11 @@ export class LettaAdapter extends SimpleAdapter<
         contactsMessage,
       });
 
-      const clientTools = toClientTools(tools.getOpenAIToolSchemas());
+      let clientTools = this.roomClientTools.get(context.roomId);
+      if (!clientTools) {
+        clientTools = toClientTools(tools.getOpenAIToolSchemas());
+        this.roomClientTools.set(context.roomId, clientTools);
+      }
       const assistantText = await this.executeWithToolLoop(
         client,
         agentId,
@@ -373,7 +379,24 @@ export class LettaAdapter extends SimpleAdapter<
       [pendingAgent, pendingBootstrap].filter(Boolean),
     );
 
+    const agentId = this.roomAgents.get(roomId);
+    if (agentId && !this.sharedLettaAgentId) {
+      try {
+        const client = this.clientLoader.current;
+        if (client) {
+          await client.agents.delete(agentId);
+        }
+      } catch (error) {
+        this.logger.debug("Failed to delete Letta agent on cleanup", {
+          agentId,
+          roomId,
+          error,
+        });
+      }
+    }
+
     this.roomAgents.delete(roomId);
+    this.roomClientTools.delete(roomId);
     this.bootstrappedRooms.delete(roomId);
     this.roomAgentInitPromises.delete(roomId);
     this.roomBootstrapInitPromises.delete(roomId);
@@ -507,6 +530,7 @@ export class LettaAdapter extends SimpleAdapter<
     try {
       await client.agents.messages.create(agentId, {
         messages: [{ role: "user", content: lines.join("\n\n") }],
+        max_steps: 1,
       });
     } catch (error) {
       this.logger.warn("Letta history injection failed", {
@@ -557,9 +581,9 @@ export class LettaAdapter extends SimpleAdapter<
 
       for (const approval of approvals) {
         const { name, arguments: argsJson, tool_call_id } =
-          approval.tool_call!;
+          approval.tool_call;
         try {
-          const args = JSON.parse(argsJson) as Record<string, unknown>;
+          const args = safeParseToolArgs(argsJson);
           const result = await tools.executeToolCall(name, args);
           toolResults.push({
             role: "tool",
@@ -646,6 +670,20 @@ export class LettaAdapter extends SimpleAdapter<
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function safeParseToolArgs(json: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(json);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    return { raw: parsed };
+  } catch {
+    throw new Error(
+      `Letta tool_call arguments are not valid JSON: ${json.slice(0, 200)}`,
+    );
+  }
+}
 
 function selectCompleteExchanges(history: LettaMessages): LettaMessages {
   const complete: LettaMessages = [];

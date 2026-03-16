@@ -553,7 +553,7 @@ describe("LettaAdapter", () => {
     );
   });
 
-  it("cleans up room state on onCleanup", async () => {
+  it("cleans up room state and deletes the Letta agent on onCleanup", async () => {
     const client = new FakeLettaClient();
     client.responseBatches.push(
       assistantResponse("Hello"),
@@ -577,8 +577,11 @@ describe("LettaAdapter", () => {
     );
 
     expect(client.agentCreateCount).toBe(1);
+    expect(client.agentDeleteCount).toBe(0);
 
     await adapter.onCleanup("room-clean");
+
+    expect(client.agentDeleteCount).toBe(1);
 
     await adapter.onMessage(
       makeMessage("Hi again", "room-clean"),
@@ -591,6 +594,32 @@ describe("LettaAdapter", () => {
 
     // After cleanup, a new agent should be created for the room
     expect(client.agentCreateCount).toBe(2);
+  });
+
+  it("does not delete shared agent on cleanup", async () => {
+    const client = new FakeLettaClient();
+    client.responseBatches.push(assistantResponse("Hello"));
+
+    const adapter = new LettaAdapter({
+      lettaAgentId: "shared-agent",
+      clientFactory: async () => client,
+    });
+
+    await adapter.onStarted("Agent", "An agent");
+
+    const tools = new FakeTools();
+    await adapter.onMessage(
+      makeMessage("Hi", "room-shared"),
+      tools,
+      [],
+      null,
+      null,
+      { isSessionBootstrap: false, roomId: "room-shared" },
+    );
+
+    await adapter.onCleanup("room-shared");
+
+    expect(client.agentDeleteCount).toBe(0);
   });
 
   it("serializes concurrent agent creation for the same room", async () => {
@@ -654,5 +683,148 @@ describe("LettaAdapter", () => {
     expect(sentContent).toContain("Alice joined the room");
     expect(sentContent).toContain("Bob is online");
     expect(sentContent).toContain("Hello");
+  });
+
+  it("returns a structured error for malformed tool arguments JSON", async () => {
+    const client = new FakeLettaClient();
+    client.responseBatches.push(
+      {
+        messages: [
+          {
+            id: "msg-1",
+            message_type: "approval_request_message",
+            tool_call: {
+              name: "some_tool",
+              arguments: "not valid json{{{",
+              tool_call_id: "tc-bad",
+            },
+          },
+        ],
+        stop_reason: { stop_reason: "requires_approval" },
+      },
+      assistantResponse("Recovered"),
+    );
+
+    const adapter = new LettaAdapter({
+      clientFactory: async () => client,
+    });
+
+    await adapter.onStarted("Agent", "An agent");
+
+    const tools = new FakeTools();
+    await adapter.onMessage(
+      makeMessage("Do it", "room-bad-json"),
+      tools,
+      [],
+      null,
+      null,
+      { isSessionBootstrap: false, roomId: "room-bad-json" },
+    );
+
+    const toolResult = client.messageCreateCalls[1]?.params.messages?.[0];
+    expect(toolResult?.role).toBe("tool");
+    expect(toolResult?.content).toContain("not valid JSON");
+    expect(tools.messages).toEqual(["Recovered"]);
+  });
+
+  it("logs and continues when history injection fails", async () => {
+    const client = new FakeLettaClient();
+    const originalCreate = client.agents.messages.create;
+    let firstCall = true;
+    client.agents.messages.create = async (agentId, params) => {
+      if (firstCall && params.max_steps === 1) {
+        firstCall = false;
+        throw new Error("injection failed");
+      }
+      return originalCreate.call(client.agents.messages, agentId, params);
+    };
+    client.responseBatches.push(assistantResponse("Response after failed injection"));
+
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const adapter = new LettaAdapter({
+      clientFactory: async () => client,
+      logger,
+    });
+
+    await adapter.onStarted("Agent", "An agent");
+
+    const history = [
+      {
+        role: "user" as const,
+        content: "Past question",
+        sender: "User",
+        senderType: "User",
+      },
+      {
+        role: "assistant" as const,
+        content: "Past answer",
+        sender: "Bot",
+        senderType: "Agent",
+      },
+    ];
+
+    const tools = new FakeTools();
+    await adapter.onMessage(
+      makeMessage("Current", "room-inject-fail"),
+      tools,
+      history,
+      null,
+      null,
+      { isSessionBootstrap: true, roomId: "room-inject-fail" },
+    );
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Letta history injection failed",
+      expect.objectContaining({ agentId: "letta-agent-1" }),
+    );
+    expect(tools.messages).toEqual(["Response after failed injection"]);
+  });
+
+  it("passes max_steps: 1 for history injection", async () => {
+    const client = new FakeLettaClient();
+    client.responseBatches.push(
+      assistantResponse("History ack"),
+      assistantResponse("Actual response"),
+    );
+
+    const adapter = new LettaAdapter({
+      clientFactory: async () => client,
+    });
+
+    await adapter.onStarted("Agent", "An agent");
+
+    const history = [
+      {
+        role: "user" as const,
+        content: "Past",
+        sender: "User",
+        senderType: "User",
+      },
+      {
+        role: "assistant" as const,
+        content: "Past reply",
+        sender: "Bot",
+        senderType: "Agent",
+      },
+    ];
+
+    const tools = new FakeTools();
+    await adapter.onMessage(
+      makeMessage("Now", "room-max-steps"),
+      tools,
+      history,
+      null,
+      null,
+      { isSessionBootstrap: true, roomId: "room-max-steps" },
+    );
+
+    const historyCall = client.messageCreateCalls[0];
+    expect(historyCall.params.max_steps).toBe(1);
   });
 });
