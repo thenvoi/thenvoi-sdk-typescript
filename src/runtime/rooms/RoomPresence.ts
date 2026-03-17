@@ -36,7 +36,7 @@ export class RoomPresence {
   public constructor(options: RoomPresenceOptions) {
     this.link = options.link;
     this.roomFilter = options.roomFilter;
-    this.autoSubscribeExistingRooms = options.autoSubscribeExistingRooms ?? false;
+    this.autoSubscribeExistingRooms = options.autoSubscribeExistingRooms ?? true;
     this.logger = options.logger ?? new NoopLogger();
   }
 
