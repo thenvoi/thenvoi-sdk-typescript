@@ -48,23 +48,20 @@ export class PhoenixChannelsTransport implements StreamingTransport {
     });
 
     this.socket.onOpen(() => {
-      console.log("[transport] socket opened");
       this.connected = true;
       this.connectResolve?.();
       this.connectResolve = null;
       this.logger.info("Phoenix socket opened", {
-        channels: (this.socket as unknown as { channels: Channel[] }).channels?.length ?? "unknown",
+        channels: getSocketChannelCount(this.socket),
       });
     });
 
     this.socket.onClose((event?: { code?: number; reason?: string }) => {
-      console.log("[transport] socket closed", { code: event?.code, reason: event?.reason });
       this.connected = false;
 
       // If there are no active channels, stop reconnecting — the socket has
       // nothing to rejoin and would just churn connections.
-      const socketChannels = (this.socket as unknown as { channels: Channel[] }).channels;
-      if (!socketChannels || socketChannels.length === 0) {
+      if (getSocketChannelCount(this.socket) === 0) {
         this.socket.disconnect();
       }
 
@@ -245,4 +242,13 @@ function resolveWebSocketFactory(): typeof WebSocket {
 function removeSocketChannel(socket: Socket, channel: Channel): void {
   const candidate = socket as unknown as { remove?: (value: Channel) => void };
   candidate.remove?.(channel);
+}
+
+function getSocketChannelCount(socket: Socket): number | "unknown" {
+  const candidate = socket as unknown as { channels?: Channel[] };
+  if (!Array.isArray(candidate.channels)) {
+    return "unknown";
+  }
+
+  return candidate.channels.length;
 }

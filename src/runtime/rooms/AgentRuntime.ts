@@ -39,14 +39,10 @@ export class AgentRuntime {
   private readonly executions = new Map<string, Execution>();
   private readonly executionWatchers = new Map<string, Promise<void>>();
   private readonly logger: Logger;
-  private readonly messagePollIntervalMs: number;
-  private readonly streamingEnabled: boolean;
-  private readonly polledMessageIdsByRoom = new Map<string, Set<string>>();
   private running = false;
   private stopping = false;
   private stopController = new AbortController();
   private consumeTask: Promise<void> | null = null;
-  private pollTask: Promise<void> | null = null;
   private fatalError: unknown = null;
 
   public constructor(options: AgentRuntimeOptions) {
@@ -67,8 +63,6 @@ export class AgentRuntime {
       enableContextHydration: options.sessionConfig?.enableContextHydration ?? true,
     };
     this.autoSubscribeExistingRooms = options.agentConfig?.autoSubscribeExistingRooms ?? false;
-    this.messagePollIntervalMs = resolveMessagePollIntervalMs();
-    this.streamingEnabled = resolveStreamingEnabled();
   }
 
   public async start(): Promise<void> {
@@ -83,18 +77,13 @@ export class AgentRuntime {
       this.stopController.abort();
     }
     this.stopController = new AbortController();
-    this.consumeTask = this.streamingEnabled
-      ? this.consumeLoop(this.stopController.signal)
-      : null;
-    this.pollTask = this.messagePollIntervalMs > 0
-      ? this.pollLoop(this.stopController.signal)
-      : null;
 
-    if (!this.streamingEnabled) {
-      return;
+    try {
+      await this.link.connect();
+    } catch (error) {
+      await this.handleStartFailure();
+      throw error;
     }
-
-    await this.link.connect();
 
     try {
       await this.link.subscribeAgentRooms();
@@ -102,15 +91,35 @@ export class AgentRuntime {
       this.logger.warn("AgentRuntime failed to subscribe agent_rooms channel, continuing without it");
     }
 
-    await this.subscribeExistingRooms();
-
-    if (this.link.capabilities.contacts) {
-      try {
-        await this.link.subscribeAgentContacts();
-      } catch {
-        this.logger.warn("AgentRuntime failed to subscribe agent_contacts channel, continuing without it");
-      }
+    try {
+      await this.subscribeExistingRooms();
+    } catch (error) {
+      await this.handleStartFailure();
+      throw error;
     }
+
+    this.consumeTask = this.consumeLoop(this.stopController.signal);
+
+    if (!this.link.capabilities.contacts) {
+      return;
+    }
+
+    try {
+      await this.link.subscribeAgentContacts();
+    } catch {
+      this.logger.warn("AgentRuntime failed to subscribe agent_contacts channel, continuing without it");
+    }
+  }
+
+  private async handleStartFailure(): Promise<void> {
+    this.running = false;
+    this.stopping = false;
+    this.stopController.abort();
+    if (this.consumeTask) {
+      await this.consumeTask;
+      this.consumeTask = null;
+    }
+    await this.link.disconnect();
   }
 
   public async stop(timeoutMs?: number): Promise<boolean> {
@@ -124,10 +133,6 @@ export class AgentRuntime {
     if (this.consumeTask) {
       await this.consumeTask;
       this.consumeTask = null;
-    }
-    if (this.pollTask) {
-      await this.pollTask;
-      this.pollTask = null;
     }
 
     const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
@@ -153,15 +158,12 @@ export class AgentRuntime {
     this.contexts.clear();
     this.executions.clear();
     this.executionWatchers.clear();
-    this.polledMessageIdsByRoom.clear();
 
-    if (this.streamingEnabled && this.link.capabilities.contacts) {
+    if (this.link.capabilities.contacts) {
       await this.link.unsubscribeAgentContacts();
     }
 
-    if (this.streamingEnabled) {
-      await this.link.disconnect();
-    }
+    await this.link.disconnect();
     if (this.fatalError) {
       throw this.fatalError;
     }
@@ -175,9 +177,6 @@ export class AgentRuntime {
   public async waitUntilStopped(): Promise<void> {
     if (this.consumeTask) {
       await this.consumeTask;
-      if (this.pollTask) {
-        await this.pollTask;
-      }
     } else {
       await this.link.runForever(this.stopController.signal);
     }
@@ -202,30 +201,6 @@ export class AgentRuntime {
       } catch (error: unknown) {
         await this.failRuntime(error, event);
         return;
-      }
-    }
-  }
-
-  private async pollLoop(signal: AbortSignal): Promise<void> {
-    while (!signal.aborted) {
-      await delay(this.messagePollIntervalMs, signal);
-      if (signal.aborted) {
-        return;
-      }
-
-      for (const roomId of this.subscribedRooms) {
-        if (signal.aborted) {
-          return;
-        }
-
-        try {
-          await this.pollRoomMessage(roomId);
-        } catch (error) {
-          this.logger.warn("Polling next room message failed", {
-            roomId,
-            error,
-          });
-        }
       }
     }
   }
@@ -291,9 +266,7 @@ export class AgentRuntime {
   }
 
   public async bootstrapRoomMessage(roomId: string, message: PlatformMessage): Promise<void> {
-    if (this.streamingEnabled) {
-      await this.link.subscribeRoom(roomId);
-    }
+    await this.link.subscribeRoom(roomId);
     this.subscribedRooms.add(roomId);
     await this.getOrCreateExecution(roomId).bootstrapMessage(message);
   }
@@ -307,48 +280,8 @@ export class AgentRuntime {
 
     this.executions.delete(roomId);
     this.contexts.delete(roomId);
-    this.polledMessageIdsByRoom.delete(roomId);
     await this.onSessionCleanup(roomId);
     return graceful;
-  }
-
-  private async pollRoomMessage(roomId: string): Promise<void> {
-    const context = this.getOrCreateContext(roomId);
-    const nextMessage = await this.link.getNextMessage(roomId);
-    if (!nextMessage) {
-      return;
-    }
-
-    if (context.hasMessage(nextMessage.id)) {
-      return;
-    }
-
-    let knownIds = this.polledMessageIdsByRoom.get(roomId);
-    if (!knownIds) {
-      knownIds = new Set<string>();
-      this.polledMessageIdsByRoom.set(roomId, knownIds);
-    }
-
-    if (knownIds.has(nextMessage.id)) {
-      return;
-    }
-
-    knownIds.add(nextMessage.id);
-    await this.getOrCreateExecution(roomId).enqueue({
-      type: "message_created",
-      roomId,
-      payload: {
-        id: nextMessage.id,
-        content: nextMessage.content,
-        sender_id: nextMessage.senderId,
-        sender_type: nextMessage.senderType,
-        sender_name: nextMessage.senderName ?? null,
-        message_type: nextMessage.messageType,
-        metadata: nextMessage.metadata,
-        inserted_at: nextMessage.createdAt.toISOString(),
-        updated_at: nextMessage.createdAt.toISOString(),
-      },
-    });
   }
 
   private getOrCreateExecution(roomId: string): Execution {
@@ -433,16 +366,6 @@ export class AgentRuntime {
   }
 
   private async leaveTrackedRoom(roomId: string): Promise<void> {
-    if (!this.streamingEnabled) {
-      this.subscribedRooms.delete(roomId);
-      await this.executions.get(roomId)?.stop();
-      this.contexts.delete(roomId);
-      this.executions.delete(roomId);
-      this.polledMessageIdsByRoom.delete(roomId);
-      await this.onSessionCleanup(roomId);
-      return;
-    }
-
     await trackRoomLeave({
       link: this.link,
       roomId,
@@ -451,7 +374,6 @@ export class AgentRuntime {
         await this.executions.get(leftRoomId)?.stop();
         this.contexts.delete(leftRoomId);
         this.executions.delete(leftRoomId);
-        this.polledMessageIdsByRoom.delete(leftRoomId);
         await this.onSessionCleanup(leftRoomId);
       },
     });
@@ -493,32 +415,4 @@ export class AgentRuntime {
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled platform event: ${JSON.stringify(value)}`);
-}
-
-function resolveMessagePollIntervalMs(): number {
-  const raw = process.env.THENVOI_MESSAGE_POLL_INTERVAL_MS?.trim();
-  if (!raw) {
-    return 0;
-  }
-
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 250) {
-    return 0;
-  }
-
-  return parsed;
-}
-
-function resolveStreamingEnabled(): boolean {
-  return process.env.THENVOI_DISABLE_STREAMING !== "1";
-}
-
-async function delay(ms: number, signal: AbortSignal): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener("abort", () => {
-      clearTimeout(timer);
-      resolve();
-    }, { once: true });
-  });
 }
