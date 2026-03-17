@@ -372,13 +372,12 @@ async function runDispatchAttempt(
     retryEvent: string;
     eventKey: string;
     sessionId: string;
+    retryLimit?: number;
+    retryBaseDelayMs?: number;
   },
 ): Promise<DispatchAttemptResult> {
-  const retryLimit = parseFinitePositiveInt(process.env.LINEAR_THENVOI_DISPATCH_RETRY_LIMIT, DISPATCH_RETRY_LIMIT);
-  const retryBaseDelayMs = parseFinitePositiveInt(
-    process.env.LINEAR_THENVOI_DISPATCH_RETRY_BASE_DELAY_MS,
-    DISPATCH_RETRY_BASE_DELAY_MS,
-  );
+  const retryLimit = context.retryLimit ?? DISPATCH_RETRY_LIMIT;
+  const retryBaseDelayMs = context.retryBaseDelayMs ?? DISPATCH_RETRY_BASE_DELAY_MS;
   let attempt = 0;
 
   while (true) {
@@ -516,10 +515,4 @@ function toDispatchFailureError(failure: DispatchTerminalFailure): Error {
     `Linear bridge async dispatch failed for event ${failure.eventKey} (session ${failure.sessionId})`,
     { cause: failure.error },
   );
-}
-
-function parseFinitePositiveInt(raw: string | undefined, fallback: number): number {
-  if (raw === undefined) return fallback;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 }

@@ -36,7 +36,6 @@ const MAX_PEER_LOOKUP_PAGES = 25;
 const PEER_PAGE_SIZE = 100;
 const RECOVERED_ROOM_EVENT_RETRY_LIMIT = 2;
 const RECOVERED_ROOM_EVENT_RETRY_BASE_DELAY_MS = 1_000;
-const RECOVERED_ROOM_EVENT_RETRY_BASE_DELAY_ENV = "LINEAR_THENVOI_RECOVERED_ROOM_RETRY_BASE_DELAY_MS";
 
 export interface LinearBridgeRuntime {
   roomResolutionLocks: Map<string, Promise<SessionRoomRecord>>;
@@ -170,6 +169,8 @@ export async function handleAgentSessionEvent(
       roomId: roomRecord.thenvoiRoomId,
       intent: sessionIntent,
       hostAgentHandle,
+      planningAgentHandles: input.config.planningAgentHandles,
+      implementationAgentHandles: input.config.implementationAgentHandles,
       logger,
     });
 
@@ -248,6 +249,7 @@ export async function handleAgentSessionEvent(
         message,
         messageType: "task",
         metadata: messageMetadata,
+        recoveredRoomRetryBaseDelayMs: input.config.recoveredRoomRetryBaseDelayMs,
       });
     }
     if (canBootstrapDirectly) {
@@ -622,6 +624,7 @@ async function forwardBridgeMessage(input: {
   message: string;
   messageType: string;
   metadata: Record<string, unknown>;
+  recoveredRoomRetryBaseDelayMs?: number;
 }): Promise<SessionRoomRecord> {
   try {
     await input.thenvoiRest.createChatEvent(input.roomRecord.thenvoiRoomId, {
@@ -672,7 +675,7 @@ async function forwardBridgeMessage(input: {
         }
 
         attempt += 1;
-        const retryBaseDelayMs = getRecoveredRoomRetryBaseDelayMs();
+        const retryBaseDelayMs = input.recoveredRoomRetryBaseDelayMs ?? RECOVERED_ROOM_EVENT_RETRY_BASE_DELAY_MS;
         const delayMs = retryBaseDelayMs * attempt;
         input.logger.warn("linear_thenvoi_bridge.room_recreated_retrying", {
           sessionId: input.sessionId,
@@ -686,20 +689,6 @@ async function forwardBridgeMessage(input: {
       }
     }
   }
-}
-
-function getRecoveredRoomRetryBaseDelayMs(): number {
-  const override = process.env[RECOVERED_ROOM_EVENT_RETRY_BASE_DELAY_ENV];
-  if (override === undefined) {
-    return RECOVERED_ROOM_EVENT_RETRY_BASE_DELAY_MS;
-  }
-
-  const parsed = Number(override);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return RECOVERED_ROOM_EVENT_RETRY_BASE_DELAY_MS;
-  }
-
-  return parsed;
 }
 
 function isRecoverableRoomAccessError(error: unknown): boolean {
@@ -946,10 +935,14 @@ async function selectRelevantPeerHandles(input: {
   roomId: string;
   intent: SessionIntent;
   hostAgentHandle: string;
+  planningAgentHandles?: string[];
+  implementationAgentHandles?: string[];
   logger: Logger;
 }): Promise<string[]> {
-  const configuredHandles = resolveConfiguredSpecialistHandles(input.intent)
-    .filter((handle) => handle !== input.hostAgentHandle);
+  const configuredHandles = resolveConfiguredSpecialistHandles(input.intent, {
+    planningAgentHandles: input.planningAgentHandles,
+    implementationAgentHandles: input.implementationAgentHandles,
+  }).filter((handle) => handle !== input.hostAgentHandle);
   if (configuredHandles.length > 0) {
     input.logger.info("linear_thenvoi_bridge.peer_prefetch_selected", {
       roomId: input.roomId,
@@ -1014,23 +1007,19 @@ async function selectRelevantPeerHandles(input: {
   return selected;
 }
 
-function resolveConfiguredSpecialistHandles(intent: SessionIntent): string[] {
-  if (
-    process.env.LINEAR_THENVOI_PLANNING_AGENT_HANDLES === undefined
-    && process.env.LINEAR_THENVOI_IMPLEMENTATION_AGENT_HANDLES === undefined
-  ) {
+function resolveConfiguredSpecialistHandles(
+  intent: SessionIntent,
+  config: { planningAgentHandles?: string[]; implementationAgentHandles?: string[] },
+): string[] {
+  const handles = intent === "implementation"
+    ? config.implementationAgentHandles
+    : config.planningAgentHandles;
+
+  if (!handles || handles.length === 0) {
     return [];
   }
 
-  const raw = intent === "implementation"
-    ? process.env.LINEAR_THENVOI_IMPLEMENTATION_AGENT_HANDLES
-    : process.env.LINEAR_THENVOI_PLANNING_AGENT_HANDLES;
-  if (!raw) {
-    return [];
-  }
-
-  const configured = raw
-    .split(",")
+  const configured = handles
     .map((value) => normalizeOptionalHandle(value))
     .filter((value): value is string => Boolean(value));
 

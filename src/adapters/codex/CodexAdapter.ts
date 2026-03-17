@@ -78,6 +78,7 @@ export interface CodexAdapterConfig {
   maxHistoryMessages?: number;
   enableLocalCommands?: boolean;
   includeBaseInstructions?: boolean;
+  debug?: boolean;
   customSection?: string;
   /**
    * Full system prompt override.
@@ -165,7 +166,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
     this.includeMemoryTools = options?.includeMemoryTools ?? false;
     this.factoryOverride = options?.factory;
     this.logger = options?.logger ?? new NoopLogger();
-    this.debugEnabled = process.env.LINEAR_THENVOI_CODEX_DEBUG === "1";
+    this.debugEnabled = options?.config?.debug ?? false;
   }
 
   public override async onStarted(agentName: string, agentDescription: string): Promise<void> {

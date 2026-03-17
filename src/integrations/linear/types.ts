@@ -14,6 +14,9 @@ export interface LinearThenvoiBridgeConfig {
   roomStrategy?: RoomStrategy;
   writebackMode?: WritebackMode;
   hostAgentHandle?: string;
+  planningAgentHandles?: string[];
+  implementationAgentHandles?: string[];
+  recoveredRoomRetryBaseDelayMs?: number;
 }
 
 export interface SessionRoomRecord {
