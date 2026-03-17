@@ -226,17 +226,9 @@ function getRequiredEnv(name: string): string {
 }
 
 function resolveBridgeApiKey(logger: Logger): string {
-  const bridgeEnvKey = process.env.THENVOI_BRIDGE_API_KEY?.trim();
-  if (bridgeEnvKey) {
-    return bridgeEnvKey;
-  }
-
   const configuredKeys = [
     process.env.LINEAR_THENVOI_BRIDGE_AGENT_CONFIG_KEY?.trim(),
     "linear_thenvoi_bridge",
-    "linear_thenvoi_transport",
-    "planner_agent",
-    "basic_agent",
   ].filter((value): value is string => Boolean(value && value.length > 0));
 
   for (const configKey of configuredKeys) {
@@ -257,7 +249,7 @@ function resolveBridgeApiKey(logger: Logger): string {
   }
 
   throw new Error(
-    "Missing bridge API key. Set THENVOI_BRIDGE_API_KEY/THENVOI_API_KEY or configure an agent key in agent_config.yaml (prefer linear_thenvoi_bridge).",
+    "Missing bridge API key. Set THENVOI_API_KEY or configure linear_thenvoi_bridge in agent_config.yaml.",
   );
 }
 
@@ -276,13 +268,6 @@ export function resolveRestApiKeyForMode(input: {
 
   const embeddedApiKey = input.embeddedBridgeConfig?.apiKey?.trim();
   if (embeddedApiKey) {
-    const transportApiKey = process.env.THENVOI_BRIDGE_API_KEY?.trim();
-    if (transportApiKey && transportApiKey !== embeddedApiKey) {
-      input.logger.warn("linear_thenvoi_bridge.embedded_mode_ignoring_transport_api_key", {
-        runtimeConfigKey: resolveEmbeddedBridgeRuntimeConfigKey(),
-      });
-    }
-
     return embeddedApiKey;
   }
 

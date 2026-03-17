@@ -20,21 +20,24 @@ The SQLite session-room mapping uses `node:sqlite`, so this example requires Nod
 
 ## Environment
 
+Create a local `.env.local` from `.env.local.example`. The bridge only needs a few real values:
+
 ```bash
-export LINEAR_ACCESS_TOKEN=lin_api_xxx
-export LINEAR_WEBHOOK_SECRET=linear_webhook_secret
-export THENVOI_API_KEY=thenvoi_api_xxx
-export THENVOI_REST_URL=https://app.thenvoi.com
-export LINEAR_WEBHOOK_PUBLIC_URL=https://linear-webhook.your-domain.com/linear/webhook
+LINEAR_ACCESS_TOKEN=lin_api_xxx
+LINEAR_WEBHOOK_SECRET=lin_wh_xxx
+THENVOI_API_KEY=thnv_a_xxx
+THENVOI_REST_URL=https://app.thenvoi.com
 ```
 
-Optional:
+Common optional settings:
 
 ```bash
-export LINEAR_THENVOI_STATE_DB=.linear-thenvoi-example.sqlite
-export LINEAR_THENVOI_ROOM_STRATEGY=issue
-export LINEAR_THENVOI_WRITEBACK_MODE=activity_stream
-export THENVOI_BRIDGE_API_KEY=thenvoi_api_bridge_xxx
+LINEAR_THENVOI_STATE_DB=.linear-thenvoi-example.sqlite
+LINEAR_THENVOI_ROOM_STRATEGY=issue
+LINEAR_THENVOI_WRITEBACK_MODE=activity_stream
+THENVOI_HOST_AGENT_HANDLE=your-org/linear-orchestrator
+CODEX_MODEL=gpt-5.3-codex
+PORT=8787
 ```
 
 Recommended agent config key:
@@ -47,25 +50,32 @@ Recommended agent config key:
 pnpm dev:linear
 ```
 
-This starts:
+That starts the webhook server and the embedded bridge agent in one process.
 
-- the webhook server
-- the embedded bridge agent
-- the Cloudflare tunnel
-
-It prints:
-
-- local health URL
-- public webhook URL
-- bridge and tunnel log paths
-
-## Live Validation
+Health check:
 
 ```bash
-pnpm validate:linear
+curl http://127.0.0.1:8787/healthz
 ```
 
-This runs a real Linear end-to-end validation against the live bridge path.
+If you need a public webhook URL for Linear, run your tunnel separately. Example with Cloudflare:
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:8787
+```
+
+Then point the Linear webhook at:
+
+```text
+https://<your-tunnel-host>/linear/webhook
+```
+
+## Secrets
+
+- `.env.local` is gitignored.
+- `agent_config.yaml` is gitignored.
+- `*.sqlite` files are gitignored.
+- Do not commit real `LINEAR_ACCESS_TOKEN`, `LINEAR_WEBHOOK_SECRET`, or `THENVOI_API_KEY` values.
 
 ## Architecture Notes
 

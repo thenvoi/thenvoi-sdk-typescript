@@ -60,9 +60,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "clean": "rm -rf dist",
-    "dev:linear": "bash scripts/dev-linear-stack.sh",
-    "dev:linear:tunnel": "bash scripts/run-linear-tunnel.sh",
-    "validate:linear": "node scripts/linear-live-validate.mjs"
+    "dev:linear": "tsx examples/linear-thenvoi/linear-thenvoi-bridge-server.ts"
   },
   "engines": {
     "node": ">=22"
@@ -134,6 +132,7 @@
     "@typescript-eslint/parser": "^8.26.0",
     "eslint": "^9.22.0",
     "tsup": "^8.4.0",
+    "tsx": "^4.21.0",
     "typescript": "^5.8.2",
     "vitest": "^3.2.4"
   }

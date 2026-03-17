@@ -5,6 +5,7 @@ coverage
 .venv
 .venv-*
 .tmp-bin
+.tmp-harness-reports
 .desloppify
 .claude
 .agents
@@ -15,6 +16,7 @@ agent_config.yaml
 .env.local
 .env.*.local
 !.env.example
+!.env.local.example
 *.pem
 *.key
 credentials.json
