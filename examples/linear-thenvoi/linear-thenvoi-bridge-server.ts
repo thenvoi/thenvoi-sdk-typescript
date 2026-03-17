@@ -599,6 +599,8 @@ async function startEmbeddedAgentWithRetry(agent: Agent, logger: Logger): Promis
 
 async function runLinearThenvoiBridgeServer(): Promise<void> {
   const logger = new ConsoleLogger();
+  process.env.THENVOI_MESSAGE_POLL_INTERVAL_MS ||= "2000";
+  process.env.THENVOI_DISABLE_STREAMING ||= "1";
   const port = Number(process.env.PORT ?? "8787");
   const embedBridgeAgent = parseBooleanEnv(process.env.LINEAR_THENVOI_EMBED_AGENT, true);
   const bridgeMinRequestIntervalMs = parseNonNegativeIntEnv(
@@ -644,10 +646,11 @@ async function runLinearThenvoiBridgeServer(): Promise<void> {
       stateDbPath,
     });
     embeddedAgentStartPromise = startEmbeddedAgentWithRetry(embeddedAgent, logger);
-    void embeddedAgentStartPromise.catch((error) => {
+    void embeddedAgentStartPromise.catch(async (error) => {
       logger.warn("linear_thenvoi_bridge.embedded_agent_background_start_failed", {
         error: error instanceof Error ? error.message : String(error),
       });
+      await embeddedAgent?.stop().catch(() => {});
     });
 
     dispatcher = createEmbeddedLinearBridgeDispatcher({
@@ -692,6 +695,8 @@ async function runLinearThenvoiBridgeServer(): Promise<void> {
       mode: embedBridgeAgent ? "embedded_bridge_agent" : "agent_rest_adapter",
       thenvoiRestUrl: process.env.THENVOI_REST_URL ?? "https://app.thenvoi.com",
       bridgeMinRequestIntervalMs,
+      pollingIntervalMs: process.env.THENVOI_MESSAGE_POLL_INTERVAL_MS,
+      streamingEnabled: process.env.THENVOI_DISABLE_STREAMING !== "1",
     });
   });
 

@@ -233,6 +233,9 @@ describe("linear bridge webhook actions", () => {
       "Suggested peers available in the registry right now. They are not in the room yet:",
     );
     expect(restApi.roomEvents[0]?.content).toContain("feature-implementer");
+    expect(restApi.roomEvents[0]?.content).toContain(
+      "include the relevant ticket context in the room message",
+    );
   });
 
   it("prefetches planner and reviewer specialists for planning sessions", async () => {

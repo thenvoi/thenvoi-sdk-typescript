@@ -32,7 +32,7 @@ export interface ThenvoiLinkOptions {
   capabilities?: Partial<AgentToolsCapabilities>;
 }
 
-const DEFAULT_WS_URL = "wss://app.thenvoi.com/api/v1/socket/websocket";
+const DEFAULT_WS_URL = "wss://app.thenvoi.com/api/v1/socket";
 
 function deriveDefaultRestUrl(wsUrl: string): string {
   const parsed = new URL(wsUrl);

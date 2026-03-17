@@ -830,7 +830,7 @@ export class FernRestAdapter implements RestApi {
       status: request.status,
     };
 
-    const listMessagesApi = this.client.chatMessages?.listMessages;
+    const listMessagesApi = this.client.chatMessages?.listMessages?.bind(this.client.chatMessages);
     if (listMessagesApi) {
       return normalizePaginatedResponse<PlatformChatMessage>(
         await listMessagesApi(request.chatId, listRequest, requestOptions),
@@ -838,7 +838,7 @@ export class FernRestAdapter implements RestApi {
       );
     }
 
-    const listAgentMessagesApi = this.client.agentApiMessages?.listAgentMessages;
+    const listAgentMessagesApi = this.client.agentApiMessages?.listAgentMessages?.bind(this.client.agentApiMessages);
     if (!listAgentMessagesApi) {
       throw new UnsupportedFeatureError("Fern client missing message list endpoint");
     }
@@ -859,7 +859,7 @@ export class FernRestAdapter implements RestApi {
       page_size: request.pageSize,
     };
 
-    const getChatContextApi = this.client.chatContext?.getChatContext;
+    const getChatContextApi = this.client.chatContext?.getChatContext?.bind(this.client.chatContext);
     if (getChatContextApi) {
       return normalizePaginatedResponse<PlatformChatMessage>(
         await getChatContextApi(request.chatId, contextRequest, requestOptions),
@@ -867,7 +867,7 @@ export class FernRestAdapter implements RestApi {
       );
     }
 
-    const getAgentChatContextApi = this.client.agentApiContext?.getAgentChatContext;
+    const getAgentChatContextApi = this.client.agentApiContext?.getAgentChatContext?.bind(this.client.agentApiContext);
     if (!getAgentChatContextApi) {
       throw new UnsupportedFeatureError("Fern client missing chat context endpoint");
     }

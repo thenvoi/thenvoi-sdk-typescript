@@ -8,6 +8,8 @@ import { RuntimeStateError, ValidationError } from "../core/errors";
 import { DefaultPreprocessor } from "./preprocessing/DefaultPreprocessor";
 import { ContactEventHandler } from "./ContactEventHandler";
 import type { ExecutionContext } from "./ExecutionContext";
+import type { Logger } from "../core/logger";
+import { NoopLogger } from "../core/logger";
 
 export interface PlatformRuntimeOptions {
   agentId: string;
@@ -20,6 +22,7 @@ export interface PlatformRuntimeOptions {
   sessionConfig?: SessionConfig;
   contactConfig?: ContactEventConfig;
   agentConfig?: AgentConfig;
+  logger?: Logger;
   identity?: {
     name: string;
     description?: string | null;
@@ -40,6 +43,7 @@ export class PlatformRuntime {
     name: string;
     description?: string | null;
   };
+  private readonly logger: Logger;
 
   private linkInstance?: ThenvoiLink;
   private initPromise: Promise<void> | null = null;
@@ -74,6 +78,7 @@ export class PlatformRuntime {
     this.sessionConfig = options.sessionConfig;
     this.contactConfig = options.contactConfig;
     this.agentConfig = options.agentConfig;
+    this.logger = options.logger ?? new NoopLogger();
     this.configuredIdentity = options.identity;
   }
 
@@ -177,6 +182,7 @@ export class PlatformRuntime {
         agentId: this._agentId,
         sessionConfig: this.sessionConfig,
         agentConfig: this.agentConfig,
+        logger: this.logger,
         onExecute: (context, event) => this.executeAdapter(context, event, adapter),
         onSessionCleanup: (roomId) => adapter.onCleanup(roomId),
         onContactEvent: (event) => this.handleContactEvent(event),

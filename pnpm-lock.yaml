@@ -41,6 +41,9 @@ importers:
       phoenix:
         specifier: ^1.8.4
         version: 1.8.4
+      ws:
+        specifier: ^8.19.0
+        version: 8.19.0
       zod:
         specifier: ^3.24.2
         version: 3.25.76

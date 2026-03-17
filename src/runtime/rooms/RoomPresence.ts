@@ -36,7 +36,7 @@ export class RoomPresence {
   public constructor(options: RoomPresenceOptions) {
     this.link = options.link;
     this.roomFilter = options.roomFilter;
-    this.autoSubscribeExistingRooms = options.autoSubscribeExistingRooms ?? true;
+    this.autoSubscribeExistingRooms = options.autoSubscribeExistingRooms ?? false;
     this.logger = options.logger ?? new NoopLogger();
   }
 
@@ -49,7 +49,11 @@ export class RoomPresence {
       await this.link.connect();
     }
 
-    await this.link.subscribeAgentRooms();
+    try {
+      await this.link.subscribeAgentRooms();
+    } catch {
+      // Best-effort — rooms can still be subscribed on demand.
+    }
     if (this.autoSubscribeExistingRooms) {
       await this.subscribeExistingRooms();
     }

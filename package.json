@@ -62,8 +62,6 @@
     "clean": "rm -rf dist",
     "dev:linear": "bash scripts/dev-linear-stack.sh",
     "dev:linear:tunnel": "bash scripts/run-linear-tunnel.sh",
-    "dev:linear:specialists": "npm exec tsx examples/linear-thenvoi/linear-thenvoi-demo-specialists.ts",
-    "dogfood:linear": "node scripts/linear-dogfood.mjs",
     "validate:linear": "node scripts/linear-live-validate.mjs"
   },
   "engines": {
@@ -73,6 +71,7 @@
     "@thenvoi/rest-client": "file:../fern-javascript-sdk",
     "js-yaml": "^4.1.1",
     "phoenix": "^1.8.4",
+    "ws": "^8.19.0",
     "zod": "^3.24.2",
     "zod-to-json-schema": "^3.25.1"
   },

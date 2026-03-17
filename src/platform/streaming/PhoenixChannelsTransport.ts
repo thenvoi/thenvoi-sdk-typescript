@@ -1,4 +1,5 @@
 import { Channel, Socket } from "phoenix";
+import { WebSocket as NodeWebSocket } from "ws";
 import { TransportError } from "../../core/errors";
 import type { Logger } from "../../core/logger";
 import { NoopLogger } from "../../core/logger";
@@ -41,20 +42,36 @@ export class PhoenixChannelsTransport implements StreamingTransport {
         agent_id: options.agentId,
       },
       heartbeatIntervalMs: options.heartbeatIntervalMs,
-      reconnectAfterMs: options.reconnectAfterMs,
-      transport: options.websocketFactory,
+      reconnectAfterMs: options.reconnectAfterMs ??
+        ((tries: number) => [1_000, 2_000, 5_000, 10_000, 30_000][tries - 1] ?? 30_000),
+      transport: options.websocketFactory ?? resolveWebSocketFactory(),
     });
 
     this.socket.onOpen(() => {
+      console.log("[transport] socket opened");
       this.connected = true;
       this.connectResolve?.();
       this.connectResolve = null;
-      this.logger.info("Phoenix socket opened");
+      this.logger.info("Phoenix socket opened", {
+        channels: (this.socket as unknown as { channels: Channel[] }).channels?.length ?? "unknown",
+      });
     });
 
-    this.socket.onClose(() => {
+    this.socket.onClose((event?: { code?: number; reason?: string }) => {
+      console.log("[transport] socket closed", { code: event?.code, reason: event?.reason });
       this.connected = false;
-      this.logger.info("Phoenix socket closed");
+
+      // If there are no active channels, stop reconnecting — the socket has
+      // nothing to rejoin and would just churn connections.
+      const socketChannels = (this.socket as unknown as { channels: Channel[] }).channels;
+      if (!socketChannels || socketChannels.length === 0) {
+        this.socket.disconnect();
+      }
+
+      this.logger.info("Phoenix socket closed", {
+        code: event?.code ?? null,
+        reason: event?.reason ?? null,
+      });
     });
 
     this.socket.onError((event) => {
@@ -120,6 +137,7 @@ export class PhoenixChannelsTransport implements StreamingTransport {
 
   private async doJoin(topic: string, handlers: TopicHandlers): Promise<void> {
     const channel = this.socket.channel(topic, {});
+
     const refs: Array<[string, number]> = [];
 
     for (const [event, handler] of Object.entries(handlers)) {
@@ -136,15 +154,25 @@ export class PhoenixChannelsTransport implements StreamingTransport {
       refs.push([event, ref]);
     }
 
-    await new Promise<void>((resolve, reject) => {
-      channel
-        .join()
-        .receive("ok", () => resolve())
-        .receive("error", (error: unknown) =>
-          reject(new TransportError(`Failed to join topic ${topic}`, error)),
-        )
-        .receive("timeout", () => reject(new TransportError(`Timeout joining topic ${topic}`)));
-    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        channel
+          .join()
+          .receive("ok", () => resolve())
+          .receive("error", (error: unknown) =>
+            reject(new TransportError(`Failed to join topic ${topic}`, error)),
+          )
+          .receive("timeout", () => reject(new TransportError(`Timeout joining topic ${topic}`)));
+      });
+    } catch (error) {
+      for (const [event, ref] of refs) {
+        channel.off(event, ref);
+      }
+      // Leave and remove the channel so it doesn't get rejoined on reconnect.
+      channel.leave();
+      removeSocketChannel(this.socket, channel);
+      throw error;
+    }
 
     this.channels.set(topic, channel);
     this.channelRefs.set(topic, refs);
@@ -204,4 +232,17 @@ export class PhoenixChannelsTransport implements StreamingTransport {
       };
     });
   }
+}
+
+function resolveWebSocketFactory(): typeof WebSocket {
+  if (typeof process !== "undefined" && process.versions?.node) {
+    return NodeWebSocket as unknown as typeof WebSocket;
+  }
+
+  return WebSocket;
+}
+
+function removeSocketChannel(socket: Socket, channel: Channel): void {
+  const candidate = socket as unknown as { remove?: (value: Channel) => void };
+  candidate.remove?.(channel);
 }

@@ -126,6 +126,7 @@ Bridge responsibilities:
 - keep Linear updated with meaningful milestones
 - use linear_post_thought and linear_post_action for meaningful progress updates
 - call linear_post_response when the work is actually finished
+- when you delegate inside Thenvoi, include the relevant ticket context in the room message so the specialist can act without hidden state
 
 Suggested peers available in the registry right now. They are not in the room yet:
 ${suggestedPeersLine}

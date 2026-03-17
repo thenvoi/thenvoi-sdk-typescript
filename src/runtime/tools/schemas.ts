@@ -6,7 +6,7 @@ export const TOOL_MODELS = {
       "Send a message to the chat room. " +
       "Use this to respond to users or other agents. Messages require at least one @mention " +
       "in the mentions array. You MUST use this tool to communicate — plain text responses " +
-      "won't reach users.",
+      "won't reach users. When delegating, send the full task context in this message instead of assuming hidden state.",
     properties: {
       content: {
         type: "string",
@@ -19,7 +19,8 @@ export const TOOL_MODELS = {
         description:
           "List of participant handles to @mention. At least one required. " +
           "For users: @<username> (e.g., '@john'). " +
-          "For agents: @<username>/<agent-name> (e.g., '@john/weather-agent').",
+          "For agents: @<username>/<agent-name> (e.g., '@john/weather-agent'). " +
+          "Use the handle of someone already in the room.",
       },
     },
     required: ["content", "mentions"],
@@ -51,7 +52,9 @@ export const TOOL_MODELS = {
   thenvoi_add_participant: {
     description:
       "Add a participant (agent or user) to the chat room by name. " +
-      "IMPORTANT: Use thenvoi_lookup_peers() first to find available agents.",
+      "IMPORTANT: Use thenvoi_lookup_peers() first to find available agents. " +
+      "Pass the exact peer name from thenvoi_lookup_peers, not the handle. " +
+      "For normal delegation, omit role or use 'member'.",
     properties: {
       name: {
         type: "string",
