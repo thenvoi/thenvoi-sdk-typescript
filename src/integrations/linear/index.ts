@@ -4,6 +4,11 @@ export {
   handleAgentSessionEvent,
 } from "./bridge";
 export type { LinearBridgeRuntime } from "./bridge";
+export {
+  buildLinearAuthorizationHeader,
+  createLinearClient,
+  isLinearApiKey,
+} from "./client";
 export { stripHandlePrefix, dedupeHandles } from "./handles";
 export { createSqliteSessionRoomStore } from "./store";
 export {

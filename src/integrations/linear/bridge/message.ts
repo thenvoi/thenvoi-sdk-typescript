@@ -33,10 +33,14 @@ export function buildBridgeMessage(input: {
   appUserId: string | null | undefined;
   writebackMode: "final_only" | "activity_stream";
 }): string {
-  const lead = `@${input.hostHandle}`;
   const header = input.action === "created"
     ? "[Linear]: Agent session created."
     : "[Linear]: Agent session updated.";
+  const userRequest = firstNonEmpty(
+    input.commentBody,
+    input.promptContext,
+    input.issueTitle ? `Please handle ${input.issueTitle}.` : null,
+  ) ?? "Please handle this Linear request.";
 
   const issueIdLine = input.issueId ? `issue_id: ${input.issueId}` : "issue_id: none";
   const issueIdentifierLine = input.issueIdentifier
@@ -84,12 +88,11 @@ export function buildBridgeMessage(input: {
   const issueDescription = firstNonEmpty(input.issueDescription) ?? "none";
   const commentBody = firstNonEmpty(input.commentBody) ?? "none";
   const suggestedPeersLine = input.suggestedPeerHandles.length > 0
-    ? input.suggestedPeerHandles.map((handle) => `  - @${handle}`).join("\n")
+    ? input.suggestedPeerHandles.map((handle) => `  - ${handle}`).join("\n")
     : "  - none";
-  const transportPrefetchedLine = input.suggestedPeerHandles.length > 0
-    ? "transport_prefetched_specialists: yes"
-    : "transport_prefetched_specialists: no";
-  return `${header} ${lead} please coordinate the response.
+  return `${userRequest}
+
+${header}
 
 Linear session context:
 - session_id: ${input.sessionId}
@@ -109,7 +112,6 @@ Linear session context:
 - ${issueAssigneeLine}
 - ${issueAssigneeIdLine}
 - inferred_session_intent: ${input.sessionIntent}
-- ${transportPrefetchedLine}
 - writeback_mode: ${input.writebackMode}
 - ${appUserLine}
 - ${organizationLine}
@@ -118,12 +120,14 @@ Linear session context:
 - ${webhookTimestampLine}
 
 Bridge responsibilities:
+- own orchestration for this Linear session
 - decide whether you can answer alone or need help
-- invite specialists only when needed
+- discover and invite specialists only when needed
 - keep Linear updated with meaningful milestones
-- call complete_session when the work is actually finished
+- use linear_post_thought and linear_post_action for meaningful progress updates
+- call linear_post_response when the work is actually finished
 
-Relevant peers already added to the room from the current registry snapshot:
+Suggested peers available in the registry right now. They are not in the room yet:
 ${suggestedPeersLine}
 
 Prompt context:

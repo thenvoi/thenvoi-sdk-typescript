@@ -80,6 +80,10 @@ export class Execution {
     return Promise.resolve();
   }
 
+  public async bootstrapMessage(message: PlatformMessage): Promise<void> {
+    await this.executeSyncMessage(toMessageEvent(message), message.id);
+  }
+
   public isIdle(): boolean {
     return this.syncComplete && this.inFlight === 0 && this.eventQueue.length === 0;
   }

@@ -1,13 +1,13 @@
 # Linear + Thenvoi Example
 
-This example implements the Linear bridge flow in `thenvoi-sdk-typescript`: Linear sends an `AgentSessionEvent`, the webhook handler verifies it with `@linear/sdk/webhooks`, posts an immediate acknowledgment thought, then hands the task directly into a single running Linear-aware bridge agent that can self-initiate, discover relevant peers, coordinate specialist agents, and write progress back to Linear.
+This example implements the Linear bridge flow in `thenvoi-sdk-typescript`: Linear sends an `AgentSessionEvent`, the webhook handler verifies it with `@linear/sdk/webhooks`, posts an immediate acknowledgment thought, then hands the task directly into a single running Linear-aware bridge agent that coordinates real Thenvoi agents in a room and writes progress back to Linear.
 
-The realistic demo path is:
-- the user asks `@Thenvoi` to enrich a vague ticket
-- the bridge decides whether any peer would help and may invite a planning-oriented specialist to sharpen title, scope, and acceptance criteria
-- later, when the issue is moved to `In Progress`, the bridge reevaluates the ticket and may invite an implementation-oriented specialist
-- the specialist works in its own isolated temp workspace and reports back concrete files
-- the bridge moves the issue to `In Review` and posts the final Linear summary
+The demo path for Phase 2 is:
+- the user tags `@Thenvoi` on a Linear issue
+- the bridge opens or reuses a Thenvoi room for that issue
+- Claude Code joins as the planner and drafts the implementation plan
+- Codex joins as the reviewer and tightens that plan
+- the bridge posts the reviewed implementation plan back to Linear as activities and completes the session
 
 The SQLite session-room mapping uses `node:sqlite`, so this example requires Node.js 22+.
 
@@ -17,8 +17,8 @@ The SQLite session-room mapping uses `node:sqlite`, so this example requires Nod
   Express webhook server using `createLinearWebhookHandler(...)`, a shared SQLite session-room store, and an embedded dispatcher that can bootstrap the running bridge agent directly.
 - `examples/linear-thenvoi/linear-thenvoi-bridge-agent.ts`
   Thenvoi-hosted bridge agent with two adapter modes:
-  - `scripted` (default, deterministic dogfood path)
-  - `codex` (full model-driven bridge with Linear tools)
+  - `codex` (default, real model-driven bridge with Linear tools)
+  - `scripted` (test-only fallback path kept for deterministic coverage)
 - `examples/linear-thenvoi/linear-thenvoi-rest-stub.ts`
   In-memory `RestApi` used by tests only.
 
@@ -86,7 +86,7 @@ This starts:
 
 The script prints the webhook URL and tails logs so the stack is observable while developing.
 
-## Run planner + coder specialists
+## Run planner + reviewer specialists
 
 Start the specialist pair in a separate terminal:
 
@@ -95,8 +95,8 @@ pnpm dev:linear:specialists
 ```
 
 This launches:
-- a planning-oriented specialist agent
-- an implementation-oriented specialist agent
+- a Claude Code planning agent
+- a Codex review agent
 
 They remain Linear-agnostic. The bridge decides whether they are worth inviting for the current request.
 
@@ -104,7 +104,7 @@ By default each specialist gets its own fresh temp workspace. You can override t
 
 ```bash
 export LINEAR_THENVOI_PLANNER_CWD=/absolute/path/to/planner-workdir
-export LINEAR_THENVOI_CODER_CWD=/absolute/path/to/coder-workdir
+export LINEAR_THENVOI_REVIEWER_CWD=/absolute/path/to/reviewer-workdir
 ```
 
 Or keep temp dirs but pin them under a shared root:
@@ -117,21 +117,17 @@ You can also override which configured Thenvoi identities are used:
 
 ```bash
 export LINEAR_THENVOI_PLANNER_CONFIG_KEY=planner_agent
-export LINEAR_THENVOI_CODER_CONFIG_KEY=codex_agent
+export LINEAR_THENVOI_REVIEWER_CONFIG_KEY=reviewer_agent
 ```
 
-The example config expects separate `planner_agent` and `codex_agent` entries in `agent_config.yaml` so the bridge can discover distinct specialists.
+The recommended setup uses role-named Thenvoi identities: `planner_agent` for the planner and `reviewer_agent` for the reviewer. Those agents can still run Claude Code and Codex under the hood; the config keys should describe the job, not the adapter.
 
 Adapter mode toggles:
 
 ```bash
 # Bridge adapter mode
-export LINEAR_THENVOI_BRIDGE_AGENT_MODE=scripted   # default
-# export LINEAR_THENVOI_BRIDGE_AGENT_MODE=codex
-
-# Specialist adapter mode
-export LINEAR_THENVOI_SPECIALIST_MODE=scripted     # default
-# export LINEAR_THENVOI_SPECIALIST_MODE=codex
+export LINEAR_THENVOI_BRIDGE_AGENT_MODE=codex      # default
+# export LINEAR_THENVOI_BRIDGE_AGENT_MODE=scripted  # test-only fallback
 
 # Bridge elicitation policy in Codex mode
 # Default is disabled so unattended runs won't stall on questions.
@@ -200,7 +196,7 @@ By default this command also starts the Linear bridge agent in-process. Set `LIN
 pnpm tsx examples/linear-thenvoi/linear-thenvoi-bridge-agent.ts
 ```
 
-In `scripted` mode, this process runs deterministic bridge logic for stable dogfood runs (including planner/coder collaboration and Linear writeback). In `codex` mode, it uses `CodexAdapter` plus dynamic tools. The bridge does not hardcode specific peer handles into its orchestration logic.
+This process uses `CodexAdapter` plus dynamic Linear tools by default. The bridge does not hardcode specific peer handles into its orchestration logic, but the planning flow is designed to pick up a planner-like Claude agent and a reviewer-like Codex agent when they are available.
 
 ## Configuration Notes
 
@@ -209,4 +205,5 @@ In `scripted` mode, this process runs deterministic bridge logic for stable dogf
 - `writebackMode: "activity_stream"` is the example default and is passed into the room context for the bridge agent.
 - `writebackMode: "final_only"` is available when you want the room to produce a final answer without intermediate Linear activity updates.
 - The bridge room payload now includes issue state and assignee so the bridge can distinguish enrichment from implementation kickoff.
+- During planning sessions, peer prefetch prefers planner and reviewer identities so the bridge can run a real plan-review pass before posting back to Linear.
 - `linear_list_workflow_states` lets the bridge resolve the correct team-specific `In Review` state before calling `linear_update_issue`.

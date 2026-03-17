@@ -1,6 +1,8 @@
 export {
   DEFAULT_STATUS_MAPPING,
+  buildLinearAuthorizationHeader,
   completeLinearSession,
+  createLinearClient,
   createInlineLinearBridgeDispatcher,
   createLinearBridgeRuntime,
   createLinearTools,
@@ -14,6 +16,7 @@ export {
   postError,
   postResponse,
   postThought,
+  isLinearApiKey,
   stripHandlePrefix,
   updatePlan,
 } from "../integrations/linear";

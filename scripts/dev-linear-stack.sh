@@ -30,6 +30,28 @@ PORT="${PORT:-8787}"
 BRIDGE_LOG="${BRIDGE_LOG:-/tmp/thenvoi-linear-bridge.log}"
 TUNNEL_LOG="${TUNNEL_LOG:-/tmp/thenvoi-linear-tunnel.log}"
 PUBLIC_WEBHOOK_URL="${LINEAR_WEBHOOK_PUBLIC_URL:-}"
+TAIL_LOGS="${LINEAR_THENVOI_TAIL_LOGS:-0}"
+MAX_LOG_BYTES="${LINEAR_THENVOI_MAX_LOG_BYTES:-10485760}"
+
+prepare_log_file() {
+  local path="$1"
+  local max_bytes="$2"
+  local size=0
+
+  mkdir -p "$(dirname "$path")"
+  touch "$path"
+
+  size="$(wc -c <"$path" | tr -d ' ')"
+  if [[ "$size" -le "$max_bytes" ]]; then
+    return
+  fi
+
+  local backup="${path}.previous"
+  rm -f "$backup"
+  mv "$path" "$backup"
+  : >"$path"
+  echo "Rotated oversized log: $path (${size} bytes) -> $backup"
+}
 
 cleanup() {
   local status=$?
@@ -45,6 +67,9 @@ if [[ -n "${THENVOI_BRIDGE_API_KEY:-}" ]]; then
 fi
 
 export LINEAR_THENVOI_EMBED_AGENT="${LINEAR_THENVOI_EMBED_AGENT:-1}"
+
+prepare_log_file "$BRIDGE_LOG" "$MAX_LOG_BYTES"
+prepare_log_file "$TUNNEL_LOG" "$MAX_LOG_BYTES"
 
 echo "Starting Linear bridge on :$PORT ..."
 npm exec tsx examples/linear-thenvoi/linear-thenvoi-bridge-server.ts >"$BRIDGE_LOG" 2>&1 &
@@ -90,7 +115,16 @@ fi
 echo "Logs:"
 echo "  bridge: $BRIDGE_LOG"
 echo "  tunnel: $TUNNEL_LOG"
+echo "Manual tail: tail -f \"$BRIDGE_LOG\" \"$TUNNEL_LOG\""
 echo
 echo "Press Ctrl+C to stop all processes."
 
-tail -F "$BRIDGE_LOG" "$TUNNEL_LOG"
+if [[ "$TAIL_LOGS" == "1" ]]; then
+  tail -F "$BRIDGE_LOG" "$TUNNEL_LOG"
+fi
+
+while kill -0 "$BRIDGE_PID" 2>/dev/null && kill -0 "$TUNNEL_PID" 2>/dev/null; do
+  sleep 5
+done
+
+wait "$BRIDGE_PID" "$TUNNEL_PID"

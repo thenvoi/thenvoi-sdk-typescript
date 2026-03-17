@@ -20,6 +20,10 @@ export interface PlatformRuntimeOptions {
   sessionConfig?: SessionConfig;
   contactConfig?: ContactEventConfig;
   agentConfig?: AgentConfig;
+  identity?: {
+    name: string;
+    description?: string | null;
+  };
 }
 
 export class PlatformRuntime {
@@ -32,6 +36,10 @@ export class PlatformRuntime {
   private readonly contactConfig?: ContactEventConfig;
   private readonly agentConfig?: AgentConfig;
   private readonly linkOptions?: Omit<ThenvoiLinkOptions, "agentId" | "apiKey">;
+  private readonly configuredIdentity?: {
+    name: string;
+    description?: string | null;
+  };
 
   private linkInstance?: ThenvoiLink;
   private initPromise: Promise<void> | null = null;
@@ -64,6 +72,7 @@ export class PlatformRuntime {
     this.sessionConfig = options.sessionConfig;
     this.contactConfig = options.contactConfig;
     this.agentConfig = options.agentConfig;
+    this.configuredIdentity = options.identity;
   }
 
   public get link(): ThenvoiLink {
@@ -117,6 +126,12 @@ export class PlatformRuntime {
         wsUrl: this._wsUrl,
         restUrl: this._restUrl,
       });
+    }
+
+    if (this.configuredIdentity) {
+      this._agentName = this.configuredIdentity.name;
+      this._agentDescription = this.configuredIdentity.description ?? "";
+      return;
     }
 
     const me = await this.link.rest.getAgentMe();

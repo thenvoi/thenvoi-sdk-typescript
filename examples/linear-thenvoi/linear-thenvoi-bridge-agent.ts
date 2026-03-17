@@ -10,6 +10,7 @@ import {
 } from "../../src/index";
 import {
   completeLinearSession,
+  createLinearClient,
   createLinearTools,
   createSqliteSessionRoomStore,
   type SessionRoomStore,
@@ -21,6 +22,8 @@ interface LinearThenvoiBridgeAgentOptions {
   linearAccessToken?: string;
   stateDbPath?: string;
   codexModel?: string;
+  name?: string;
+  description?: string | null;
 }
 
 export function createLinearThenvoiBridgeAgent(
@@ -33,9 +36,9 @@ export function createLinearThenvoiBridgeAgent(
 function createLinearThenvoiBridgeAgentWithStore(
   options: LinearThenvoiBridgeAgentOptions & { store: SessionRoomStore },
 ): Agent {
-  const linearClient = new LinearClient({
-    accessToken: options?.linearAccessToken ?? process.env.LINEAR_ACCESS_TOKEN ?? "linear-api-key",
-  });
+  const linearClient = createLinearClient(
+    options?.linearAccessToken ?? process.env.LINEAR_ACCESS_TOKEN ?? "linear-api-key",
+  );
 
   const adapterMode = resolveBridgeAdapterMode();
   const adapter = adapterMode === "codex"
@@ -69,6 +72,10 @@ function createLinearThenvoiBridgeAgentWithStore(
       agentId: options?.agentId ?? "agent-linear-thenvoi-bridge",
       apiKey: options?.apiKey ?? "api-key",
     },
+    identity: {
+      name: options?.name ?? "Thenvoi Linear Bridge",
+      description: options?.description ?? "Linear bridge agent coordinating Thenvoi specialists",
+    },
   });
 }
 
@@ -84,7 +91,7 @@ function resolveBridgeAdapterMode(): "codex" | "scripted" {
     return configured;
   }
 
-  return process.env.LINEAR_THENVOI_FORCE_CODEX === "1" ? "codex" : "scripted";
+  return "codex";
 }
 
 function resolveBridgeElicitationEnabled(): boolean {
@@ -186,6 +193,11 @@ function createScriptedBridgeAdapter(input: {
     issueTeamId: string | null;
     intent: "planning" | "implementation";
     awaitingSpecialist: boolean;
+    awaitingRole: "planner" | "reviewer" | "implementer" | null;
+    plannerHandle: string | null;
+    reviewerHandle: string | null;
+    implementerHandle: string | null;
+    plannerDraft: string | null;
   }>();
 
   return new GenericAdapter(async ({ message, tools, roomId }) => {
@@ -199,6 +211,9 @@ function createScriptedBridgeAdapter(input: {
       };
       const intent = parseIntentFromBridgePayload(message.content);
       const suggestedHandles = parseSuggestedHandles(message.content);
+      const plannerHandle = findSuggestedHandle(suggestedHandles, "planner");
+      const reviewerHandle = findSuggestedHandle(suggestedHandles, "reviewer");
+      const implementerHandle = findSuggestedHandle(suggestedHandles, "implementer");
       const issueTitle = parseLineValue(message.content, "issue_title:");
       const issueTeamId = parseLineValue(message.content, "issue_team_id:");
 
@@ -225,7 +240,16 @@ function createScriptedBridgeAdapter(input: {
         issueTitle,
         issueTeamId,
         intent,
-        awaitingSpecialist: suggestedHandles.length > 0,
+        awaitingSpecialist: intent === "implementation"
+          ? implementerHandle !== null
+          : plannerHandle !== null || reviewerHandle !== null,
+        awaitingRole: intent === "implementation"
+          ? (implementerHandle ? "implementer" : null)
+          : (plannerHandle ? "planner" : reviewerHandle ? "reviewer" : null),
+        plannerHandle,
+        reviewerHandle,
+        implementerHandle,
+        plannerDraft: null,
       });
 
       await tools.sendEvent(
@@ -233,12 +257,24 @@ function createScriptedBridgeAdapter(input: {
         "thought",
       );
 
-      if (suggestedHandles.length > 0) {
-        const target = suggestedHandles[0];
-        const ask = intent === "implementation"
-          ? "Please implement the requested deliverable and report concrete files changed plus run instructions."
-          : "Please return an execution-ready ticket enrichment: scope, acceptance criteria, and implementation notes.";
-        await tools.sendMessage(`${ask}`, [`@${target}`]);
+      if (intent === "planning") {
+        const planningTarget = plannerHandle ?? reviewerHandle;
+        if (planningTarget) {
+          await ensureParticipantInRoomByHandle(tools, planningTarget);
+          const ask = plannerHandle
+            ? "Please draft an implementation plan for this Linear request. Return scope, acceptance criteria, sequencing, and verification."
+            : "Please review the implementation plan for this Linear request and return a bridge-ready execution plan.";
+          await tools.sendMessage(ask, [`@${planningTarget}`]);
+          return;
+        }
+      }
+
+      if (intent === "implementation" && implementerHandle) {
+        await ensureParticipantInRoomByHandle(tools, implementerHandle);
+        await tools.sendMessage(
+          "Please implement the requested deliverable and report concrete files changed plus run instructions.",
+          [`@${implementerHandle}`],
+        );
         return;
       }
 
@@ -270,13 +306,39 @@ function createScriptedBridgeAdapter(input: {
       return;
     }
 
+    const specialistBody = (message.content || "").trim();
+    if (pending.intent === "planning" && pending.awaitingRole === "planner" && pending.reviewerHandle) {
+      pending.awaitingRole = "reviewer";
+      pending.plannerDraft = specialistBody.length > 0 ? specialistBody : null;
+      sessionsByRoom.set(roomId, pending);
+      await tools.sendEvent(
+        "Bridge scripted mode: planner returned a draft, asking the reviewer to tighten it.",
+        "thought",
+      );
+      await ensureParticipantInRoomByHandle(tools, pending.reviewerHandle);
+      const reviewPrompt = [
+        "Please review the implementation plan below and return a tightened version the bridge can post back to Linear.",
+        "",
+        pending.plannerDraft ?? "No planner draft was returned.",
+      ].join("\n");
+      await tools.sendMessage(reviewPrompt, [`@${pending.reviewerHandle}`]);
+      return;
+    }
+
     pending.awaitingSpecialist = false;
+    pending.awaitingRole = null;
     sessionsByRoom.set(roomId, pending);
 
-    const specialistBody = (message.content || "").trim();
     const fallbackBody = pending.intent === "implementation"
       ? buildImplementationSummary(pending.issueTitle)
       : buildPlanningSummary(pending.issueTitle);
+    const finalPlanningBody = pending.intent === "planning"
+      ? buildReviewedPlanningSummary({
+        issueTitle: pending.issueTitle,
+        plannerDraft: pending.plannerDraft,
+        reviewerDraft: specialistBody,
+      })
+      : null;
 
     await finalizeSession({
       linearClient: input.linearClient,
@@ -285,7 +347,9 @@ function createScriptedBridgeAdapter(input: {
       issueId: pending.issueId,
       issueTeamId: pending.issueTeamId,
       intent: pending.intent,
-      body: specialistBody.length > 0 ? specialistBody : fallbackBody,
+      body: pending.intent === "planning"
+        ? finalPlanningBody ?? fallbackBody
+        : specialistBody.length > 0 ? specialistBody : fallbackBody,
     });
     const progress = roomProgress.get(roomId) ?? {
       planningCompleted: false,
@@ -388,6 +452,19 @@ function parseSuggestedHandles(content: string): string[] {
   return [...handles];
 }
 
+function findSuggestedHandle(
+  handles: string[],
+  kind: "planner" | "reviewer" | "implementer",
+): string | null {
+  const patterns = kind === "planner"
+    ? [/\bplanner\b/, /\bclaude\b/]
+    : kind === "reviewer"
+      ? [/\breviewer\b/, /\breview\b/, /\bcodex\b/]
+      : [/\bimplementer\b/, /\bcoder\b/, /\bengineer\b/, /\bdeveloper\b/];
+
+  return handles.find((handle) => patterns.some((pattern) => pattern.test(handle))) ?? null;
+}
+
 function parseLineValue(content: string, prefix: string): string | null {
   const line = content
     .split("\n")
@@ -398,6 +475,50 @@ function parseLineValue(content: string, prefix: string): string | null {
 
   const value = line.slice(line.indexOf(":") + 1).trim();
   return value.length > 0 && value !== "none" ? value : null;
+}
+
+async function ensureParticipantInRoomByHandle(
+  tools: {
+    addParticipant(name: string, role?: string): Promise<unknown>;
+    lookupPeers?: (page?: number, pageSize?: number) => Promise<{
+      data?: Array<{ handle?: string | null; name?: string | null }>;
+      metadata?: { totalPages?: number };
+    }>;
+  },
+  handle: string,
+): Promise<void> {
+  if (typeof tools.lookupPeers !== "function") {
+    throw new Error("Bridge scripted mode requires peer lookup support to add participants by handle.");
+  }
+
+  const normalizedHandle = handle.trim().replace(/^@+/, "").toLowerCase();
+  const pageSize = 100;
+  const maxPages = 10;
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    const peers = await tools.lookupPeers(page, pageSize);
+    const items = peers.data ?? [];
+    const match = items.find((peer) => {
+      const peerHandle = typeof peer.handle === "string"
+        ? peer.handle.trim().replace(/^@+/, "").toLowerCase()
+        : "";
+      return peerHandle === normalizedHandle;
+    });
+    if (match?.name) {
+      await tools.addParticipant(match.name, "member");
+      return;
+    }
+
+    const totalPages = peers.metadata?.totalPages;
+    if (typeof totalPages === "number" && page >= totalPages) {
+      break;
+    }
+    if (items.length < pageSize) {
+      break;
+    }
+  }
+
+  throw new Error(`Bridge scripted mode could not find specialist handle '${handle}'.`);
 }
 
 function asString(value: unknown): string | null {
@@ -412,11 +533,32 @@ function asNullableString(value: unknown): string | null {
 function buildPlanningSummary(issueTitle: string | null): string {
   return [
     `Planning update${issueTitle ? ` for ${issueTitle}` : ""}:`,
-    "- Clarified scope into a single landing page focused on dog adoption conversion.",
-    "- Added acceptance criteria: hero, social proof, adoption flow section, and mobile responsiveness.",
-    "- Added implementation notes: static HTML/CSS baseline first, then optional framework migration.",
-    "- Next step: move ticket to In Progress and run implementation session.",
+    "- Register Claude Code and Codex as standard Thenvoi agents and keep the bridge as the only Linear-aware participant.",
+    "- Reuse the existing isolated sandbox and git-ready specialist workspaces for planner and reviewer execution.",
+    "- Post the reviewed implementation plan back to Linear as thought, action, and final response activities.",
+    "- Next step: validate the tagged-issue flow against a real Linear session.",
   ].join("\n");
+}
+
+function buildReviewedPlanningSummary(input: {
+  issueTitle: string | null;
+  plannerDraft: string | null;
+  reviewerDraft: string;
+}): string | null {
+  const reviewed = input.reviewerDraft.trim();
+  if (reviewed.length > 0) {
+    return reviewed;
+  }
+
+  const planner = input.plannerDraft?.trim() ?? "";
+  if (planner.length > 0) {
+    return [
+      `Reviewed implementation plan${input.issueTitle ? ` for ${input.issueTitle}` : ""}:`,
+      planner,
+    ].join("\n\n");
+  }
+
+  return null;
 }
 
 function buildImplementationSummary(issueTitle: string | null): string {
@@ -455,7 +597,7 @@ function buildImplementationTimeoutSummary(issueTitle: string | null): string {
   ].join("\n");
 }
 
-function buildLinearThenvoiBridgePrompt(): string {
+export function buildLinearThenvoiBridgePrompt(): string {
   return `You are the Thenvoi Linear bridge agent.
 
 You are the only Linear-facing coordinator in the room.
@@ -475,24 +617,36 @@ Rules:
 - Treat the bridge-provided session context as the source of truth for ticket identity, issue state, assignee, and latest user intent.
 - The bridge transport may already have added relevant specialists to the room and posted the initial collaborator kickoff before your turn starts.
 - If the bridge payload already includes suggested_peer_handles or the relevant specialists are already present in the room, do not repeat participant discovery or send another wake-up message unless the room materially changes.
+- When you inspect peers, think in role terms first:
+  - planning or ticket enrichment: look for a planner agent first, then a reviewer agent to tighten the result
+  - implementation: look for a coder, implementer, engineer, or developer agent to do the file work, and use a reviewer agent when review is needed
+  - treat peer name, handle, and description as role signals; matches like planner, reviewer, coder, implementer, developer, Claude Planner, and Codex Reviewer all count
 - Use linear_get_issue and linear_list_issue_comments when you need authoritative ticket reads.
 - Use linear_list_workflow_states before moving an issue into a review state so you use the correct state id for that team.
 - If you call get_issue or list_comments, use the exact UUID issue_id from the bridge payload. Never use issue_identifier with those tools.
+- Use the exact Linear tool names exposed in this room:
+  - linear_post_thought for bridge reasoning updates
+  - linear_post_action for visible work progress
+  - linear_post_error for failures
+  - linear_post_response for the final answer and session completion
+  - linear_update_plan when you have a step list worth showing
 - Start alone, but inspect available peers before deciding whether the bridge should handle the work itself.
 - Only use thenvoi_lookup_peers when the room does not already contain a clearly relevant collaborator or when you need to replace/expand the current set of specialists. Choose collaborators based on the actual request and the visible peer identity you observe, not from a fixed handoff graph.
 - When you invite a specialist, ask for one concrete deliverable and wait briefly for their reply before deciding the next step.
 - Do not block indefinitely on silent specialists. If a collaborator does not make visible progress after a short attempt, say that explicitly and continue with the best bridge-only response or choose a different collaborator.
 - Do not ask specialists to coordinate the workflow or to talk to Linear.
 - If the request is planning-only, produce a sharper ticket: title, summary, scope, acceptance criteria, and implementation outline. Write those updates back to Linear and complete the session without pretending code was written.
+- For planning sessions, prefer a two-step specialist path when available: ask a planner for the first implementation plan, then ask a reviewer to challenge and tighten it before writeback.
 - If the request is implementation, ask a relevant implementation specialist to work in an isolated workspace and report concrete files, run steps, and blockers.
 - Use linear_add_issue_comment for durable handoff notes when the plan or implementation summary should live on the ticket itself.
-- Do not create chatter. Post Linear thoughts/actions only when state meaningfully changes.
+- Do not create chatter. Use linear_post_thought and linear_post_action only when state meaningfully changes.
 - Do not restate completion after the session is already complete.
-- Use post_elicitation only when the room is blocked on human input.
-- Use complete_session only after you have enough information to give the user the final answer.
+- Use linear_ask_user only when the room is blocked on human input.
+- Use linear_post_response only after you have enough information to give the user the final answer.
 - If the room message says the session was canceled, stop.
 - Treat issue state and assignee information in the room context as a workflow hint:
-  - if the ticket is being enriched or clarified and a planning-oriented specialist is available, you should delegate the ticket-sharpening work to that specialist instead of doing the planning work yourself
+  - if the ticket is being enriched or clarified and a planning-oriented specialist is available, you should delegate the first planning pass to that specialist instead of doing the planning work yourself
+  - if a review-oriented specialist is also available during planning, use them to tighten the implementation plan before you post it back to Linear
   - if the ticket is already in progress, assigned, or explicitly asks for implementation and a suitable implementation-oriented specialist is available, you should delegate the concrete file-making work to that specialist instead of implementing it yourself
   - when implementation is done, move the issue to an appropriate review state, leave a concise implementation comment, and complete the session with the summary
 - If no suitable specialist is available, say that explicitly and do the best bridge-only response you can.

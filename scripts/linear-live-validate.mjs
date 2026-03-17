@@ -28,10 +28,15 @@ function loadDotEnvLocal() {
 
 loadDotEnvLocal();
 
-const token = process.env.LINEAR_ACCESS_TOKEN;
-const teamId = process.env.LINEAR_TEAM_ID ?? "2c36f836-9952-4e4f-b661-752a266e304c";
+const token = process.env.LINEAR_ACCESS_TOKEN ?? process.env.LINEAR_API_KEY;
+const teamId = process.env.LINEAR_TEAM_ID;
 if (!token) {
-  console.error("Missing LINEAR_ACCESS_TOKEN.");
+  console.error("Missing LINEAR_ACCESS_TOKEN or LINEAR_API_KEY.");
+  process.exit(1);
+}
+
+if (!teamId) {
+  console.error("Missing LINEAR_TEAM_ID.");
   process.exit(1);
 }
 
@@ -40,7 +45,7 @@ async function gql(query, variables = {}) {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${token}`,
+      authorization: buildAuthorizationHeader(token),
     },
     body: JSON.stringify({ query, variables }),
   });
@@ -49,6 +54,17 @@ async function gql(query, variables = {}) {
     throw new Error(`Linear GraphQL error: ${JSON.stringify(json.errors)}`);
   }
   return json.data;
+}
+
+function buildAuthorizationHeader(rawToken) {
+  const trimmedToken = rawToken.trim();
+  if (trimmedToken.startsWith("lin_api_")) {
+    return trimmedToken;
+  }
+  if (trimmedToken.startsWith("Bearer ")) {
+    return trimmedToken;
+  }
+  return `Bearer ${trimmedToken}`;
 }
 
 const issueData = await gql(

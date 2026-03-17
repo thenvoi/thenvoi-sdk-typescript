@@ -242,10 +242,12 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
       effort: config.reasoningEffort ?? null,
       summary: config.reasoningSummary ?? null,
     };
+    const toolNames = this.buildDynamicTools(tools).map((tool) => tool.name);
 
     this.debug("codex_adapter.turn.start", {
       roomId: context.roomId,
       threadId,
+      toolNames,
     });
     const turnStarted = parseTurnStartResponse(await client.request<unknown>(
       "turn/start",

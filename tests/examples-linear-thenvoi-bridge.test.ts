@@ -3,12 +3,16 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createLinearThenvoiBridgeApp,
   createEmbeddedLinearBridgeDispatcher,
+  createRateLimitedRestApi,
   resolveRestApiKeyForMode,
 } from "../examples/linear-thenvoi/linear-thenvoi-bridge-server";
-import { createLinearThenvoiBridgeAgent } from "../examples/linear-thenvoi/linear-thenvoi-bridge-agent";
 import {
-  createLinearThenvoiCoderAgent,
+  buildLinearThenvoiBridgePrompt,
+  createLinearThenvoiBridgeAgent,
+} from "../examples/linear-thenvoi/linear-thenvoi-bridge-agent";
+import {
   createLinearThenvoiPlannerAgent,
+  createLinearThenvoiReviewerAgent,
   resolveSpecialistWorkspace,
 } from "../examples/linear-thenvoi/linear-thenvoi-specialist-agent";
 import { LinearThenvoiExampleRestApi } from "../examples/linear-thenvoi/linear-thenvoi-rest-stub";
@@ -20,6 +24,7 @@ import type {
   SessionRoomRecord,
   SessionRoomStore,
 } from "../src/linear";
+import { ExecutionContext } from "../src/runtime/ExecutionContext";
 
 function createLogger(): Logger {
   return {
@@ -73,6 +78,26 @@ class RejectingRoomEventRestApi extends LinearThenvoiExampleRestApi {
     },
   ): Promise<Record<string, unknown>> {
     throw new Error("POST /api/v1/agent/chats/room-1/events failed (403; response body omitted; content-type=text/html)");
+  }
+}
+
+class RetryOnceRoomEventRestApi extends LinearThenvoiExampleRestApi {
+  public attempts = 0;
+
+  public override async createChatEvent(
+    chatId: string,
+    event: {
+      content: string;
+      messageType: string;
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<Record<string, unknown>> {
+    this.attempts += 1;
+    if (this.attempts === 1) {
+      throw new Error("Status code: 429");
+    }
+
+    return super.createChatEvent(chatId, event);
   }
 }
 
@@ -138,20 +163,53 @@ describe("linear thenvoi examples", () => {
     expect(typeof agent.stop).toBe("function");
   });
 
-  it("builds planner and coder specialists for the realistic demo flow", () => {
+  it("exposes thenvoi_lookup_peers on the bridge room tool surface", () => {
+    const restApi = new LinearThenvoiExampleRestApi({
+      peers: [
+        { id: "peer-host", name: "Thenvoi Linear Bridge", handle: "linear-host" },
+        { id: "peer-planner", name: "Claude Planner", handle: "claude-planner" },
+      ],
+      agentId: "peer-host",
+      agentName: "Thenvoi Linear Bridge",
+      agentHandle: "linear-host",
+    });
+    const context = new ExecutionContext({
+      roomId: "room-1",
+      link: { rest: restApi },
+      maxContextMessages: 20,
+    });
+
+    const toolNames = context.getTools()
+      .getOpenAIToolSchemas()
+      .map((entry) => (entry.function as { name?: string } | undefined)?.name);
+
+    expect(toolNames).toContain("thenvoi_lookup_peers");
+    expect(typeof context.getTools().lookupPeers).toBe("function");
+  });
+
+  it("documents the real Linear tool names in the bridge prompt", () => {
+    const prompt = buildLinearThenvoiBridgePrompt();
+
+    expect(prompt).toContain("linear_post_thought");
+    expect(prompt).toContain("linear_post_action");
+    expect(prompt).toContain("linear_post_response");
+    expect(prompt).not.toContain("complete_session");
+  });
+
+  it("builds planner and reviewer specialists for the realistic demo flow", () => {
     const planner = createLinearThenvoiPlannerAgent({
       agentId: "planner-agent",
       apiKey: "planner-key",
     });
-    const coder = createLinearThenvoiCoderAgent({
-      agentId: "coder-agent",
-      apiKey: "coder-key",
+    const reviewer = createLinearThenvoiReviewerAgent({
+      agentId: "reviewer-agent",
+      apiKey: "reviewer-key",
     });
 
     expect(planner).toBeDefined();
-    expect(coder).toBeDefined();
+    expect(reviewer).toBeDefined();
     expect(typeof planner.run).toBe("function");
-    expect(typeof coder.run).toBe("function");
+    expect(typeof reviewer.run).toBe("function");
   });
 
   it("creates isolated temp workspaces for specialists by default", () => {
@@ -159,14 +217,14 @@ describe("linear thenvoi examples", () => {
       workspaceMode: "temp",
       workspacePrefix: "thenvoi-linear-test-planner-",
     });
-    const coderWorkspace = resolveSpecialistWorkspace({
+    const reviewerWorkspace = resolveSpecialistWorkspace({
       workspaceMode: "temp",
-      workspacePrefix: "thenvoi-linear-test-coder-",
+      workspacePrefix: "thenvoi-linear-test-reviewer-",
     });
 
     expect(plannerWorkspace).toContain("thenvoi-linear-test-planner-");
-    expect(coderWorkspace).toContain("thenvoi-linear-test-coder-");
-    expect(plannerWorkspace).not.toBe(coderWorkspace);
+    expect(reviewerWorkspace).toContain("thenvoi-linear-test-reviewer-");
+    expect(plannerWorkspace).not.toBe(reviewerWorkspace);
   });
 
   it("uses the embedded bridge runtime api key in embedded mode", () => {
@@ -224,6 +282,31 @@ describe("linear thenvoi examples", () => {
     }
   });
 
+  it("retries rate-limited Thenvoi REST calls before surfacing failure", async () => {
+    const logger = createLogger();
+    const restApi = createRateLimitedRestApi({
+      api: new RetryOnceRoomEventRestApi(),
+      minIntervalMs: 0,
+      retryLimit: 1,
+      retryBaseDelayMs: 0,
+      logger,
+    });
+
+    await expect(
+      restApi.createChatEvent("room-1", {
+        content: "hello",
+        messageType: "task",
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(logger.warn).toHaveBeenCalledWith(
+      "linear_thenvoi_bridge.rest_rate_limited_retrying",
+      expect.objectContaining({
+        operation: "createChatEvent",
+        attempt: 1,
+      }),
+    );
+  });
+
   it("retries embedded bootstrap when room event posting is transiently forbidden", async () => {
     const store = new MemorySessionRoomStore();
     const logger = createLogger();
@@ -240,6 +323,10 @@ describe("linear thenvoi examples", () => {
     const dispatcher = createEmbeddedLinearBridgeDispatcher({
       agent,
       store,
+      restApi: new LinearThenvoiExampleRestApi(),
+      linearClient: {
+        createAgentActivity: vi.fn(async () => ({ ok: true })),
+      } as never,
       logger,
     });
 
@@ -310,6 +397,10 @@ describe("linear thenvoi examples", () => {
     const dispatcher = createEmbeddedLinearBridgeDispatcher({
       agent,
       store,
+      restApi: new RejectingRoomEventRestApi(),
+      linearClient: {
+        createAgentActivity: vi.fn(async () => ({ ok: true })),
+      } as never,
       logger,
     });
     const restApi = new RejectingRoomEventRestApi();
@@ -355,6 +446,10 @@ describe("linear thenvoi examples", () => {
     const dispatcher = createEmbeddedLinearBridgeDispatcher({
       agent,
       store,
+      restApi: new LinearThenvoiExampleRestApi(),
+      linearClient: {
+        createAgentActivity: vi.fn(async () => ({ ok: true })),
+      } as never,
       logger,
     });
     const restApi = new LinearThenvoiExampleRestApi();
@@ -399,4 +494,60 @@ describe("linear thenvoi examples", () => {
       bootstrapRoomMessage.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
     );
   });
+
+  it("processes bootstrap room messages immediately even before queue sync settles", async () => {
+    const runtimeModule = await import("../src/runtime/PlatformRuntime");
+    const executionSpy = vi.fn().mockResolvedValue(undefined);
+    let releaseNextMessage: (() => void) | null = null;
+    const runtime = new runtimeModule.PlatformRuntime({
+      agentId: "agent-1",
+      apiKey: "key-1",
+      identity: { name: "Bridge", description: "Bridge" },
+      link: {
+        isConnected: () => true,
+        connect: vi.fn().mockResolvedValue(undefined),
+        subscribeAgentRooms: vi.fn().mockResolvedValue(undefined),
+        subscribeAgentContacts: vi.fn().mockResolvedValue(undefined),
+        unsubscribeAgentContacts: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined),
+        nextEvent: vi.fn(),
+        subscribeRoom: vi.fn().mockResolvedValue(undefined),
+        unsubscribeRoom: vi.fn().mockResolvedValue(undefined),
+        getStaleProcessingMessages: vi.fn().mockResolvedValue([]),
+        getNextMessage: vi.fn(() => new Promise((resolve) => {
+          releaseNextMessage = () => resolve(null);
+        })),
+        markProcessing: vi.fn().mockResolvedValue(undefined),
+        markProcessed: vi.fn().mockResolvedValue(undefined),
+        markFailed: vi.fn().mockResolvedValue(undefined),
+        rest: new LinearThenvoiExampleRestApi(),
+        capabilities: { peers: true, contacts: false, memory: false },
+      } as never,
+    });
+    const adapter = {
+      onStarted: vi.fn().mockResolvedValue(undefined),
+      onCleanup: vi.fn().mockResolvedValue(undefined),
+      onEvent: executionSpy,
+    };
+
+    await runtime.start(adapter as never);
+    await runtime.bootstrapRoomMessage("room-1", {
+      id: "bootstrap-1",
+      roomId: "room-1",
+      content: "hello",
+      senderId: "user-1",
+      senderType: "User",
+      senderName: "User",
+      messageType: "task",
+      metadata: {},
+      createdAt: new Date(),
+    });
+
+    expect(executionSpy).toHaveBeenCalledTimes(1);
+    if (releaseNextMessage !== null) {
+      (releaseNextMessage as () => void)();
+    }
+    await runtime.stop(0);
+  });
+
 });

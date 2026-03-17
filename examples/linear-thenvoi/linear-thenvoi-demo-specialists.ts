@@ -23,7 +23,12 @@ interface RoleAgentOptions {
   workdirPrefix: string;
   cwd?: string;
   codexModel?: string;
+  claudeModel?: string;
+  mode?: "claude_sdk" | "codex" | "scripted";
 }
+
+const START_RETRY_ATTEMPTS = 4;
+const START_RETRY_DELAY_MS = 2_000;
 
 export function createFreshSpecialistWorkdir(roleSlug: string): string {
   const baseDir = process.env.LINEAR_THENVOI_SPECIALIST_TMPDIR?.trim() || tmpdir();
@@ -50,39 +55,43 @@ export function createLinearThenvoiPlannerAgent(options?: {
   configKey?: string;
   cwd?: string;
   codexModel?: string;
+  claudeModel?: string;
 }): RoleAgentInstance {
   return createRoleAgent({
     configKey: options?.configKey ?? process.env.LINEAR_THENVOI_PLANNER_CONFIG_KEY?.trim() ?? "planner_agent",
-    roleName: "Planner Agent",
+    roleName: "Claude Code Planner",
     roleInstructions: [
-      "Turn rough requests into execution-ready plans.",
-      "When asked to enrich a ticket, return a sharper problem statement, scope, constraints, acceptance criteria, and a short implementation checklist.",
+      "Turn rough requests into execution-ready implementation plans.",
+      "When asked to enrich a ticket, return a sharper problem statement, scope, constraints, acceptance criteria, rollout sequence, and verification checklist.",
       "Do not implement code unless the room explicitly asks for a concrete artifact.",
       "If the brief is underspecified, propose the missing details as assumptions instead of blocking the room.",
     ].join(" "),
     workdirPrefix: "planner",
     cwd: options?.cwd ?? process.env.LINEAR_THENVOI_PLANNER_CWD?.trim(),
     codexModel: options?.codexModel,
+    claudeModel: options?.claudeModel,
+    mode: "claude_sdk",
   });
 }
 
-export function createLinearThenvoiCoderAgent(options?: {
+export function createLinearThenvoiReviewerAgent(options?: {
   configKey?: string;
   cwd?: string;
   codexModel?: string;
 }): RoleAgentInstance {
   return createRoleAgent({
-    configKey: options?.configKey ?? process.env.LINEAR_THENVOI_CODER_CONFIG_KEY?.trim() ?? "codex_agent",
-    roleName: "Coder Agent",
+    configKey: options?.configKey ?? process.env.LINEAR_THENVOI_REVIEWER_CONFIG_KEY?.trim() ?? "reviewer_agent",
+    roleName: "Codex Reviewer",
     roleInstructions: [
-      "Implement the requested deliverable in the current isolated workspace.",
-      "Create the minimal set of files needed to make the solution concrete.",
-      "When you finish, report exactly what you changed, what you verified, and what still needs review.",
-      "If the room only asks for implementation planning, redirect that back to the planner instead of doing both jobs yourself.",
+      "Review the planner's proposed implementation plan in the current isolated workspace.",
+      "Tighten sequencing, assumptions, verification, and rollback notes before the bridge writes anything back to Linear.",
+      "Report exactly what needs changing in the plan and what already looks solid.",
+      "If the room only asks for implementation planning, stay in review mode rather than turning into the implementer.",
     ].join(" "),
-    workdirPrefix: "coder",
-    cwd: options?.cwd ?? process.env.LINEAR_THENVOI_CODER_CWD?.trim(),
+    workdirPrefix: "reviewer",
+    cwd: options?.cwd ?? process.env.LINEAR_THENVOI_REVIEWER_CWD?.trim(),
     codexModel: options?.codexModel,
+    mode: "codex",
   });
 }
 
@@ -95,6 +104,8 @@ function createRoleAgent(options: RoleAgentOptions): RoleAgentInstance {
     roleInstructions: options.roleInstructions,
     cwd,
     codexModel: options.codexModel,
+    claudeModel: options.claudeModel,
+    mode: options.mode,
   });
 
   return {
@@ -107,13 +118,19 @@ function createRoleAgent(options: RoleAgentOptions): RoleAgentInstance {
 export async function runLinearThenvoiDemoSpecialists(): Promise<void> {
   const logger = new ConsoleLogger();
   const planner = createLinearThenvoiPlannerAgent();
-  const coder = createLinearThenvoiCoderAgent();
-  const agents = [planner, coder];
+  const reviewer = createLinearThenvoiReviewerAgent();
+  const agents = [planner, reviewer];
 
-  await Promise.all(agents.map(async ({ agent }) => agent.start()));
+  for (const { agent, roleName } of agents) {
+    await startAgentWithRetry({
+      agent,
+      roleName,
+      logger,
+    });
+  }
   logger.info("linear_thenvoi_demo_specialists.started", {
     plannerCwd: planner.cwd,
-    coderCwd: coder.cwd,
+    reviewerCwd: reviewer.cwd,
   });
 
   let shuttingDown = false;
@@ -140,4 +157,43 @@ if (isDirectExecution(import.meta.url)) {
     });
     process.exitCode = 1;
   });
+}
+
+async function startAgentWithRetry(input: {
+  agent: Agent;
+  roleName: string;
+  logger: ConsoleLogger;
+}): Promise<void> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= START_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      await input.agent.start();
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!isRateLimitedStartupError(error) || attempt === START_RETRY_ATTEMPTS) {
+        throw error;
+      }
+
+      input.logger.warn("linear_thenvoi_demo_specialists.start_retrying", {
+        roleName: input.roleName,
+        attempt,
+        maxAttempts: START_RETRY_ATTEMPTS,
+        delayMs: START_RETRY_DELAY_MS * attempt,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await sleep(START_RETRY_DELAY_MS * attempt);
+    }
+  }
+
+  throw lastError;
+}
+
+function isRateLimitedStartupError(error: unknown): boolean {
+  return error instanceof Error && /\b429\b/.test(error.message);
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 }

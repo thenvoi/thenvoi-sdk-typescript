@@ -36,8 +36,19 @@ function mergeOptions(options?: RestRequestOptions): RestRequestOptions {
   };
 }
 
+const AGENT_ME_RETRY_LIMIT = 4;
+const AGENT_ME_RETRY_BASE_DELAY_MS = 2_000;
+
 function asMetadataMap(value: unknown): MetadataMap | undefined {
   return asOptionalRecord(value) as MetadataMap | undefined;
+}
+
+function isRateLimitError(error: unknown): boolean {
+  return error instanceof Error && /\b429\b/.test(error.message);
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 }
 
 function requireNonEmptyStringField(
@@ -77,7 +88,6 @@ function normalizeAgentIdentityRecord(
     name: requireNonEmptyStringField(record.name, "name", source),
     description: normalizeOptionalStringField(record.description, "description", source),
     handle: normalizeOptionalStringField(record.handle, "handle", source),
-    ownerUuid: normalizeOptionalStringField(record.owner_uuid, "owner_uuid", source),
   };
 }
 
@@ -110,6 +120,15 @@ function normalizeLegacyProfileIdentity(
     description: profile.description ?? null,
     handle: null,
   };
+}
+
+function normalizeLegacyProfileEnvelope(value: unknown): FernUserProfile {
+  const payload = asMetadataMap(extractEnvelopeData(value));
+  if (!payload) {
+    throw new Error("Invalid profile.getMyProfile response: expected object payload");
+  }
+
+  return payload as unknown as FernUserProfile;
 }
 
 function asRecordArray(value: unknown): MetadataMap[] | undefined {
@@ -339,20 +358,38 @@ export class FernRestAdapter implements RestApi {
   }
 
   public async getAgentMe(options?: RestRequestOptions): Promise<AgentIdentity> {
-    if (this.client.agentApiIdentity?.getAgentMe) {
-      const response = await this.client.agentApiIdentity.getAgentMe(mergeOptions(options));
-      return normalizeAgentIdentityEnvelope(response, "agentApiIdentity.getAgentMe");
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= AGENT_ME_RETRY_LIMIT; attempt += 1) {
+      try {
+        if (this.client.agentApiIdentity?.getAgentMe) {
+          const response = await this.client.agentApiIdentity.getAgentMe(mergeOptions(options));
+          return normalizeAgentIdentityEnvelope(response, "agentApiIdentity.getAgentMe");
+        }
+
+        const profileClient = this.client.myProfile ?? this.client.humanApiProfile;
+        if (!profileClient?.getMyProfile) {
+          throw new UnsupportedFeatureError(
+            "Fern client missing agentApiIdentity.getAgentMe or humanApiProfile.getMyProfile",
+          );
+        }
+
+        const profile = await profileClient.getMyProfile(mergeOptions(options));
+        return normalizeLegacyProfileIdentity(
+          normalizeLegacyProfileEnvelope(profile),
+          "profile.getMyProfile",
+        );
+      } catch (error) {
+        lastError = error;
+        if (!isRateLimitError(error) || attempt === AGENT_ME_RETRY_LIMIT) {
+          throw error;
+        }
+
+        await sleep(AGENT_ME_RETRY_BASE_DELAY_MS * attempt);
+      }
     }
 
-    const profileApi = this.client.myProfile?.getMyProfile ?? this.client.humanApiProfile?.getMyProfile;
-    if (!profileApi) {
-      throw new UnsupportedFeatureError(
-        "Fern client missing agentApiIdentity.getAgentMe or humanApiProfile.getMyProfile",
-      );
-    }
-
-    const profile = await profileApi(mergeOptions(options));
-    return normalizeLegacyProfileIdentity(profile, "profile.getMyProfile");
+    throw lastError;
   }
 
   public async createChatMessage(

@@ -32,6 +32,8 @@ export interface PendingBootstrapRequest {
   thenvoiRoomId: string;
   expectedContent: string;
   messageType: string;
+  senderId?: string | null;
+  senderName?: string | null;
   metadata?: Record<string, unknown>;
   createdAt: string;
   expiresAt: string;

@@ -57,6 +57,12 @@ class MemorySessionRoomStore implements SessionRoomStore {
   }
 }
 
+class PromptedConfiguredHostRestApi extends LinearThenvoiExampleRestApi {
+  public override async getAgentMe(): Promise<never> {
+    throw new Error("getAgentMe should not be called when hostAgentHandle is configured");
+  }
+}
+
 const config: LinearThenvoiBridgeConfig = {
   linearAccessToken: "lin_api_test",
   linearWebhookSecret: "linear_webhook_secret",
@@ -177,14 +183,17 @@ describe("linear bridge webhook actions", () => {
       linear_session_id: "session-1",
       linear_issue_id: "issue-1",
     });
-    await expect(store.listPendingBootstrapRequests()).resolves.toEqual([]);
+    await expect(store.listPendingBootstrapRequests()).resolves.toEqual([
+      expect.objectContaining({ messageType: "task" }),
+      expect.objectContaining({ messageType: "task" }),
+    ]);
     await expect(store.getBySessionId("session-1")).resolves.toMatchObject({
       status: "active",
       lastEventKey: expect.any(String),
     });
   });
 
-  it("prefetches a relevant implementation specialist into the room when available", async () => {
+  it("surfaces a relevant implementation specialist as a bridge hint without adding them to the room", async () => {
     const restApi = new LinearThenvoiExampleRestApi({
       agentId: "peer-host",
       agentName: "Linear Bridge",
@@ -212,29 +221,29 @@ describe("linear bridge webhook actions", () => {
     await expect(restApi.listChatParticipants(roomId ?? "missing-room")).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ handle: "linear-host" }),
+      ]),
+    );
+    await expect(restApi.listChatParticipants(roomId ?? "missing-room")).resolves.not.toEqual(
+      expect.arrayContaining([
         expect.objectContaining({ handle: "feature-implementer" }),
       ]),
     );
-    expect(restApi.roomMessages).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          roomId,
-          mentions: expect.arrayContaining([
-            expect.objectContaining({ handle: "feature-implementer" }),
-          ]),
-        }),
-      ]),
+    expect(restApi.roomMessages).toEqual([]);
+    expect(restApi.roomEvents[0]?.content).toContain(
+      "Suggested peers available in the registry right now. They are not in the room yet:",
     );
+    expect(restApi.roomEvents[0]?.content).toContain("feature-implementer");
   });
 
-  it("keeps an unstarted feature request in planning mode until execution is explicitly requested", async () => {
+  it("prefetches planner and reviewer specialists for planning sessions", async () => {
     const restApi = new LinearThenvoiExampleRestApi({
       agentId: "peer-host",
       agentName: "Linear Bridge",
       agentHandle: "linear-host",
       peers: [
         { id: "peer-host", name: "Linear Bridge", handle: "linear-host" },
-        { id: "peer-planner", name: "Ticket Planner", handle: "ticket-planner" },
+        { id: "peer-planner", name: "Claude Code Planner", handle: "claude-planner" },
+        { id: "peer-reviewer", name: "Codex Reviewer", handle: "codex-reviewer" },
         { id: "peer-implementer", name: "Feature Implementer", handle: "feature-implementer" },
       ],
     });
@@ -269,24 +278,21 @@ describe("linear bridge webhook actions", () => {
     await expect(restApi.listChatParticipants(roomId ?? "missing-room")).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ handle: "linear-host" }),
-        expect.objectContaining({ handle: "ticket-planner" }),
       ]),
     );
     await expect(restApi.listChatParticipants(roomId ?? "missing-room")).resolves.not.toEqual(
       expect.arrayContaining([
+        expect.objectContaining({ handle: "claude-planner" }),
+        expect.objectContaining({ handle: "codex-reviewer" }),
         expect.objectContaining({ handle: "feature-implementer" }),
       ]),
     );
-    expect(restApi.roomMessages).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          roomId,
-          mentions: expect.arrayContaining([
-            expect.objectContaining({ handle: "ticket-planner" }),
-          ]),
-        }),
-      ]),
+    expect(restApi.roomMessages).toEqual([]);
+    expect(restApi.roomEvents[0]?.content).toContain(
+      "Suggested peers available in the registry right now. They are not in the room yet:",
     );
+    expect(restApi.roomEvents[0]?.content).toContain("claude-planner");
+    expect(restApi.roomEvents[0]?.content).toContain("codex-reviewer");
   });
 
   it("marks session canceled and emits a cancellation event", async () => {
@@ -408,7 +414,7 @@ describe("linear bridge webhook actions", () => {
   });
 
   it("forwards prompted action as user response to room", async () => {
-    const restApi = new LinearThenvoiExampleRestApi();
+    const restApi = new PromptedConfiguredHostRestApi();
     const store = new MemorySessionRoomStore();
     const linearClient = makeLinearClient();
 
@@ -548,6 +554,8 @@ describe("linear bridge webhook actions", () => {
       linear_host_handle: "linear-host",
       linear_event_action: "created",
     });
-    await expect(store.listPendingBootstrapRequests()).resolves.toEqual([]);
+    await expect(store.listPendingBootstrapRequests()).resolves.toEqual([
+      expect.objectContaining({ messageType: "task" }),
+    ]);
   });
 });

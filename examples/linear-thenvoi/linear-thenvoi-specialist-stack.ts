@@ -4,8 +4,8 @@ import {
 } from "../../src/index";
 import { ConsoleLogger } from "../../src/core";
 import {
-  createLinearThenvoiCoderAgent,
   createLinearThenvoiPlannerAgent,
+  createLinearThenvoiReviewerAgent,
   resolveSpecialistWorkspace,
 } from "./linear-thenvoi-specialist-agent";
 
@@ -13,7 +13,7 @@ async function runSpecialistStack(): Promise<void> {
   const logger = new ConsoleLogger();
 
   const plannerConfig = loadAgentConfig(process.env.LINEAR_THENVOI_PLANNER_CONFIG_KEY?.trim() ?? "planner_agent");
-  const coderConfig = loadAgentConfig(process.env.LINEAR_THENVOI_CODER_CONFIG_KEY?.trim() ?? "codex_agent");
+  const reviewerConfig = loadAgentConfig(process.env.LINEAR_THENVOI_REVIEWER_CONFIG_KEY?.trim() ?? "reviewer_agent");
 
   const plannerWorkspace = resolveSpecialistWorkspace({
     cwd: process.env.LINEAR_THENVOI_PLANNER_CWD?.trim(),
@@ -22,17 +22,17 @@ async function runSpecialistStack(): Promise<void> {
       : "temp",
     workspacePrefix: process.env.LINEAR_THENVOI_PLANNER_WORKSPACE_PREFIX?.trim() ?? "thenvoi-linear-planner-",
   });
-  const coderWorkspace = resolveSpecialistWorkspace({
-    cwd: process.env.LINEAR_THENVOI_CODER_CWD?.trim(),
-    workspaceMode: process.env.LINEAR_THENVOI_CODER_WORKSPACE_MODE?.trim() === "configured"
+  const reviewerWorkspace = resolveSpecialistWorkspace({
+    cwd: process.env.LINEAR_THENVOI_REVIEWER_CWD?.trim(),
+    workspaceMode: process.env.LINEAR_THENVOI_REVIEWER_WORKSPACE_MODE?.trim() === "configured"
       ? "configured"
       : "temp",
-    workspacePrefix: process.env.LINEAR_THENVOI_CODER_WORKSPACE_PREFIX?.trim() ?? "thenvoi-linear-coder-",
+    workspacePrefix: process.env.LINEAR_THENVOI_REVIEWER_WORKSPACE_PREFIX?.trim() ?? "thenvoi-linear-reviewer-",
   });
 
   logger.info("linear_thenvoi_specialists.starting", {
     plannerWorkspace,
-    coderWorkspace,
+    reviewerWorkspace,
   });
 
   const planner = createLinearThenvoiPlannerAgent({
@@ -40,13 +40,13 @@ async function runSpecialistStack(): Promise<void> {
     cwd: plannerWorkspace,
     workspaceMode: "configured",
   });
-  const coder = createLinearThenvoiCoderAgent({
-    ...coderConfig,
-    cwd: coderWorkspace,
+  const reviewer = createLinearThenvoiReviewerAgent({
+    ...reviewerConfig,
+    cwd: reviewerWorkspace,
     workspaceMode: "configured",
   });
 
-  await Promise.all([planner.start(), coder.start()]);
+  await Promise.all([planner.start(), reviewer.start()]);
 
   let shuttingDown = false;
   const shutdown = () => {
@@ -56,7 +56,7 @@ async function runSpecialistStack(): Promise<void> {
     shuttingDown = true;
     void Promise.all([
       planner.stop(),
-      coder.stop(),
+      reviewer.stop(),
     ]).finally(() => {
       process.exit(0);
     });

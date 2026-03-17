@@ -232,21 +232,7 @@ export class AgentRuntime {
   public async bootstrapRoomMessage(roomId: string, message: PlatformMessage): Promise<void> {
     await this.link.subscribeRoom(roomId);
     this.subscribedRooms.add(roomId);
-    await this.getOrCreateExecution(roomId).enqueue({
-      type: "message_created",
-      roomId,
-      payload: {
-        id: message.id,
-        content: message.content,
-        sender_id: message.senderId,
-        sender_type: message.senderType,
-        sender_name: message.senderName ?? null,
-        message_type: message.messageType,
-        metadata: message.metadata,
-        inserted_at: message.createdAt.toISOString(),
-        updated_at: message.createdAt.toISOString(),
-      },
-    });
+    await this.getOrCreateExecution(roomId).bootstrapMessage(message);
   }
 
   public async resetRoomSession(roomId: string, timeoutMs?: number): Promise<boolean> {

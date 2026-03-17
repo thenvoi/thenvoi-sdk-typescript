@@ -20,14 +20,8 @@ const runRoot = await mkdtemp(join(tmpdir(), `thenvoi-linear-dogfood-${runStamp}
 const logsDir = join(runRoot, "logs");
 mkdirSync(logsDir, { recursive: true });
 
-const requiredEnv = [
-  "LINEAR_ACCESS_TOKEN",
-  "LINEAR_WEBHOOK_SECRET",
-];
-
-for (const name of requiredEnv) {
-  requireEnv(name);
-}
+requireOneOfEnv(["LINEAR_ACCESS_TOKEN", "LINEAR_API_KEY"]);
+requireEnv("LINEAR_WEBHOOK_SECRET");
 
 if (!process.env.THENVOI_BRIDGE_API_KEY?.trim() && !process.env.THENVOI_API_KEY?.trim()) {
   throw new Error("Missing THENVOI_BRIDGE_API_KEY or THENVOI_API_KEY.");
@@ -115,9 +109,9 @@ try {
     tmpRoot: specialistsTmpRoot,
   };
 
-  const linear = new LinearClient({
-    accessToken: process.env.LINEAR_ACCESS_TOKEN,
-  });
+  const linear = createLinearClient(
+    process.env.LINEAR_ACCESS_TOKEN ?? process.env.LINEAR_API_KEY ?? "",
+  );
   const targetTeam = await resolveTargetTeam(linear);
   const viewer = await linear.viewer;
   if (!viewer?.id) {
@@ -304,6 +298,30 @@ function requireEnv(name) {
     throw new Error(`Missing required environment variable: ${name}`);
   }
   return value.trim();
+}
+
+function requireOneOfEnv(names) {
+  for (const name of names) {
+    const value = process.env[name];
+    if (value && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  throw new Error(`Missing required environment variable: one of ${names.join(", ")}`);
+}
+
+function createLinearClient(token) {
+  const trimmedToken = token.trim();
+  if (trimmedToken.startsWith("lin_api_")) {
+    return new LinearClient({
+      apiKey: trimmedToken,
+    });
+  }
+
+  return new LinearClient({
+    accessToken: trimmedToken,
+  });
 }
 
 function startLoggedProcess(input) {

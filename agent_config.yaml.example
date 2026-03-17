@@ -62,6 +62,10 @@ planner_agent:
   agent_id: "your-planner-agent-id"
   api_key: "your-api-key"
 
+reviewer_agent:
+  agent_id: "your-reviewer-agent-id"
+  api_key: "your-api-key"
+
 linear_thenvoi_transport:
   agent_id: "your-linear-transport-agent-id"
   api_key: "your-api-key"

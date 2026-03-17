@@ -37,6 +37,10 @@ const PEER_PAGE_SIZE = 100;
 const RECOVERED_ROOM_EVENT_RETRY_LIMIT = 2;
 const RECOVERED_ROOM_EVENT_RETRY_BASE_DELAY_MS = 1_000;
 const RECOVERED_ROOM_EVENT_RETRY_BASE_DELAY_ENV = "LINEAR_THENVOI_RECOVERED_ROOM_RETRY_BASE_DELAY_MS";
+const DEFAULT_SPECIALIST_HANDLES = [
+  "darvell.long/claude-planner",
+  "darvell.long/codex-reviewer",
+];
 
 export interface LinearBridgeRuntime {
   roomResolutionLocks: Map<string, Promise<SessionRoomRecord>>;
@@ -173,27 +177,12 @@ export async function handleAgentSessionEvent(
       logger,
     });
 
-    const allHandles = dedupeHandles([
-      hostAgentHandle,
-      ...suggestedPeerHandles,
-    ]);
-
     await ensureRoomParticipants({
       thenvoiRest: input.deps.thenvoiRest,
       roomId: roomRecord.thenvoiRoomId,
-      handles: allHandles,
+      handles: [hostAgentHandle],
       logger,
     });
-
-    if (suggestedPeerHandles.length > 0) {
-      await notifySuggestedPeers({
-        thenvoiRest: input.deps.thenvoiRest,
-        roomId: roomRecord.thenvoiRoomId,
-        suggestedPeerHandles,
-        sessionIntent,
-        logger,
-      });
-    }
 
     const message = buildBridgeMessage({
       sessionId,
@@ -266,12 +255,15 @@ export async function handleAgentSessionEvent(
       });
     }
     if (canBootstrapDirectly) {
+      const linearActor = resolveLinearActor(input.payload);
       await enqueueBootstrapRequest(input.deps.store, {
         eventKey,
         linearSessionId: sessionId,
         thenvoiRoomId: roomRecord.thenvoiRoomId,
         expectedContent: message,
         messageType: "task",
+        senderId: linearActor.id,
+        senderName: linearActor.name,
         metadata: shouldResetRoomSession
           ? {
             ...messageMetadata,
@@ -393,35 +385,7 @@ async function resolveHostAgentHandle(input: {
   runtime: LinearBridgeRuntime;
 }): Promise<string> {
   if (input.configuredHostHandle) {
-    const cachedAuthenticated = input.runtime.authenticatedHostHandleCache.get(input.thenvoiRest);
-    if (cachedAuthenticated && input.configuredHostHandle !== cachedAuthenticated) {
-      input.logger.warn("linear_thenvoi_bridge.host_handle_differs_from_authenticated_agent", {
-        configuredHostHandle: input.configuredHostHandle,
-        authenticatedHandle: cachedAuthenticated,
-      });
-    }
-
-    if (!cachedAuthenticated) {
-      try {
-        const identity = await input.thenvoiRest.getAgentMe();
-        const authenticatedAgentHandle = normalizeOptionalHandle(identity.handle);
-        if (authenticatedAgentHandle) {
-          input.runtime.authenticatedHostHandleCache.set(input.thenvoiRest, authenticatedAgentHandle);
-          if (input.configuredHostHandle !== authenticatedAgentHandle) {
-            input.logger.warn("linear_thenvoi_bridge.host_handle_differs_from_authenticated_agent", {
-              configuredHostHandle: input.configuredHostHandle,
-              authenticatedHandle: authenticatedAgentHandle,
-              agentId: identity.id,
-            });
-          }
-        }
-      } catch (error) {
-        input.logger.warn("linear_thenvoi_bridge.host_handle_validation_skipped", {
-          configuredHostHandle: input.configuredHostHandle,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
+    input.runtime.resolvedHostHandleCache.set(input.thenvoiRest, input.configuredHostHandle);
     return input.configuredHostHandle;
   }
 
@@ -545,10 +509,9 @@ async function handlePromptedAction(input: {
     linear_bridge: "thenvoi",
   };
 
-  const authenticatedHostHandle = normalizeOptionalHandle(
-    (await input.deps.thenvoiRest.getAgentMe()).handle,
-  );
-  const canBootstrapDirectly = authenticatedHostHandle === input.config.hostAgentHandle;
+  const canBootstrapDirectly = input.config.hostAgentHandle !== null
+    ? true
+    : Boolean(normalizeOptionalHandle((await input.deps.thenvoiRest.getAgentMe()).handle));
   if (!input.skipRoomWrite || !canBootstrapDirectly) {
     await input.deps.thenvoiRest.createChatEvent(existing.thenvoiRoomId, {
       content: message,
@@ -557,12 +520,15 @@ async function handlePromptedAction(input: {
     });
   }
   if (canBootstrapDirectly) {
+    const linearActor = resolveLinearActor(input.payload);
     await enqueueBootstrapRequest(input.deps.store, {
       eventKey: input.eventKey,
       linearSessionId: input.sessionId,
       thenvoiRoomId: existing.thenvoiRoomId,
       expectedContent: message,
       messageType: "text",
+      senderId: linearActor.id,
+      senderName: linearActor.name,
       metadata,
     });
   }
@@ -584,7 +550,14 @@ async function enqueueBootstrapRequest(
   store: SessionRoomStore,
   request: Pick<
     PendingBootstrapRequest,
-    "eventKey" | "linearSessionId" | "thenvoiRoomId" | "expectedContent" | "messageType" | "metadata"
+    | "eventKey"
+    | "linearSessionId"
+    | "thenvoiRoomId"
+    | "expectedContent"
+    | "messageType"
+    | "senderId"
+    | "senderName"
+    | "metadata"
   >,
 ): Promise<void> {
   const now = new Date();
@@ -593,6 +566,26 @@ async function enqueueBootstrapRequest(
     createdAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + 10 * 60_000).toISOString(),
   });
+}
+
+function resolveLinearActor(payload: HandleAgentSessionEventInput["payload"]): {
+  id: string | null;
+  name: string;
+} {
+  const creator = payload.agentSession.creator;
+  const creatorName = typeof creator?.name === "string" ? creator.name.trim() : "";
+  const creatorId = typeof creator?.id === "string" ? creator.id.trim() : "";
+  if (creatorName.length > 0) {
+    return {
+      id: creatorId.length > 0 ? creatorId : payload.agentSession.creatorId ?? payload.appUserId ?? null,
+      name: creatorName,
+    };
+  }
+
+  return {
+    id: payload.agentSession.creatorId ?? payload.appUserId ?? null,
+    name: "Linear User",
+  };
 }
 
 async function resolveRoomRecord(input: {
@@ -905,70 +898,6 @@ async function ensureRoomParticipants(input: {
   }
 }
 
-async function notifySuggestedPeers(input: {
-  thenvoiRest: RestApi;
-  roomId: string;
-  suggestedPeerHandles: string[];
-  sessionIntent: SessionIntent;
-  logger: Logger;
-}): Promise<void> {
-  if (input.suggestedPeerHandles.length === 0) {
-    return;
-  }
-
-  let participants;
-  try {
-    participants = await input.thenvoiRest.listChatParticipants(input.roomId);
-  } catch (error) {
-    if (isRetryableRateLimitError(error)) {
-      input.logger.warn("linear_thenvoi_bridge.peer_bootstrap_skipped_rate_limited", {
-        roomId: input.roomId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return;
-    }
-    throw error;
-  }
-  const participantMentions: Array<{ id: string; handle?: string; name?: string }> = [];
-  for (const participant of participants) {
-    const normalizedHandle = normalizeOptionalHandle(participant.handle ?? participant.name);
-    if (!normalizedHandle || !input.suggestedPeerHandles.includes(normalizedHandle)) {
-      continue;
-    }
-
-    participantMentions.push({
-      id: participant.id,
-      handle: participant.handle ?? undefined,
-      name: participant.name || undefined,
-    });
-  }
-
-  if (participantMentions.length === 0) {
-    return;
-  }
-
-  const taskLine = input.sessionIntent === "implementation"
-    ? "Specialists: if you are a good fit, implement the requested deliverable in your isolated workspace and report concrete files, run steps, and blockers back in this room."
-    : "Specialists: if you are a good fit, sharpen the ticket into execution-ready scope, acceptance criteria, and implementation notes, then report the result back in this room.";
-  const specialistHandlesLine = input.suggestedPeerHandles.map((handle) => `@${handle}`).join(" ");
-
-  await input.thenvoiRest.createChatMessage(input.roomId, {
-    content: [
-      "Bridge agent: coordinate this session and own the Linear writeback.",
-      specialistHandlesLine,
-      taskLine,
-      "Do not use Linear tools directly; the bridge owns Linear writeback.",
-    ].join(" "),
-    mentions: participantMentions,
-  });
-
-  input.logger.info("linear_thenvoi_bridge.peer_bootstrap_sent", {
-    roomId: input.roomId,
-    sessionIntent: input.sessionIntent,
-    handles: input.suggestedPeerHandles,
-  });
-}
-
 async function lookupPeerIdsByHandle(
   thenvoiRest: RestApi,
   roomId: string,
@@ -1023,6 +952,18 @@ async function selectRelevantPeerHandles(input: {
   hostAgentHandle: string;
   logger: Logger;
 }): Promise<string[]> {
+  const configuredHandles = resolveConfiguredSpecialistHandles(input.intent)
+    .filter((handle) => handle !== input.hostAgentHandle);
+  if (configuredHandles.length > 0) {
+    input.logger.info("linear_thenvoi_bridge.peer_prefetch_selected", {
+      roomId: input.roomId,
+      intent: input.intent,
+      handles: configuredHandles,
+      source: "configured",
+    });
+    return configuredHandles;
+  }
+
   if (!input.thenvoiRest.listPeers) {
     return [];
   }
@@ -1070,10 +1011,43 @@ async function selectRelevantPeerHandles(input: {
       roomId: input.roomId,
       intent: input.intent,
       handles: selected,
+      source: "lookup",
     });
   }
 
   return selected;
+}
+
+function resolveConfiguredSpecialistHandles(intent: SessionIntent): string[] {
+  if (
+    process.env.LINEAR_THENVOI_PLANNING_AGENT_HANDLES === undefined
+    && process.env.LINEAR_THENVOI_IMPLEMENTATION_AGENT_HANDLES === undefined
+  ) {
+    return [];
+  }
+
+  const raw = intent === "implementation"
+    ? process.env.LINEAR_THENVOI_IMPLEMENTATION_AGENT_HANDLES
+    : process.env.LINEAR_THENVOI_PLANNING_AGENT_HANDLES;
+  const configured = (raw ?? DEFAULT_SPECIALIST_HANDLES.join(","))
+    .split(",")
+    .map((value) => normalizeOptionalHandle(value))
+    .filter((value): value is string => Boolean(value));
+
+  if (intent === "implementation") {
+    return dedupeHandles(configured);
+  }
+
+  const ranked = configured
+    .map((handle) => ({
+      handle,
+      score: /\bplanner\b/.test(handle) ? 3 : /\breviewer\b|\bcodex\b/.test(handle) ? 2 : 1,
+    }))
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 2)
+    .map((entry) => entry.handle);
+
+  return dedupeHandles(ranked);
 }
 
 function scorePeerForIntent(peer: PeerRecord, intent: SessionIntent): number {
@@ -1093,8 +1067,10 @@ function scorePeerForIntent(peer: PeerRecord, intent: SessionIntent): number {
     ]
     : [
       { pattern: /\bplanner\b|\bplanning\b|\bplan\b/, score: 10 },
+      { pattern: /\bclaude\b/, score: 8 },
+      { pattern: /\breviewer\b|\breview\b|\bcodex\b/, score: 7 },
       { pattern: /\borchestrator\b|\barchitect\b|\bdesign\b|\bscope\b|\bspec\b/, score: 6 },
-      { pattern: /\bimplementer\b|\bimplementation\b|\breviewer\b|\breview\b/, score: -3 },
+      { pattern: /\bimplementer\b|\bimplementation\b/, score: -3 },
     ];
 
   return weightedTerms.reduce((total, term) => (term.pattern.test(haystack) ? total + term.score : total), 0);

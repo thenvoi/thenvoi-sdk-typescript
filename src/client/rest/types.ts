@@ -24,7 +24,6 @@ export interface AgentIdentity {
   name: string;
   description: string | null;
   handle?: string | null;
-  ownerUuid?: string | null;
 }
 
 export interface ChatParticipant {
@@ -235,10 +234,10 @@ export interface FernThenvoiClientLike {
     getAgentMe(options?: RestRequestOptions): Promise<unknown>;
   };
   myProfile?: {
-    getMyProfile(options?: RestRequestOptions): Promise<FernUserProfile>;
+    getMyProfile(options?: RestRequestOptions): Promise<unknown>;
   };
   humanApiProfile?: {
-    getMyProfile(options?: RestRequestOptions): Promise<FernUserProfile>;
+    getMyProfile(options?: RestRequestOptions): Promise<unknown>;
   };
   agentPeers?: {
     listAgentPeers?(
@@ -496,7 +495,7 @@ export interface FernThenvoiClientLike {
     ): Promise<unknown>;
     addAgentChatParticipant?(
       chatId: string,
-      request: { participant: { participant_id: string; role: string } },
+      request: unknown,
       options?: RestRequestOptions,
     ): Promise<unknown>;
     removeAgentChatParticipant?(
