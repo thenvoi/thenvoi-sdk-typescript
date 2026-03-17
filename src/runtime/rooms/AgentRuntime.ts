@@ -290,7 +290,7 @@ export class AgentRuntime {
     return execution;
   }
 
-  private getOrCreateContext(roomId: string): ExecutionContext {
+  public getOrCreateContext(roomId: string): ExecutionContext {
     const existing = this.contexts.get(roomId);
     if (existing) {
       return existing;

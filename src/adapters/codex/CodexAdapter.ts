@@ -553,6 +553,10 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
         }
       }
 
+      if (isSessionBootstrap && allowHistoryThreadResume && !resumeThreadId) {
+        this.needsHistoryInjection.add(roomId);
+      }
+
       const started = parseThreadResponse(await client.request<unknown>(
         "thread/start",
         toRpcParams(this.buildThreadStartParams(tools, config)),

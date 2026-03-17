@@ -279,6 +279,10 @@ describe("CodexAdapter", () => {
 
     const turnStart = fakeClient.requestCalls.find((call) => call.method === "turn/start");
     expect(turnStart?.params.input).toEqual([
+      {
+        type: "text",
+        text: "[Conversation History]\nThe following is the conversation history from a previous session. Use it to maintain continuity.\n[Alice]: historical message",
+      },
       { type: "text", text: "[System]: Participants changed" },
       { type: "text", text: "[System]: Contacts updated" },
       { type: "text", text: "[User]: diagnose and fix" },
@@ -433,6 +437,12 @@ describe("CodexAdapter", () => {
       tools,
       new HistoryProvider([
         {
+          sender_name: "Alice",
+          sender_type: "User",
+          content: "Old context that should be ignored",
+          message_type: "text",
+        },
+        {
           message_type: "task",
           metadata: {
             codex_thread_id: "thread-old",
@@ -446,6 +456,10 @@ describe("CodexAdapter", () => {
 
     expect(fakeClient.requestCalls.map((call) => call.method)).not.toContain("thread/resume");
     expect(fakeClient.requestCalls.map((call) => call.method)).toContain("thread/start");
+    const turnStart = fakeClient.requestCalls.find((call) => call.method === "turn/start");
+    expect(turnStart?.params.input).toEqual([
+      { type: "text", text: "[User]: restart here" },
+    ]);
     expect(tools.messages).toEqual(["fresh thread after reset"]);
   });
 

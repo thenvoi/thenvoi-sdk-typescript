@@ -88,9 +88,7 @@ export class Agent {
     }
 
     try {
-      const graceful = await this.platformRuntime.stop(timeoutMs ?? undefined);
-      await this.adapter.onRuntimeStop?.();
-      return graceful;
+      return await this.platformRuntime.stop(timeoutMs ?? undefined);
     } finally {
       this.started = false;
       this.startPromise = null;

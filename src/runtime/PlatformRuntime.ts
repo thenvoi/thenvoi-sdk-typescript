@@ -45,6 +45,8 @@ export class PlatformRuntime {
   private initPromise: Promise<void> | null = null;
   private runtime?: AgentRuntime;
   private contactHandler?: ContactEventHandler;
+  private activeAdapter?: FrameworkAdapter;
+  private stopping = false;
   private _agentName = "";
   private _agentDescription = "";
   private contactsSubscribed = false;
@@ -142,58 +144,104 @@ export class PlatformRuntime {
   public async start(adapter: FrameworkAdapter): Promise<void> {
     await this.initialize();
     await adapter.onStarted(this._agentName, this._agentDescription);
+    this.activeAdapter = adapter;
 
-    const strategy = this.contactConfig?.strategy ?? "disabled";
-    if (strategy !== "disabled") {
-      this.contactHandler = new ContactEventHandler({
-        config: this.contactConfig ?? { strategy: "disabled" },
-        rest: this.link.rest,
-        onBroadcast: (message) => {
-          const runtime = this.runtime;
-          if (!runtime) return;
-          for (const context of runtime.getContexts()) {
-            context.injectSystemMessage(message);
-          }
-        },
-        onHubEvent: async (roomId, event) => {
-          const runtime = this.runtime;
-          if (!runtime) return;
-          await runtime.enqueueEvent(roomId, event);
-        },
-        onHubInit: async (roomId, systemPrompt) => {
-          const runtime = this.runtime;
-          if (!runtime) return;
-          const context = runtime.getContext(roomId);
-          if (context) {
-            context.injectSystemMessage(systemPrompt);
-          }
-        },
+    try {
+      const strategy = this.contactConfig?.strategy ?? "disabled";
+      if (strategy !== "disabled") {
+        this.contactHandler = new ContactEventHandler({
+          config: this.contactConfig ?? { strategy: "disabled" },
+          rest: this.link.rest,
+          onBroadcast: (message) => {
+            const runtime = this.runtime;
+            if (!runtime) return;
+            for (const context of runtime.getContexts()) {
+              context.injectSystemMessage(message);
+            }
+          },
+          onHubEvent: async (roomId, event) => {
+            const runtime = this.runtime;
+            if (!runtime) return;
+            await runtime.enqueueEvent(roomId, event);
+          },
+          onHubInit: async (roomId, systemPrompt) => {
+            const runtime = this.runtime;
+            if (!runtime) return;
+            runtime.getOrCreateContext(roomId).injectSystemMessage(systemPrompt);
+          },
+        });
+      }
+
+      this.runtime = new AgentRuntime({
+        link: this.link,
+        agentId: this._agentId,
+        sessionConfig: this.sessionConfig,
+        agentConfig: this.agentConfig,
+        onExecute: (context, event) => this.executeAdapter(context, event, adapter),
+        onSessionCleanup: (roomId) => adapter.onCleanup(roomId),
+        onContactEvent: (event) => this.handleContactEvent(event),
       });
+
+      await this.runtime.start();
+      this.contactsSubscribed = Boolean(this.link.capabilities.contacts);
+    } catch (error) {
+      try {
+        await this.stop();
+      } catch (stopError) {
+        throw new AggregateError(
+          [error, stopError],
+          "PlatformRuntime failed to start and cleanup also failed",
+        );
+      }
+      throw error;
     }
-
-    this.runtime = new AgentRuntime({
-      link: this.link,
-      agentId: this._agentId,
-      sessionConfig: this.sessionConfig,
-      agentConfig: this.agentConfig,
-      onExecute: (context, event) => this.executeAdapter(context, event, adapter),
-      onSessionCleanup: (roomId) => adapter.onCleanup(roomId),
-      onContactEvent: (event) => this.handleContactEvent(event),
-    });
-
-    await this.runtime.start();
-    this.contactsSubscribed = Boolean(this.link.capabilities.contacts);
   }
 
   public async stop(timeoutMs?: number): Promise<boolean> {
-    if (!this.runtime) {
+    if (this.stopping) {
       return true;
     }
 
-    const graceful = await this.runtime.stop(timeoutMs);
+    const runtime = this.runtime;
+    const adapter = this.activeAdapter;
+    if (!runtime && !adapter) {
+      return true;
+    }
+
+    this.stopping = true;
     this.runtime = undefined;
     this.contactHandler = undefined;
     this.contactsSubscribed = false;
+    this.activeAdapter = undefined;
+
+    let graceful = true;
+    let runtimeError: unknown = null;
+
+    if (runtime) {
+      try {
+        graceful = await runtime.stop(timeoutMs);
+      } catch (error) {
+        runtimeError = error;
+      }
+    }
+
+    try {
+      await adapter?.onRuntimeStop?.();
+    } catch (error) {
+      if (runtimeError) {
+        throw new AggregateError(
+          [runtimeError, error],
+          "PlatformRuntime stop failed and adapter cleanup also failed",
+        );
+      }
+      throw error;
+    }
+
+    if (runtimeError) {
+      throw runtimeError;
+    }
+
+    this.stopping = false;
     return graceful;
   }
 

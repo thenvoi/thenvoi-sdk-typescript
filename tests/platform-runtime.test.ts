@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { GenericAdapter } from "../src/adapters/GenericAdapter";
 import { FernRestAdapter, RestFacade } from "../src/client/rest/RestFacade";
 import { ValidationError } from "../src/core/errors";
 import { PlatformRuntime } from "../src/runtime/PlatformRuntime";
+import { HUB_ROOM_SYSTEM_PROMPT } from "../src/runtime/ContactEventHandler";
 import type { StreamingTransport, TopicHandlers } from "../src/platform/streaming/transport";
 import { ThenvoiLink } from "../src/platform/ThenvoiLink";
 import { FakeRestApi } from "./testUtils";
@@ -346,6 +347,124 @@ describe("PlatformRuntime", () => {
     ]);
 
     await runtime.stop();
+  });
+
+  it("preserves the hub-room system prompt on the first contact event", async () => {
+    const transport = new FakeTransport();
+    const restApi = new FakeRestApi({
+      createChat: async () => ({ id: "hub-room-1" }),
+      createChatEvent: async () => ({}),
+    });
+    let resolveSeen: (() => void) | null = null;
+    const seenPromise = new Promise<void>((resolve) => {
+      resolveSeen = resolve;
+    });
+    const seenInputs: Array<{ contactsMessage: string | null; content: string }> = [];
+    const adapter = new GenericAdapter(async ({ message, contactsMessage }) => {
+      seenInputs.push({
+        contactsMessage,
+        content: message.content,
+      });
+      resolveSeen?.();
+    });
+
+    const runtime = new PlatformRuntime({
+      agentId: "a1",
+      apiKey: "k",
+      link: new ThenvoiLink({
+        agentId: "a1",
+        apiKey: "k",
+        transport,
+        restApi,
+      }),
+      contactConfig: {
+        strategy: "hub_room",
+        hubTaskId: "task-1",
+      },
+    });
+
+    await runtime.start(adapter);
+
+    await transport.emit("agent_contacts:a1", "contact_request_received", {
+      id: "req-1",
+      from_handle: "alice",
+      from_name: "Alice",
+      message: "Hello!",
+      status: "pending",
+      inserted_at: new Date().toISOString(),
+    });
+
+    await seenPromise;
+
+    expect(seenInputs).toEqual([
+      {
+        contactsMessage: HUB_ROOM_SYSTEM_PROMPT,
+        content: "New contact request from Alice (@alice). Message: \"Hello!\"",
+      },
+    ]);
+
+    await runtime.stop();
+  });
+
+  it("calls adapter onRuntimeStop when PlatformRuntime stops", async () => {
+    const transport = new FakeTransport();
+    const adapter = {
+      onEvent: vi.fn(async () => undefined),
+      onCleanup: vi.fn(async () => undefined),
+      onStarted: vi.fn(async () => undefined),
+      onRuntimeStop: vi.fn(async () => undefined),
+    };
+
+    const runtime = new PlatformRuntime({
+      agentId: "a1",
+      apiKey: "k",
+      link: new ThenvoiLink({
+        agentId: "a1",
+        apiKey: "k",
+        transport,
+        restApi: new FakeRestApi(),
+      }),
+    });
+
+    await runtime.start(adapter);
+    await runtime.stop();
+
+    expect(adapter.onRuntimeStop).toHaveBeenCalledTimes(1);
+  });
+
+  it("cleans up adapter runtime hooks when startup fails after onStarted", async () => {
+    const adapter = {
+      onEvent: vi.fn(async () => undefined),
+      onCleanup: vi.fn(async () => undefined),
+      onStarted: vi.fn(async () => undefined),
+      onRuntimeStop: vi.fn(async () => undefined),
+    };
+    const transport: StreamingTransport = {
+      connect: vi.fn(async () => {
+        throw new Error("connect failed");
+      }),
+      disconnect: vi.fn(async () => undefined),
+      join: vi.fn(async () => undefined),
+      leave: vi.fn(async () => undefined),
+      runForever: vi.fn(async () => undefined),
+      isConnected: vi.fn(() => false),
+    };
+
+    const runtime = new PlatformRuntime({
+      agentId: "a1",
+      apiKey: "k",
+      link: new ThenvoiLink({
+        agentId: "a1",
+        apiKey: "k",
+        transport,
+        restApi: new FakeRestApi(),
+      }),
+    });
+
+    await expect(runtime.start(adapter)).rejects.toThrow("connect failed");
+
+    expect(adapter.onStarted).toHaveBeenCalledTimes(1);
+    expect(adapter.onRuntimeStop).toHaveBeenCalledTimes(1);
   });
 
   it("throws ValidationError when agentId is empty", () => {
