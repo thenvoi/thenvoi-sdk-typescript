@@ -17,8 +17,10 @@ interface PhoenixChannelsTransportOptions {
 export class PhoenixChannelsTransport implements StreamingTransport {
   private readonly socket: Socket;
   private readonly channels = new Map<string, Channel>();
+  private readonly channelRefs = new Map<string, Array<[string, number]>>();
   private readonly pendingJoins = new Map<string, Promise<void>>();
   private readonly logger: Logger;
+  private onHandlerError?: (error: unknown) => void;
   private connected = false;
   private connectPromise: Promise<void> | null = null;
   private connectResolve: (() => void) | null = null;
@@ -118,17 +120,20 @@ export class PhoenixChannelsTransport implements StreamingTransport {
 
   private async doJoin(topic: string, handlers: TopicHandlers): Promise<void> {
     const channel = this.socket.channel(topic, {});
+    const refs: Array<[string, number]> = [];
 
     for (const [event, handler] of Object.entries(handlers)) {
-      channel.on(event, (payload: Record<string, unknown>) => {
+      const ref = channel.on(event, (payload: Record<string, unknown>) => {
         Promise.resolve(handler(payload)).catch((error: unknown) => {
           this.logger.error("Unhandled topic handler error", {
             topic,
             event,
             error,
           });
+          this.onHandlerError?.(error);
         });
       });
+      refs.push([event, ref]);
     }
 
     await new Promise<void>((resolve, reject) => {
@@ -142,6 +147,7 @@ export class PhoenixChannelsTransport implements StreamingTransport {
     });
 
     this.channels.set(topic, channel);
+    this.channelRefs.set(topic, refs);
     this.logger.debug("Joined topic", { topic });
   }
 
@@ -150,6 +156,12 @@ export class PhoenixChannelsTransport implements StreamingTransport {
     if (!channel) {
       return;
     }
+
+    const refs = this.channelRefs.get(topic) ?? [];
+    for (const [event, ref] of refs) {
+      channel.off(event, ref);
+    }
+    this.channelRefs.delete(topic);
 
     await new Promise<void>((resolve, reject) => {
       channel

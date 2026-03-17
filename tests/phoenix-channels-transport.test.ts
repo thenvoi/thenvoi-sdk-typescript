@@ -10,13 +10,19 @@ const phoenixMock = vi.hoisted(() => {
     public readonly handlers = new Map<string, (payload: Record<string, unknown>) => void>();
     public joinOutcome: Outcome = "ok";
     public leaveOutcome: Outcome = "ok";
+    private nextRef = 1;
 
     public constructor(topic: string) {
       this.topic = topic;
     }
 
-    public on(event: string, handler: (payload: Record<string, unknown>) => void): void {
+    public on(event: string, handler: (payload: Record<string, unknown>) => void): number {
       this.handlers.set(event, handler);
+      return this.nextRef++;
+    }
+
+    public off(_event: string, _ref?: number): void {
+      // In a real implementation this would remove the specific handler
     }
 
     public emit(event: string, payload: Record<string, unknown>): void {

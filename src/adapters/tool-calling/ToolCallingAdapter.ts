@@ -187,6 +187,10 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
     const text = response.text?.trim();
     if (text) {
       await tools.sendMessage(text, [{ id: message.senderId, handle: message.senderName ?? message.senderType }]);
+    } else if ((response.toolCalls?.length ?? 0) === 0) {
+      this.logger.warn("Model returned empty response with no tool calls", {
+        messageId: message.id,
+      });
     }
   }
 

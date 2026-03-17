@@ -44,23 +44,17 @@ export class MessageRetryTracker {
 
   private evictMapIfNeeded(map: Map<string, unknown>): void {
     while (map.size >= this.maxTracked) {
-      const oldest = map.keys().next().value;
-      if (oldest !== undefined) {
-        map.delete(oldest);
-      } else {
-        break;
-      }
+      const first = map.keys().next();
+      if (first.done) break;
+      map.delete(first.value);
     }
   }
 
   private evictSetIfNeeded(set: Set<string>): void {
     while (set.size >= this.maxTracked) {
-      const oldest = set.values().next().value;
-      if (oldest !== undefined) {
-        set.delete(oldest);
-      } else {
-        break;
-      }
+      const first = set.values().next();
+      if (first.done) break;
+      set.delete(first.value);
     }
   }
 }

@@ -118,8 +118,10 @@ export function createInProcessLinearBridgeDispatcher(
   return {
     isQueued: (eventKey: string) => queued.has(eventKey),
     waitForIdle: async (): Promise<void> => {
-      while (inFlight.size > 0) {
-        await Promise.allSettled([...inFlight]);
+      let snapshot = [...inFlight];
+      while (snapshot.length > 0) {
+        await Promise.allSettled(snapshot);
+        snapshot = [...inFlight];
       }
 
       if (terminalFailures.length === 0) {
@@ -372,9 +374,10 @@ async function runDispatchAttempt(
     sessionId: string;
   },
 ): Promise<DispatchAttemptResult> {
-  const retryLimit = Number(process.env.LINEAR_THENVOI_DISPATCH_RETRY_LIMIT ?? String(DISPATCH_RETRY_LIMIT));
-  const retryBaseDelayMs = Number(
-    process.env.LINEAR_THENVOI_DISPATCH_RETRY_BASE_DELAY_MS ?? String(DISPATCH_RETRY_BASE_DELAY_MS),
+  const retryLimit = parseFinitePositiveInt(process.env.LINEAR_THENVOI_DISPATCH_RETRY_LIMIT, DISPATCH_RETRY_LIMIT);
+  const retryBaseDelayMs = parseFinitePositiveInt(
+    process.env.LINEAR_THENVOI_DISPATCH_RETRY_BASE_DELAY_MS,
+    DISPATCH_RETRY_BASE_DELAY_MS,
   );
   let attempt = 0;
 
@@ -513,4 +516,10 @@ function toDispatchFailureError(failure: DispatchTerminalFailure): Error {
     `Linear bridge async dispatch failed for event ${failure.eventKey} (session ${failure.sessionId})`,
     { cause: failure.error },
   );
+}
+
+function parseFinitePositiveInt(raw: string | undefined, fallback: number): number {
+  if (raw === undefined) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 }

@@ -7,7 +7,8 @@ declare module "phoenix" {
   }
 
   export class Channel {
-    on(event: string, callback: (payload: Record<string, unknown>) => void): void;
+    on(event: string, callback: (payload: Record<string, unknown>) => void): number;
+    off(event: string, ref?: number): void;
     join(): Push;
     leave(): Push;
   }

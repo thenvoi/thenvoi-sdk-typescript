@@ -85,6 +85,7 @@ export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
   private readonly queryFnOverride?: ClaudeSDKQuery;
   private readonly logger: Logger;
   private readonly sessionIds = new Map<string, string>();
+  private readonly sessionInitLocks = new Map<string, Promise<void>>();
   private readonly roomTools = new Map<string, AdapterToolsProtocol>();
   private mcpBridge: ThenvoiMcpBridge | null = null;
   private systemPrompt = "";
@@ -122,6 +123,34 @@ export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
   }
 
   public async onMessage(
+    message: PlatformMessage,
+    tools: AdapterToolsProtocol,
+    history: HistoryProvider,
+    participantsMessage: string | null,
+    contactsMessage: string | null,
+    context: { isSessionBootstrap: boolean; roomId: string },
+  ): Promise<void> {
+    // Serialize per-room to prevent concurrent bootstrap from creating duplicate sessions.
+    const existing = this.sessionInitLocks.get(context.roomId);
+    if (existing) {
+      await existing;
+    }
+
+    let unlock!: () => void;
+    const lock = new Promise<void>((resolve) => { unlock = resolve; });
+    this.sessionInitLocks.set(context.roomId, lock);
+
+    try {
+      await this.doMessage(message, tools, history, participantsMessage, contactsMessage, context);
+    } finally {
+      unlock();
+      if (this.sessionInitLocks.get(context.roomId) === lock) {
+        this.sessionInitLocks.delete(context.roomId);
+      }
+    }
+  }
+
+  private async doMessage(
     message: PlatformMessage,
     tools: AdapterToolsProtocol,
     history: HistoryProvider,
@@ -219,6 +248,7 @@ export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
 
   public async onCleanup(roomId: string): Promise<void> {
     this.sessionIds.delete(roomId);
+    this.sessionInitLocks.delete(roomId);
     this.roomTools.delete(roomId);
   }
 

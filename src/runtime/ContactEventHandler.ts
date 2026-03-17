@@ -264,11 +264,10 @@ export class ContactEventHandler {
 
   private cacheRequestInfo(id: string, info: RequestInfo): void {
     this.requestCache.set(id, info);
-    if (this.requestCache.size > LRU_MAX_SIZE) {
-      const oldest = this.requestCache.keys().next().value;
-      if (oldest !== undefined) {
-        this.requestCache.delete(oldest);
-      }
+    while (this.requestCache.size > LRU_MAX_SIZE) {
+      const first = this.requestCache.keys().next();
+      if (first.done) break;
+      this.requestCache.delete(first.value);
     }
   }
 

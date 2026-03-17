@@ -342,7 +342,11 @@ class SqliteSessionRoomStore implements SessionRoomStore {
     try {
       const parsed = JSON.parse(metadataJson);
       return asRecord(parsed) ?? undefined;
-    } catch {
+    } catch (error) {
+      // Log but don't throw — corrupted metadata shouldn't block the row
+      const msg = error instanceof Error ? error.message : String(error);
+      // eslint-disable-next-line no-console
+      console.warn(`SqliteSessionRoomStore: failed to parse metadata_json: ${msg}`);
       return undefined;
     }
   }
