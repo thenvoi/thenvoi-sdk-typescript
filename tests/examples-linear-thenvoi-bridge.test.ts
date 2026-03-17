@@ -323,10 +323,6 @@ describe("linear thenvoi examples", () => {
     const dispatcher = createEmbeddedLinearBridgeDispatcher({
       agent,
       store,
-      restApi: new LinearThenvoiExampleRestApi(),
-      linearClient: {
-        createAgentActivity: vi.fn(async () => ({ ok: true })),
-      } as never,
       logger,
     });
 
@@ -397,10 +393,6 @@ describe("linear thenvoi examples", () => {
     const dispatcher = createEmbeddedLinearBridgeDispatcher({
       agent,
       store,
-      restApi: new RejectingRoomEventRestApi(),
-      linearClient: {
-        createAgentActivity: vi.fn(async () => ({ ok: true })),
-      } as never,
       logger,
     });
     const restApi = new RejectingRoomEventRestApi();
@@ -446,10 +438,6 @@ describe("linear thenvoi examples", () => {
     const dispatcher = createEmbeddedLinearBridgeDispatcher({
       agent,
       store,
-      restApi: new LinearThenvoiExampleRestApi(),
-      linearClient: {
-        createAgentActivity: vi.fn(async () => ({ ok: true })),
-      } as never,
       logger,
     });
     const restApi = new LinearThenvoiExampleRestApi();

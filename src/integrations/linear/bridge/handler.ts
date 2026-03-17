@@ -37,10 +37,6 @@ const PEER_PAGE_SIZE = 100;
 const RECOVERED_ROOM_EVENT_RETRY_LIMIT = 2;
 const RECOVERED_ROOM_EVENT_RETRY_BASE_DELAY_MS = 1_000;
 const RECOVERED_ROOM_EVENT_RETRY_BASE_DELAY_ENV = "LINEAR_THENVOI_RECOVERED_ROOM_RETRY_BASE_DELAY_MS";
-const DEFAULT_SPECIALIST_HANDLES = [
-  "darvell.long/claude-planner",
-  "darvell.long/codex-reviewer",
-];
 
 export interface LinearBridgeRuntime {
   roomResolutionLocks: Map<string, Promise<SessionRoomRecord>>;
@@ -1029,7 +1025,11 @@ function resolveConfiguredSpecialistHandles(intent: SessionIntent): string[] {
   const raw = intent === "implementation"
     ? process.env.LINEAR_THENVOI_IMPLEMENTATION_AGENT_HANDLES
     : process.env.LINEAR_THENVOI_PLANNING_AGENT_HANDLES;
-  const configured = (raw ?? DEFAULT_SPECIALIST_HANDLES.join(","))
+  if (!raw) {
+    return [];
+  }
+
+  const configured = raw
     .split(",")
     .map((value) => normalizeOptionalHandle(value))
     .filter((value): value is string => Boolean(value));

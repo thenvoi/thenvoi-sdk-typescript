@@ -1,12 +1,9 @@
 import express, { type NextFunction, type Request, type Response } from "express";
-import { LinearClient } from "@linear/sdk";
 import { ThenvoiClient } from "@thenvoi/rest-client";
-import { z } from "zod";
 
 import {
   Agent,
   type AgentConfigResult,
-  CodexAdapter,
   type PlatformMessage,
   isDirectExecution,
   loadAgentConfig,
@@ -15,7 +12,6 @@ import { ConsoleLogger, type Logger } from "../../src/core";
 import {
   createSqliteSessionRoomStore,
   createLinearClient,
-  createLinearTools,
   createLinearWebhookHandler,
   handleAgentSessionEvent,
   type LinearBridgeDispatcher,
@@ -25,10 +21,7 @@ import {
   type WritebackMode,
 } from "../../src/linear";
 import { FernRestAdapter, type RestApi } from "../../src/rest";
-import { ExecutionContext } from "../../src/runtime/ExecutionContext";
-import { HistoryProvider } from "../../src/runtime/types";
-import type { CustomToolDef } from "../../src/runtime/tools/customTools";
-import { createLinearThenvoiBridgeAgent, buildLinearThenvoiBridgePrompt } from "./linear-thenvoi-bridge-agent";
+import { createLinearThenvoiBridgeAgent } from "./linear-thenvoi-bridge-agent";
 
 interface LinearThenvoiBridgeServerOptions {
   restApi: RestApi;
@@ -53,8 +46,6 @@ const EMBEDDED_AGENT_START_RETRY_BASE_DELAY_MS = 2_000;
 const DEFAULT_THENVOI_BRIDGE_MIN_REQUEST_INTERVAL_MS = 2_000;
 const DEFAULT_THENVOI_BRIDGE_RETRY_LIMIT = 4;
 const DEFAULT_THENVOI_BRIDGE_RETRY_BASE_DELAY_MS = 2_000;
-const DEFAULT_DIRECT_ROOM_WAIT_TIMEOUT_SECONDS = 120;
-const DEFAULT_DIRECT_ROOM_WAIT_POLL_INTERVAL_SECONDS = 2;
 
 export function createLinearThenvoiBridgeApp(options: LinearThenvoiBridgeServerOptions): express.Express {
   const logger = options.logger ?? new ConsoleLogger();
@@ -114,8 +105,6 @@ export function createLinearThenvoiBridgeApp(options: LinearThenvoiBridgeServerO
 export function createEmbeddedLinearBridgeDispatcher(options: {
   agent: Agent;
   store: SessionRoomStore;
-  restApi: RestApi;
-  linearClient: LinearClient;
   ensureAgentStarted?: () => Promise<void>;
   logger?: Logger;
 }): LinearBridgeDispatcher {
@@ -123,10 +112,6 @@ export function createEmbeddedLinearBridgeDispatcher(options: {
   const queued = new Set<string>();
   const roomResetTimeoutMs = Number(
     process.env.LINEAR_THENVOI_ROOM_RESET_TIMEOUT_MS ?? String(DEFAULT_ROOM_RESET_TIMEOUT_MS),
-  );
-  const directFallbackEnabled = parseBooleanEnv(
-    process.env.LINEAR_THENVOI_DIRECT_CODEX_FALLBACK,
-    true,
   );
 
   return {
@@ -151,66 +136,40 @@ export function createEmbeddedLinearBridgeDispatcher(options: {
             return;
           }
 
-          let embeddedStartupFailed = false;
           if (options.ensureAgentStarted) {
-            try {
-              await options.ensureAgentStarted();
-            } catch (error) {
-              if (!directFallbackEnabled || !isRetryableEmbeddedStartupError(error)) {
-                throw error;
-              }
-
-              embeddedStartupFailed = true;
-              logger.warn("linear_thenvoi_bridge.embedded_agent_start_falling_back_to_direct_codex", {
-                eventKey: job.eventKey,
-                roomId: bootstrap.thenvoiRoomId,
-                sessionId: job.input.payload.agentSession.id,
-                error: error instanceof Error ? error.message : String(error),
-              });
-            }
+            await options.ensureAgentStarted();
           }
 
-          if (embeddedStartupFailed) {
-            await runDirectCodexBridgeFallback({
-              roomId: bootstrap.thenvoiRoomId,
-              bootstrap,
-              restApi: options.restApi,
-              linearClient: options.linearClient,
-              store: options.store,
-              logger,
-            });
-          } else {
-            try {
-              if (bootstrap.metadata?.linear_reset_room_session === true) {
-                const resetGraceful = await options.agent.resetRoomSession(
-                  bootstrap.thenvoiRoomId,
-                  roomResetTimeoutMs,
-                );
-                if (!resetGraceful) {
-                  logger.warn("linear_thenvoi_bridge.room_reset_timed_out_continuing", {
-                    roomId: bootstrap.thenvoiRoomId,
-                    timeoutMs: roomResetTimeoutMs,
-                    eventKey: job.eventKey,
-                  });
-                }
-              }
-              logger.info("linear_thenvoi_bridge.embedded_bootstrap_start", {
-                roomId: bootstrap.thenvoiRoomId,
-                eventKey: job.eventKey,
-                sessionId: job.input.payload.agentSession.id,
-              });
-              await options.agent.bootstrapRoomMessage(
+          try {
+            if (bootstrap.metadata?.linear_reset_room_session === true) {
+              const resetGraceful = await options.agent.resetRoomSession(
                 bootstrap.thenvoiRoomId,
-                buildBootstrapMessage(bootstrap),
+                roomResetTimeoutMs,
               );
-              logger.info("linear_thenvoi_bridge.embedded_bootstrap_success", {
-                roomId: bootstrap.thenvoiRoomId,
-                eventKey: job.eventKey,
-                sessionId: job.input.payload.agentSession.id,
-              });
-            } catch (error) {
-              throw markRetryableRoomEventError(error);
+              if (!resetGraceful) {
+                logger.warn("linear_thenvoi_bridge.room_reset_timed_out_continuing", {
+                  roomId: bootstrap.thenvoiRoomId,
+                  timeoutMs: roomResetTimeoutMs,
+                  eventKey: job.eventKey,
+                });
+              }
             }
+            logger.info("linear_thenvoi_bridge.embedded_bootstrap_start", {
+              roomId: bootstrap.thenvoiRoomId,
+              eventKey: job.eventKey,
+              sessionId: job.input.payload.agentSession.id,
+            });
+            await options.agent.bootstrapRoomMessage(
+              bootstrap.thenvoiRoomId,
+              buildBootstrapMessage(bootstrap),
+            );
+            logger.info("linear_thenvoi_bridge.embedded_bootstrap_success", {
+              roomId: bootstrap.thenvoiRoomId,
+              eventKey: job.eventKey,
+              sessionId: job.input.payload.agentSession.id,
+            });
+          } catch (error) {
+            throw markRetryableRoomEventError(error);
           }
 
           await options.store.markBootstrapRequestProcessed(job.eventKey);
@@ -255,319 +214,6 @@ function buildBootstrapMessage(request: {
     metadata: request.metadata ?? {},
     createdAt: new Date(request.createdAt),
   };
-}
-
-async function runDirectCodexBridgeFallback(input: {
-  roomId: string;
-  bootstrap: {
-    expectedContent: string;
-    linearSessionId: string;
-    metadata?: Record<string, unknown>;
-    senderId?: string | null;
-    senderName?: string | null;
-    messageType: string;
-    createdAt: string;
-  };
-  restApi: RestApi;
-  linearClient: LinearClient;
-  store: SessionRoomStore;
-  logger: Logger;
-}): Promise<void> {
-  const adapter = createDirectCodexBridgeAdapter({
-    roomId: input.roomId,
-    restApi: input.restApi,
-    linearClient: input.linearClient,
-    store: input.store,
-  });
-  const message = buildBootstrapMessage({
-    eventKey: `direct-fallback:${input.bootstrap.linearSessionId}:${Date.now()}`,
-    thenvoiRoomId: input.roomId,
-    expectedContent: `${input.bootstrap.expectedContent}\n\nthenvoi_room_id: ${input.roomId}`,
-    messageType: input.bootstrap.messageType,
-    senderId: input.bootstrap.senderId,
-    senderName: input.bootstrap.senderName,
-    metadata: input.bootstrap.metadata,
-    createdAt: input.bootstrap.createdAt,
-    linearSessionId: input.bootstrap.linearSessionId,
-  });
-  const context = new ExecutionContext({
-    roomId: input.roomId,
-    link: {
-      rest: input.restApi,
-    },
-    maxContextMessages: 100,
-    enableContextHydration: true,
-  });
-
-  try {
-    context.setParticipants(await listRoomParticipants(input.restApi, input.roomId));
-  } catch (error) {
-    input.logger.warn("linear_thenvoi_bridge.direct_codex_participant_sync_failed", {
-      roomId: input.roomId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-
-  context.recordMessage(message);
-  await adapter.onStarted(
-    "Thenvoi Linear Bridge",
-    "Linear bridge agent coordinating Thenvoi specialists",
-  );
-  input.logger.info("linear_thenvoi_bridge.direct_codex_start", {
-    roomId: input.roomId,
-    sessionId: input.bootstrap.linearSessionId,
-  });
-  await adapter.onEvent({
-    message,
-    tools: context.getTools(),
-    history: new HistoryProvider(context.getRawHistory()),
-    participantsMessage: null,
-    contactsMessage: null,
-    isSessionBootstrap: true,
-    roomId: input.roomId,
-  });
-  await adapter.onCleanup(input.roomId);
-  input.logger.info("linear_thenvoi_bridge.direct_codex_success", {
-    roomId: input.roomId,
-    sessionId: input.bootstrap.linearSessionId,
-  });
-}
-
-function createDirectCodexBridgeAdapter(input: {
-  roomId: string;
-  restApi: RestApi;
-  linearClient: LinearClient;
-  store: SessionRoomStore;
-}): CodexAdapter {
-  return new CodexAdapter({
-    config: {
-      model: process.env.CODEX_MODEL ?? "gpt-5.3-codex",
-      approvalPolicy: "never",
-      sandboxMode: "workspace-write",
-      enableExecutionReporting: true,
-      emitThoughtEvents: true,
-      customSection: buildDirectCodexBridgePrompt(input.roomId),
-    },
-    customTools: [
-      ...createLinearTools({
-        client: input.linearClient,
-        store: input.store,
-        enableElicitation: resolveBridgeElicitationEnabled(),
-      }),
-      ...createDirectBridgeRoomTools({
-        roomId: input.roomId,
-        restApi: input.restApi,
-      }),
-    ],
-  });
-}
-
-function buildDirectCodexBridgePrompt(roomId: string): string {
-  return `${buildLinearThenvoiBridgePrompt()}
-
-Direct bridge execution notes:
-- The current Thenvoi room id is ${roomId}.
-- If you invite a specialist and need to see their reply during this same turn, use thenvoi_wait_for_room_activity.
-- Use thenvoi_list_room_messages when you need to inspect recent room traffic before deciding what to post back to Linear.
-- If the direct room polling tools return a timeout, say which specialist did not respond and continue with the best honest bridge response.`;
-}
-
-function resolveBridgeElicitationEnabled(): boolean {
-  return process.env.LINEAR_THENVOI_ALLOW_ELICITATION === "1";
-}
-
-function createDirectBridgeRoomTools(input: {
-  roomId: string;
-  restApi: RestApi;
-}): CustomToolDef[] {
-  return [
-    {
-      name: "thenvoi_list_room_messages",
-      description: "List recent messages in the current Thenvoi room so the bridge can inspect specialist replies.",
-      schema: z.object({
-        limit: z.number().int().min(1).max(50).optional()
-          .describe("Maximum messages to return"),
-      }),
-      handler: async (args: Record<string, unknown>) => {
-        const limit = typeof args.limit === "number" ? args.limit : 20;
-        const messages = await listRoomMessages(input.restApi, input.roomId, limit);
-        return {
-          room_id: input.roomId,
-          messages,
-        };
-      },
-    },
-    {
-      name: "thenvoi_wait_for_room_activity",
-      description: "Poll the current Thenvoi room for new non-bridge messages from collaborators.",
-      schema: z.object({
-        timeout_seconds: z.number().int().min(5).max(600).optional()
-          .describe("How long to wait before giving up"),
-        poll_interval_seconds: z.number().int().min(1).max(30).optional()
-          .describe("Polling interval while waiting"),
-        after_iso: z.string().optional()
-          .describe("Only return messages strictly newer than this ISO timestamp"),
-        max_messages: z.number().int().min(1).max(20).optional()
-          .describe("Maximum new messages to return"),
-      }),
-      handler: async (args: Record<string, unknown>) => {
-        const timeoutSeconds = typeof args.timeout_seconds === "number"
-          ? args.timeout_seconds
-          : DEFAULT_DIRECT_ROOM_WAIT_TIMEOUT_SECONDS;
-        const pollIntervalSeconds = typeof args.poll_interval_seconds === "number"
-          ? args.poll_interval_seconds
-          : DEFAULT_DIRECT_ROOM_WAIT_POLL_INTERVAL_SECONDS;
-        const afterIso = typeof args.after_iso === "string" && args.after_iso.trim().length > 0
-          ? args.after_iso
-          : new Date().toISOString();
-        const maxMessages = typeof args.max_messages === "number" ? args.max_messages : 10;
-
-        return waitForRoomActivity({
-          restApi: input.restApi,
-          roomId: input.roomId,
-          afterIso,
-          timeoutMs: timeoutSeconds * 1000,
-          pollIntervalMs: pollIntervalSeconds * 1000,
-          maxMessages,
-        });
-      },
-    },
-  ];
-}
-
-async function listRoomParticipants(restApi: RestApi, roomId: string): Promise<Array<{
-  id: string;
-  name: string;
-  type: string;
-  handle: string | null;
-}>> {
-  const participants = await restApi.listChatParticipants(roomId);
-  return participants.map((participant) => ({
-    id: participant.id,
-    name: participant.name,
-    type: participant.type,
-    handle: participant.handle ?? null,
-  }));
-}
-
-async function listRoomMessages(
-  restApi: RestApi,
-  roomId: string,
-  limit: number,
-): Promise<Array<Record<string, unknown>>> {
-  const pageSize = Math.min(Math.max(limit, 1), 100);
-  const messages = await fetchRoomMessages(restApi, roomId, pageSize);
-  const sorted = [...messages]
-    .sort((left, right) => compareIsoDates(left.inserted_at, right.inserted_at))
-    .slice(-limit);
-
-  return sorted.map((message) => serializeRoomMessage(message));
-}
-
-async function waitForRoomActivity(input: {
-  restApi: RestApi;
-  roomId: string;
-  afterIso: string;
-  timeoutMs: number;
-  pollIntervalMs: number;
-  maxMessages: number;
-}): Promise<Record<string, unknown>> {
-  const deadline = Date.now() + input.timeoutMs;
-
-  while (Date.now() <= deadline) {
-    const messages = await fetchRoomMessages(input.restApi, input.roomId, 100);
-    const fresh = messages
-      .filter((message) => {
-        if (compareIsoDates(message.inserted_at, input.afterIso) <= 0) {
-          return false;
-        }
-
-        return message.sender_type !== "User";
-      })
-      .sort((left, right) => compareIsoDates(left.inserted_at, right.inserted_at))
-      .slice(0, input.maxMessages);
-
-    if (fresh.length > 0) {
-      const last = fresh[fresh.length - 1];
-      return {
-        room_id: input.roomId,
-        timed_out: false,
-        latest_inserted_at: last?.inserted_at ?? null,
-        messages: fresh.map((message) => serializeRoomMessage(message)),
-      };
-    }
-
-    await sleep(input.pollIntervalMs);
-  }
-
-  return {
-    room_id: input.roomId,
-    timed_out: true,
-    latest_inserted_at: input.afterIso,
-    messages: [],
-  };
-}
-
-async function fetchRoomMessages(
-  restApi: RestApi,
-  roomId: string,
-  pageSize: number,
-): Promise<Array<{
-  id: string;
-  content: string;
-  sender_id: string;
-  sender_type: string;
-  sender_name?: string | null;
-  message_type: string;
-  metadata?: Record<string, unknown> | null;
-  inserted_at: string;
-}>> {
-  if (restApi.getChatContext) {
-    const response = await restApi.getChatContext({
-      chatId: roomId,
-      page: 1,
-      pageSize,
-    });
-    return response.data ?? [];
-  }
-
-  if (restApi.listMessages) {
-    const response = await restApi.listMessages({
-      chatId: roomId,
-      page: 1,
-      pageSize,
-      status: "all",
-    });
-    return response.data ?? [];
-  }
-
-  throw new Error("Room message inspection is unavailable in the current Thenvoi REST adapter.");
-}
-
-function serializeRoomMessage(message: {
-  id: string;
-  content: string;
-  sender_id: string;
-  sender_type: string;
-  sender_name?: string | null;
-  message_type: string;
-  metadata?: Record<string, unknown> | null;
-  inserted_at: string;
-}): Record<string, unknown> {
-  return {
-    id: message.id,
-    content: message.content,
-    sender_id: message.sender_id,
-    sender_type: message.sender_type,
-    sender_name: message.sender_name ?? null,
-    message_type: message.message_type,
-    inserted_at: message.inserted_at,
-    metadata: message.metadata ?? {},
-  };
-}
-
-function compareIsoDates(left: string, right: string): number {
-  return new Date(left).getTime() - new Date(right).getTime();
 }
 
 function getRequiredEnv(name: string): string {
@@ -1007,8 +653,6 @@ async function runLinearThenvoiBridgeServer(): Promise<void> {
     dispatcher = createEmbeddedLinearBridgeDispatcher({
       agent: embeddedAgent,
       store,
-      restApi,
-      linearClient,
       ensureAgentStarted: async () => {
         if (!embeddedAgent) {
           return;
