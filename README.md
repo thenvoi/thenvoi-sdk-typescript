@@ -308,7 +308,7 @@ The root `@thenvoi/sdk` import covers the common runtime, adapters, and config. 
 | `@thenvoi/sdk` | Agent, adapters, config loaders, core types |
 | `@thenvoi/sdk/adapters` | Adapter classes and helper types (e.g., `CodexAppServerStdioClient`, `GeminiToolCallingModel`) |
 | `@thenvoi/sdk/rest` | `FernRestAdapter`, `RestFacade` for direct REST API access |
-| `@thenvoi/sdk/linear` | Linear integration tools (`createLinearTools`) |
+| `@thenvoi/sdk/linear` | Linear tools plus bridge/webhook helpers (`createLinearTools`, webhook handler, dispatchers, room store) |
 | `@thenvoi/sdk/testing` | `FakeAgentTools` and test utilities |
 | `@thenvoi/sdk/config` | Config loaders (also re-exported from root) |
 | `@thenvoi/sdk/core` | Logger, errors, base classes |
