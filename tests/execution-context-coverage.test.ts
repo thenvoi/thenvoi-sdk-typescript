@@ -29,7 +29,9 @@ describe("ExecutionContext coverage", () => {
     const listParticipants = vi.fn(async () => [
       { id: "u1", name: "Jane", type: "User", handle: "@jane" },
     ]);
-    const getChatContext = vi.fn(async ({ page }: { page: number }) => {
+    const getChatContext = vi.fn(
+      async (request: { chatId: string; page?: number; pageSize?: number }) => {
+        const page = request.page ?? 1;
       if (page === 1) {
         return {
           data: [{
@@ -55,7 +57,8 @@ describe("ExecutionContext coverage", () => {
         }],
         metadata: { page: 2, pageSize: 1, totalPages: 2 },
       };
-    });
+      },
+    );
     const ctx = new ExecutionContext({
       roomId: "room-1",
       link: {

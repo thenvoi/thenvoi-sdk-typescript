@@ -17,6 +17,8 @@ import { UnsupportedFeatureError, ValidationError } from "../src/core/errors";
 import { AgentTools } from "../src/runtime/tools/AgentTools";
 
 class FakeRestApi implements RestApi {
+  public readonly chatMessages: Array<{ chatId: string; content: string; mentions?: unknown[] }> = [];
+  public readonly createdChats: Array<string | undefined> = [];
   public readonly addedParticipants: Array<{ chatId: string; participantId: string; role: string }> = [];
   public readonly addedContacts: Array<{ handle: string; message?: string }> = [];
   public readonly removedContacts: RemoveContactArgs[] = [];
@@ -28,7 +30,15 @@ class FakeRestApi implements RestApi {
     return { id: "a1", name: "Agent", description: "desc" };
   }
 
-  public async createChatMessage() {
+  public async createChatMessage(
+    chatId: string,
+    payload: { content: string; mentions?: unknown[] },
+  ) {
+    this.chatMessages.push({
+      chatId,
+      content: payload.content,
+      mentions: payload.mentions,
+    });
     return { ok: true };
   }
 
@@ -36,7 +46,8 @@ class FakeRestApi implements RestApi {
     return { ok: true };
   }
 
-  public async createChat() {
+  public async createChat(taskId?: string) {
+    this.createdChats.push(taskId);
     return { id: "r2" };
   }
 
@@ -458,5 +469,160 @@ describe("AgentTools", () => {
       requestId: "   ",
     })).rejects.toThrow("requestId is required");
     await expect(tools.getMemory("   ")).rejects.toThrow("memoryId is required");
+  });
+
+  it("normalizes mention objects and task ids through tool execution", async () => {
+    const api = new FakeRestApi();
+    const tools = new AgentTools({
+      roomId: "room-1",
+      rest: new RestFacade({ api }),
+      participants: [{ id: "u1", handle: "@jane", name: "Jane", type: "User" }],
+    });
+
+    await expect(
+      tools.executeToolCall("thenvoi_send_message", {
+        content: "hello",
+        mentions: [
+          { id: "u1", handle: "@jane", name: "Jane", username: "jane" },
+          { nope: true },
+          "ignored",
+        ],
+      }),
+    ).resolves.toEqual({ ok: true });
+    await expect(
+      tools.executeToolCall("thenvoi_create_chatroom", {
+        task_id: "  task-123  ",
+      }),
+    ).resolves.toBe("r2");
+
+    expect(api.chatMessages).toEqual([
+      {
+        chatId: "room-1",
+        content: "hello",
+        mentions: [{ id: "u1", handle: "@jane", name: "Jane", username: "jane" }],
+      },
+    ]);
+    expect(api.createdChats).toEqual(["task-123"]);
+  });
+
+  it("supports anthropic schemas and extra contact and memory execution branches", async () => {
+    const api = new FakeRestApi();
+    const tools = new AgentTools({
+      roomId: "room-1",
+      rest: new RestFacade({ api }),
+      capabilities: { contacts: true, memory: true },
+    });
+
+    const schemas = tools.getToolSchemas("anthropic", { includeMemory: true });
+
+    await expect(
+      tools.executeToolCall("thenvoi_remove_contact", {
+        handle: "  @jane  ",
+      }),
+    ).resolves.toEqual({ status: "removed" });
+    await expect(
+      tools.executeToolCall("thenvoi_respond_contact_request", {
+        action: "cancel",
+        handle: "  weather  ",
+      }),
+    ).resolves.toEqual({
+      id: "req-1",
+      status: "cancelled",
+    });
+    await expect(
+      tools.executeToolCall("thenvoi_list_memories", {
+        page_size: "7",
+        scope: "all",
+        system: "working",
+        type: "semantic",
+        segment: "guideline",
+        status: "archived",
+        content_query: "  tea  ",
+      }),
+    ).resolves.toMatchObject({
+      metadata: { pageSize: 7 },
+    });
+    await expect(
+      tools.executeToolCall("thenvoi_store_memory", {
+        content: "remember",
+        thought: "because",
+        system: "working",
+        type: "semantic",
+        segment: "guideline",
+        scope: "organization",
+        metadata: { source: "test" },
+      }),
+    ).resolves.toMatchObject({
+      content: "remember",
+      scope: "organization",
+    });
+
+    expect(schemas.some((entry) => entry.name === "thenvoi_store_memory")).toBe(true);
+    expect(api.removedContacts).toContainEqual({ target: "handle", handle: "@jane" });
+    expect(api.contactRequestResponses).toContainEqual({
+      action: "cancel",
+      target: "handle",
+      handle: "weather",
+    });
+    expect(api.memoryQueries).toContainEqual({
+      page_size: 7,
+      scope: "all",
+      system: "working",
+      type: "semantic",
+      segment: "guideline",
+      status: "archived",
+      content_query: "tea",
+    });
+    expect(api.storedMemories).toContainEqual({
+      content: "remember",
+      thought: "because",
+      system: "working",
+      type: "semantic",
+      segment: "guideline",
+      scope: "organization",
+      metadata: { source: "test" },
+    });
+  });
+
+  it("reports validation errors for bad contact and memory tool arguments", async () => {
+    const tools = new AgentTools({
+      roomId: "room-1",
+      rest: new RestFacade({ api: new FakeRestApi() }),
+      capabilities: { contacts: true, memory: true },
+    });
+
+    await expect(
+      tools.executeToolCall("thenvoi_respond_contact_request", {
+        action: "wave",
+        request_id: "req-1",
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      errorType: "ToolArgumentsValidationError",
+      toolName: "thenvoi_respond_contact_request",
+    });
+    await expect(
+      tools.executeToolCall("thenvoi_list_memories", {
+        status: "bad-status",
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      errorType: "ToolArgumentsValidationError",
+      toolName: "thenvoi_list_memories",
+    });
+    await expect(
+      tools.executeToolCall("thenvoi_store_memory", {
+        content: "remember",
+        thought: "because",
+        system: "working",
+        type: "semantic",
+        segment: "guideline",
+        scope: "bad-scope",
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      errorType: "ToolArgumentsValidationError",
+      toolName: "thenvoi_store_memory",
+    });
   });
 });

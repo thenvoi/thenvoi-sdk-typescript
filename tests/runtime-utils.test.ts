@@ -74,6 +74,55 @@ describe("runtime utilities", () => {
     expect(retry.isPermanentlyFailed("m1")).toBe(true);
   });
 
+  it("covers participant tracker load, remove, and change detection branches", () => {
+    const tracker = new ParticipantTracker();
+
+    tracker.setLoaded([
+      { id: "u1", name: "Jane", type: "User", handle: "@jane" },
+      { id: "u2", name: "Planner", type: "Agent", handle: "@planner" },
+    ]);
+    expect(tracker.isLoaded).toBe(true);
+    expect(tracker.participants).toEqual([
+      { id: "u1", name: "Jane", type: "User", handle: "@jane" },
+      { id: "u2", name: "Planner", type: "Agent", handle: "@planner" },
+    ]);
+
+    const snapshot = tracker.participants;
+    snapshot[0] = { id: "mutated" };
+    expect(tracker.participants[0]).toMatchObject({ id: "u1" });
+
+    tracker.markSent();
+    expect(tracker.changed()).toBe(false);
+    expect(tracker.add({ id: "u1", name: "Duplicate" })).toBe(false);
+    expect(tracker.remove("missing")).toBe(false);
+    expect(tracker.remove("u2")).toBe(true);
+    expect(tracker.changed()).toBe(true);
+  });
+
+  it("covers participant tracker cloning and no-op branches", () => {
+    const tracker = new ParticipantTracker();
+    const seed = [{ id: "u1", name: "Jane", type: "User", handle: "jane" }];
+
+    tracker.setLoaded(seed);
+    expect(tracker.isLoaded).toBe(true);
+
+    seed[0]!.name = "Changed";
+    const snapshot = tracker.participants;
+    expect(snapshot[0]?.name).toBe("Jane");
+
+    snapshot.push({ id: "u2", name: "Extra" });
+    expect(tracker.participants).toHaveLength(1);
+
+    expect(tracker.add({ id: "u1", name: "Jane" })).toBe(false);
+    expect(tracker.remove("missing")).toBe(false);
+
+    tracker.markSent();
+    expect(tracker.changed()).toBe(false);
+
+    expect(tracker.remove("u1")).toBe(true);
+    expect(tracker.changed()).toBe(true);
+  });
+
   it("provides chat event type guards", () => {
     expect(CHAT_EVENT_TYPES).toContain("tool_call");
     expect(isChatEventType("task")).toBe(true);

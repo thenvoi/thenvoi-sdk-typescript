@@ -6,6 +6,8 @@ export default defineConfig({
       provider: "v8",
       include: ["src/**/*.ts"],
       exclude: ["src/**/*.d.ts"],
+      reportsDirectory: "./coverage",
+      tempDirectory: "./.vitest-coverage-tmp",
       reporter: ["text"],
     },
   },
