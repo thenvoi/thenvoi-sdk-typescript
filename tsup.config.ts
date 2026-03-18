@@ -1,0 +1,38 @@
+import { defineConfig } from "tsup";
+
+const EXTERNAL = [
+  "@langchain/langgraph/prebuilt",
+  "@langchain/core/tools",
+  "@a2a-js/sdk",
+  "@a2a-js/sdk/client",
+  "@a2a-js/sdk/server",
+  "@a2a-js/sdk/server/express",
+  "@anthropic-ai/sdk",
+  "@anthropic-ai/claude-agent-sdk",
+  "@google/genai",
+  "@linear/sdk",
+  "@linear/sdk/webhooks",
+  "@openai/codex-sdk",
+  "@thenvoi/rest-client",
+  "express",
+  "openai",
+  "parlant-client",
+];
+
+export default defineConfig({
+  clean: true,
+  dts: true,
+  entry: {
+    index: "src/index.ts",
+    adapters: "src/adapters/index.ts",
+    config: "src/config/index.ts",
+    core: "src/core/index.ts",
+    linear: "src/linear/index.ts",
+    rest: "src/rest/index.ts",
+    runtime: "src/runtime/index.ts",
+    testing: "src/testing/index.ts",
+  },
+  external: EXTERNAL,
+  format: ["esm", "cjs"],
+  target: "es2022",
+});
