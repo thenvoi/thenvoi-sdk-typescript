@@ -560,7 +560,7 @@ function isRetryableEmbeddedStartupError(error: unknown): boolean {
     || /Timed out waiting for Phoenix socket connection/.test(error.message);
 }
 
-async function startEmbeddedAgentWithRetry(agent: Agent, logger: Logger): Promise<void> {
+export async function startEmbeddedAgentWithRetry(agent: Agent, logger: Logger): Promise<void> {
   for (let attempt = 1; attempt <= EMBEDDED_AGENT_START_RETRY_LIMIT; attempt += 1) {
     try {
       await agent.start();
