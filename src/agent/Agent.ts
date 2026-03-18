@@ -83,8 +83,16 @@ export class Agent {
   }
 
   public async stop(timeoutMs?: number | null): Promise<boolean> {
-    if (!this.started) {
+    if (!this.started && !this.startPromise) {
       return true;
+    }
+
+    if (!this.started && this.startPromise) {
+      try {
+        await this.startPromise;
+      } catch {
+        return true;
+      }
     }
 
     try {

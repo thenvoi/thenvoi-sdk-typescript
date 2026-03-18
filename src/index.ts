@@ -47,6 +47,23 @@ export {
 } from "./adapters";
 
 export type {
+  AdapterToolsProtocol,
+  AgentToolsProtocol,
+  FrameworkAdapter,
+  FrameworkAdapterInput,
+  HistoryConverter,
+  MessagingTools,
+  Preprocessor,
+  RoomParticipantTools,
+  PeerLookupTools,
+  ParticipantTools,
+  ToolSchemaProvider,
+  ContactTools,
+  MemoryTools,
+  ToolExecutor,
+} from "./core";
+
+export type {
   GenericAdapterHandler,
   OpenAIAdapterOptions,
   AnthropicAdapterOptions,
