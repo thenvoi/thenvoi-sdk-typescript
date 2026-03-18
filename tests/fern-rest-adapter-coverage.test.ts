@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { UnsupportedFeatureError } from "../src/core/errors";
-import { FernRestAdapter } from "../src/client/rest/FernRestAdapter";
+import {
+  FernRestAdapter,
+  isFernRateLimitError,
+  normalizeFernContactRequestsResponse,
+  normalizeFernPaginatedResponse,
+} from "../src/client/rest/FernRestAdapter";
+
+function rateLimitError(message = "rate limited"): Error & { statusCode: number } {
+  return Object.assign(new Error(message), { statusCode: 429 });
+}
 
 describe("FernRestAdapter coverage", () => {
   it("throws when no identity endpoint exists", async () => {
@@ -12,7 +21,7 @@ describe("FernRestAdapter coverage", () => {
 
   it("retries getAgentMe on 429s and then returns the normalized identity", async () => {
     const getAgentMe = vi.fn()
-      .mockRejectedValueOnce(new Error("request failed (429)"))
+      .mockRejectedValueOnce(rateLimitError())
       .mockResolvedValueOnce({ data: { id: "a1", name: "Agent", description: null, handle: "@agent" } });
     const adapter = new FernRestAdapter({
       agentApiIdentity: { getAgentMe },
@@ -35,6 +44,11 @@ describe("FernRestAdapter coverage", () => {
     });
 
     await expect(adapter.getAgentMe()).rejects.toThrow("expected non-empty string AgentIdentity.name");
+  });
+
+  it("detects rate limits from structured status codes", () => {
+    expect(isFernRateLimitError(rateLimitError())).toBe(true);
+    expect(isFernRateLimitError(new Error("429"))).toBe(false);
   });
 
   it("falls back to legacy profile identity when agentApiIdentity is missing", async () => {
@@ -215,6 +229,25 @@ describe("FernRestAdapter coverage", () => {
     );
   });
 
+  it("retries chat message writes on structured 429 responses", async () => {
+    const createChatMessage = vi.fn()
+      .mockRejectedValueOnce(rateLimitError())
+      .mockResolvedValueOnce({ data: { ok: true, id: "msg-1" } });
+    const adapter = new FernRestAdapter({
+      chatMessages: {
+        createChatMessage,
+      },
+    });
+
+    await expect(
+      adapter.createChatMessage("room-1", {
+        content: "hello",
+        messageType: "text",
+      }),
+    ).resolves.toEqual({ ok: true, id: "msg-1" });
+    expect(createChatMessage).toHaveBeenCalledTimes(2);
+  });
+
   it("falls back from createChatEvent to createChatMessage when the event endpoint is unavailable", async () => {
     const createMyChatMessage = vi.fn(async () => ({ data: { ok: true } }));
     const adapter = new FernRestAdapter({
@@ -365,6 +398,47 @@ describe("FernRestAdapter coverage", () => {
       { action: "approve", handle: "@jane" },
       expect.any(Object),
     );
+  });
+
+  it("directly normalizes paginated envelopes and filters invalid items", () => {
+    const response = normalizeFernPaginatedResponse(
+      {
+        data: {
+          data: [{ id: "ok" }, { bad: true }],
+          metadata: { page: 2, page_size: 10, total_count: 1, total_pages: 3 },
+        },
+      },
+      (item) => (typeof item.id === "string" ? item.id : null),
+    );
+
+    expect(response).toEqual({
+      data: ["ok"],
+      metadata: { page: 2, pageSize: 10, totalCount: 1, totalPages: 3 },
+    });
+  });
+
+  it("directly normalizes contact request envelopes", () => {
+    const response = normalizeFernContactRequestsResponse({
+      data: {
+        received: [{ id: "r1", from_handle: "@jane", status: "pending" }],
+        sent: [{ id: "s1", to_handle: "@bot", status: "approved" }],
+      },
+      metadata: {
+        page: 1,
+        page_size: 5,
+        received: { total: 1, total_pages: 1 },
+        sent: { total: 1, total_pages: 1 },
+      },
+    });
+
+    expect(response.received).toHaveLength(1);
+    expect(response.sent).toHaveLength(1);
+    expect(response.metadata).toEqual({
+      page: 1,
+      pageSize: 5,
+      received: { total: 1, totalPages: 1 },
+      sent: { total: 1, totalPages: 1 },
+    });
   });
 
   it("normalizes listChatParticipants from the chatParticipants namespace", async () => {

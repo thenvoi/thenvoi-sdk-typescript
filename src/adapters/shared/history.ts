@@ -1,4 +1,4 @@
-import { asRecord } from "./coercion";
+import { asOptionalRecord } from "./coercion";
 
 export function findLatestTaskMetadata(
   raw: Array<Record<string, unknown>>,
@@ -11,7 +11,7 @@ export function findLatestTaskMetadata(
       continue;
     }
 
-    const metadata = asRecord(message.metadata);
+    const metadata = asOptionalRecord(message.metadata) ?? {};
     if (predicate(metadata)) {
       return metadata;
     }

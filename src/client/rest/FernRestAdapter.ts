@@ -38,17 +38,63 @@ function mergeOptions(options?: RestRequestOptions): RestRequestOptions {
 
 const AGENT_ME_RETRY_LIMIT = 4;
 const AGENT_ME_RETRY_BASE_DELAY_MS = 2_000;
+const MESSAGE_SEND_RETRY_LIMIT = 3;
+const MESSAGE_SEND_RETRY_BASE_DELAY_MS = 500;
 
 function asMetadataMap(value: unknown): MetadataMap | undefined {
   return asOptionalRecord(value) as MetadataMap | undefined;
 }
 
-function isRateLimitError(error: unknown): boolean {
-  return error instanceof Error && /\b429\b/.test(error.message);
+function extractHttpStatus(error: unknown): number | undefined {
+  const record = asOptionalRecord(error);
+  if (!record) {
+    return undefined;
+  }
+
+  const response = asOptionalRecord(record.response);
+  const status = record.statusCode ?? record.status ?? response?.statusCode ?? response?.status;
+  return typeof status === "number" ? status : undefined;
+}
+
+export function isFernRateLimitError(error: unknown): boolean {
+  return extractHttpStatus(error) === 429;
 }
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
+}
+
+function computeRetryDelayMs(baseDelayMs: number, attempt: number): number {
+  const backoff = baseDelayMs * (2 ** (attempt - 1));
+  const jitter = Math.floor(Math.random() * Math.max(1, Math.floor(backoff / 4)));
+  return backoff + jitter;
+}
+
+async function withRateLimitRetry<T>(
+  operation: () => Promise<T>,
+  options: {
+    retryLimit: number;
+    baseDelayMs: number;
+  },
+): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= options.retryLimit; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!isFernRateLimitError(error) || attempt === options.retryLimit) {
+        throw error;
+      }
+
+      await sleep(computeRetryDelayMs(options.baseDelayMs, attempt));
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Rate-limit retry exhausted without a terminal error.");
 }
 
 function requireNonEmptyStringField(
@@ -157,7 +203,7 @@ function extractEnvelopeMetadata(value: unknown): MetadataMap | undefined {
   return asMetadataMap(record.metadata) ?? asMetadataMap(record.meta);
 }
 
-function normalizePaginatedResponse<T>(
+export function normalizeFernPaginatedResponse<T>(
   response: unknown,
   normalizeItem: (value: MetadataMap) => T | null,
 ): PaginatedResponse<T> {
@@ -175,7 +221,7 @@ function normalizePaginatedResponse<T>(
   };
 }
 
-function normalizeContactRequestsResponse(response: unknown): ContactRequestsResult {
+export function normalizeFernContactRequestsResponse(response: unknown): ContactRequestsResult {
   const payload = asMetadataMap(extractEnvelopeData(response));
   return normalizeContactRequestsResult({
     received: asRecordArray(payload?.received) ?? [],
@@ -358,10 +404,8 @@ export class FernRestAdapter implements RestApi {
   }
 
   public async getAgentMe(options?: RestRequestOptions): Promise<AgentIdentity> {
-    let lastError: unknown;
-
-    for (let attempt = 1; attempt <= AGENT_ME_RETRY_LIMIT; attempt += 1) {
-      try {
+    return withRateLimitRetry(
+      async () => {
         if (this.client.agentApiIdentity?.getAgentMe) {
           const response = await this.client.agentApiIdentity.getAgentMe(mergeOptions(options));
           return normalizeAgentIdentityEnvelope(response, "agentApiIdentity.getAgentMe");
@@ -379,17 +423,12 @@ export class FernRestAdapter implements RestApi {
           normalizeLegacyProfileEnvelope(profile),
           "profile.getMyProfile",
         );
-      } catch (error) {
-        lastError = error;
-        if (!isRateLimitError(error) || attempt === AGENT_ME_RETRY_LIMIT) {
-          throw error;
-        }
-
-        await sleep(AGENT_ME_RETRY_BASE_DELAY_MS * attempt);
-      }
-    }
-
-    throw lastError;
+      },
+      {
+        retryLimit: AGENT_ME_RETRY_LIMIT,
+        baseDelayMs: AGENT_ME_RETRY_BASE_DELAY_MS,
+      },
+    );
   }
 
   public async createChatMessage(
@@ -409,17 +448,23 @@ export class FernRestAdapter implements RestApi {
       throw new UnsupportedFeatureError("Fern client missing chat message creation endpoint");
     }
 
-    const response = await api(
-      chatId,
-      {
-        message: {
-          content: message.content,
-          message_type: message.messageType,
-          metadata: message.metadata,
-          mentions: message.mentions,
+    const response = await withRateLimitRetry(
+      async () => await api(
+        chatId,
+        {
+          message: {
+            content: message.content,
+            message_type: message.messageType,
+            metadata: message.metadata,
+            mentions: message.mentions,
+          },
         },
+        mergeOptions(options),
+      ),
+      {
+        retryLimit: MESSAGE_SEND_RETRY_LIMIT,
+        baseDelayMs: MESSAGE_SEND_RETRY_BASE_DELAY_MS,
       },
-      mergeOptions(options),
     );
     return normalizeToolOperationResult(response);
   }
@@ -433,17 +478,25 @@ export class FernRestAdapter implements RestApi {
     },
     options?: RestRequestOptions,
   ): Promise<ToolOperationResult> {
-    if (this.client.agentApiEvents?.createAgentChatEvent) {
-      const response = await this.client.agentApiEvents.createAgentChatEvent(
-        chatId,
-        {
-          event: {
-            content: event.content,
-            message_type: event.messageType,
-            metadata: event.metadata,
+    const createAgentChatEvent = this.client.agentApiEvents?.createAgentChatEvent
+      ?.bind(this.client.agentApiEvents);
+    if (createAgentChatEvent) {
+      const response = await withRateLimitRetry(
+        async () => await createAgentChatEvent(
+          chatId,
+          {
+            event: {
+              content: event.content,
+              message_type: event.messageType,
+              metadata: event.metadata,
+            },
           },
+          mergeOptions(options),
+        ),
+        {
+          retryLimit: MESSAGE_SEND_RETRY_LIMIT,
+          baseDelayMs: MESSAGE_SEND_RETRY_BASE_DELAY_MS,
         },
-        mergeOptions(options),
       );
       return normalizeToolOperationResult(response);
     }
@@ -617,7 +670,7 @@ export class FernRestAdapter implements RestApi {
       },
       mergeOptions(options),
     );
-    return normalizePaginatedResponse(response, normalizePeerRecord);
+    return normalizeFernPaginatedResponse(response, normalizePeerRecord);
   }
 
   public async listChats(
@@ -637,7 +690,7 @@ export class FernRestAdapter implements RestApi {
       mergeOptions(options),
     );
 
-    return normalizePaginatedResponse(response, normalizeMetadataRecord);
+    return normalizeFernPaginatedResponse(response, normalizeMetadataRecord);
   }
 
   public async listContacts(
@@ -660,7 +713,7 @@ export class FernRestAdapter implements RestApi {
       mergeOptions(options),
     );
 
-    return normalizePaginatedResponse(response, normalizeContactRecord);
+    return normalizeFernPaginatedResponse(response, normalizeContactRecord);
   }
 
   public async addContact(
@@ -722,7 +775,7 @@ export class FernRestAdapter implements RestApi {
       mergeOptions(options),
     );
 
-    return normalizeContactRequestsResponse(response);
+    return normalizeFernContactRequestsResponse(response);
   }
 
   public async respondContactRequest(
@@ -755,7 +808,7 @@ export class FernRestAdapter implements RestApi {
     }
 
     const response = await api(request, mergeOptions(options));
-    return normalizePaginatedResponse(response, normalizeMemoryRecordItem);
+    return normalizeFernPaginatedResponse(response, normalizeMemoryRecordItem);
   }
 
   public async storeMemory(
@@ -832,7 +885,7 @@ export class FernRestAdapter implements RestApi {
 
     const listMessagesApi = this.client.chatMessages?.listMessages?.bind(this.client.chatMessages);
     if (listMessagesApi) {
-      return normalizePaginatedResponse<PlatformChatMessage>(
+      return normalizeFernPaginatedResponse<PlatformChatMessage>(
         await listMessagesApi(request.chatId, listRequest, requestOptions),
         normalizePlatformMessageRecord,
       );
@@ -843,7 +896,7 @@ export class FernRestAdapter implements RestApi {
       throw new UnsupportedFeatureError("Fern client missing message list endpoint");
     }
 
-    return normalizePaginatedResponse<PlatformChatMessage>(
+    return normalizeFernPaginatedResponse<PlatformChatMessage>(
       await listAgentMessagesApi(request.chatId, listRequest, requestOptions),
       normalizePlatformMessageRecord,
     );
@@ -861,7 +914,7 @@ export class FernRestAdapter implements RestApi {
 
     const getChatContextApi = this.client.chatContext?.getChatContext?.bind(this.client.chatContext);
     if (getChatContextApi) {
-      return normalizePaginatedResponse<PlatformChatMessage>(
+      return normalizeFernPaginatedResponse<PlatformChatMessage>(
         await getChatContextApi(request.chatId, contextRequest, requestOptions),
         normalizePlatformMessageRecord,
       );
@@ -872,7 +925,7 @@ export class FernRestAdapter implements RestApi {
       throw new UnsupportedFeatureError("Fern client missing chat context endpoint");
     }
 
-    return normalizePaginatedResponse<PlatformChatMessage>(
+    return normalizeFernPaginatedResponse<PlatformChatMessage>(
       await getAgentChatContextApi(request.chatId, contextRequest, requestOptions),
       normalizePlatformMessageRecord,
     );

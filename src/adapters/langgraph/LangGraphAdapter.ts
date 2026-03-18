@@ -5,7 +5,7 @@ import { SimpleAdapter } from "../../core/simpleAdapter";
 import type { AdapterToolsProtocol } from "../../contracts/protocols";
 import { renderSystemPrompt } from "../../runtime/prompts";
 import type { HistoryProvider, PlatformMessage } from "../../runtime/types";
-import { asErrorMessage, asRecord } from "../shared/coercion";
+import { asErrorMessage, asOptionalRecord, asRecord } from "../shared/coercion";
 import { LazyAsyncValue } from "../shared/lazyAsyncValue";
 
 type LangGraphRole = "system" | "user" | "assistant";
@@ -256,7 +256,7 @@ export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
     let lastAssistantText: string | null = null;
 
     for await (const event of stream) {
-      const data = asRecord(event);
+      const data = asOptionalRecord(event) ?? {};
       const eventType = String(data.event ?? "");
       if (eventType === "on_tool_start") {
         await tools.sendEvent(
@@ -277,7 +277,7 @@ export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
         );
       }
       if (eventType === "on_chain_end") {
-        const output = asRecord(data.data);
+        const output = asOptionalRecord(data.data) ?? {};
         const text = extractAssistantText(output.output);
         if (text) {
           lastAssistantText = text;
@@ -362,7 +362,7 @@ function extractAssistantText(result: unknown): string | null {
     return result.trim();
   }
 
-  const record = asRecord(result);
+  const record = asOptionalRecord(result) ?? {};
   const directContent = asMessageContent(record.content);
   if (directContent) {
     return directContent;
@@ -387,7 +387,10 @@ function asMessageText(value: unknown): string | null {
     return null;
   }
 
-  const record = asRecord(value);
+  const record = asOptionalRecord(value);
+  if (!record) {
+    return null;
+  }
   const role = String(record.role ?? "");
   if (role !== "assistant") {
     return null;
@@ -404,7 +407,10 @@ function asMessageContent(value: unknown): string | null {
   if (Array.isArray(value)) {
     const chunks: string[] = [];
     for (const item of value) {
-      const record = asRecord(item);
+      const record = asOptionalRecord(item);
+      if (!record) {
+        continue;
+      }
       if (typeof record.text === "string" && record.text.trim().length > 0) {
         chunks.push(record.text.trim());
       }

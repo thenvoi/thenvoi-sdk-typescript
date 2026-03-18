@@ -8,8 +8,13 @@ export function asOptionalRecord(value: unknown): Record<string, unknown> | unde
   return value as Record<string, unknown>;
 }
 
-export function asRecord(value: unknown): Record<string, unknown> {
-  return asOptionalRecord(value) ?? {};
+export function asRecord(value: unknown, context = "value"): Record<string, unknown> {
+  const record = asOptionalRecord(value);
+  if (!record) {
+    throw new TypeError(`Expected ${context} to be an object record.`);
+  }
+
+  return record;
 }
 
 export function asNonEmptyString(value: unknown): string | null {

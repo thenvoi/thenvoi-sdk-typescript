@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { SimpleAdapter } from "../../core/simpleAdapter";
-import { UnsupportedFeatureError } from "../../core/errors";
+import { UnsupportedFeatureError, ValidationError } from "../../core/errors";
 import type { PeerRecord } from "../../contracts/dtos";
 import type { MessagingTools } from "../../contracts/protocols";
 import type { ChatMessageMention } from "../../client/rest/types";
@@ -74,6 +74,12 @@ export class A2AGatewayAdapter
     this.peerPageSize = options.peerPageSize ?? DEFAULT_PEER_PAGE_SIZE;
     this.maxPeerPages = options.maxPeerPages ?? DEFAULT_MAX_PEER_PAGES;
     this.serverFactory = options.serverFactory ?? createGatewayServer;
+
+    if (this.allowUnauthenticatedLoopback && !isLoopbackHost(this.host)) {
+      throw new ValidationError(
+        "A2AGatewayAdapter `allowUnauthenticatedLoopback` may only be enabled for loopback hosts.",
+      );
+    }
   }
 
   public async onStarted(
@@ -141,6 +147,8 @@ export class A2AGatewayAdapter
         this.pendingByTask.delete(taskId);
       }
     }
+
+    this.forgetRoom(roomId);
   }
 
   public async stopGatewayServer(): Promise<void> {
@@ -154,13 +162,7 @@ export class A2AGatewayAdapter
   }
 
   public async onRuntimeStop(): Promise<void> {
-    // Cancel all pending queues so dequeue() calls resolve immediately.
-    for (const pending of this.pendingByTask.values()) {
-      pending.queue.cancel();
-    }
-    this.pendingByRoom.clear();
-    this.pendingByTask.clear();
-
+    this.resetState();
     await this.stopGatewayServer();
   }
 
@@ -494,6 +496,29 @@ export class A2AGatewayAdapter
     pending.enqueue(event);
     this.removePending(pending);
   }
+
+  private forgetRoom(roomId: string): void {
+    this.roomParticipants.delete(roomId);
+
+    for (const [contextId, mappedRoomId] of this.contextToRoom.entries()) {
+      if (mappedRoomId === roomId) {
+        this.contextToRoom.delete(contextId);
+      }
+    }
+  }
+
+  private resetState(): void {
+    for (const pending of this.pendingByTask.values()) {
+      pending.queue.cancel();
+    }
+
+    this.peersBySlug.clear();
+    this.peersById.clear();
+    this.contextToRoom.clear();
+    this.roomParticipants.clear();
+    this.pendingByRoom.clear();
+    this.pendingByTask.clear();
+  }
 }
 
 class AsyncEventQueue<T> {
@@ -585,6 +610,11 @@ function uniqueSlug(
   }
 
   return `${baseSlug}-${index}`;
+}
+
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  return normalized === "127.0.0.1" || normalized === "::1" || normalized === "localhost";
 }
 
 function slugify(input: string): string {

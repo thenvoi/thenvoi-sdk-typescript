@@ -1,5 +1,5 @@
 import type { HistoryConverter } from "../../contracts/protocols";
-import { asNonEmptyString, asRecord } from "../shared/coercion";
+import { asNonEmptyString, asOptionalRecord } from "../shared/coercion";
 
 import type { GatewaySessionState } from "./types";
 
@@ -11,7 +11,7 @@ export class GatewayHistoryConverter
     const roomParticipants = new Map<string, Set<string>>();
 
     for (const entry of raw) {
-      const metadata = asRecord(entry.metadata);
+      const metadata = asOptionalRecord(entry.metadata) ?? {};
       const contextId = asNonEmptyString(metadata.gateway_context_id);
       if (contextId) {
         const roomId =

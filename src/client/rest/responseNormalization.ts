@@ -12,7 +12,12 @@ function normalizeContactRequestDirection(value: unknown): MetadataMap | undefin
   }
 
   return {
-    ...direction,
+    total:
+      typeof direction.total === "number"
+        ? direction.total
+        : typeof direction.total_count === "number"
+          ? direction.total_count
+          : undefined,
     totalPages:
       typeof direction.totalPages === "number"
         ? direction.totalPages
@@ -29,7 +34,6 @@ export function normalizeContactRequestsResult(result: ContactRequestsResult): C
     sent: Array.isArray(result.sent) ? result.sent : [],
     metadata: metadata
       ? {
-        ...metadata,
         page:
           typeof metadata.page === "number"
             ? metadata.page

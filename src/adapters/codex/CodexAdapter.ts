@@ -20,7 +20,7 @@ import {
   executeCustomTool,
   findCustomToolInIndex,
 } from "../../runtime/tools/customTools";
-import { asErrorMessage, asNonEmptyString, asRecord, toWireString } from "../shared/coercion";
+import { asErrorMessage, asNonEmptyString, asOptionalRecord, asRecord, toWireString } from "../shared/coercion";
 import { findLatestTaskMetadata } from "../shared/history";
 import {
   CodexAppServerStdioClient,
@@ -310,10 +310,10 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
         break;
       }
 
-      const params = asRecord(event.params);
+      const params = asOptionalRecord(event.params) ?? {};
 
       if (event.method === "error") {
-        const error = asRecord(params.error);
+        const error = asOptionalRecord(params.error) ?? {};
         const errorMessage = asNonEmptyString(error.message) ?? "Unknown Codex error";
         if (params.willRetry === true) {
           this.logger.warn("codex_adapter.retryable_error", { error: errorMessage, roomId: context.roomId });
@@ -923,7 +923,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
     }
 
     if (item.type === "mcpToolCall") {
-      const args = asRecord(item.arguments);
+      const args = asOptionalRecord(item.arguments) ?? {};
       const output = item.result ?? item.error ?? "completed";
       return [`mcp:${item.server}/${item.tool}`, args, toWireString(output)];
     }
@@ -1314,7 +1314,10 @@ function parseDynamicToolCallParams(
   tool: string;
   arguments: Record<string, unknown>;
 } | null {
-  const record = asRecord(value);
+  const record = asOptionalRecord(value);
+  if (!record) {
+    return null;
+  }
   const threadId = asNonEmptyString(record.threadId);
   const turnId = asNonEmptyString(record.turnId);
   const callId = asNonEmptyString(record.callId);
@@ -1328,12 +1331,15 @@ function parseDynamicToolCallParams(
     turnId,
     callId,
     tool,
-    arguments: asRecord(record.arguments),
+    arguments: asOptionalRecord(record.arguments) ?? {},
   };
 }
 
 function parseThreadItem(value: unknown): ThreadItem | null {
-  const record = asRecord(value);
+  const record = asOptionalRecord(value);
+  if (!record) {
+    return null;
+  }
   const type = asNonEmptyString(record.type);
   if (!type) {
     return null;
@@ -1359,7 +1365,10 @@ function parseTurnErrorInfo(value: unknown): TurnErrorInfo | null {
     return { message, additionalDetails: null };
   }
 
-  const record = asRecord(value);
+  const record = asOptionalRecord(value);
+  if (!record) {
+    return null;
+  }
   const message = asNonEmptyString(record.message);
   if (!message) {
     return null;
@@ -1385,7 +1394,10 @@ function parseTurnRef(value: unknown): {
   status: TurnStatus;
   error: TurnErrorInfo | null;
 } | null {
-  const record = asRecord(value);
+  const record = asOptionalRecord(value);
+  if (!record) {
+    return null;
+  }
   const id = asNonEmptyString(record.id);
   const status = parseTurnStatus(record.status);
   if (!id || !status) {
@@ -1400,7 +1412,10 @@ function parseTurnRef(value: unknown): {
 }
 
 function parseTurnStartResponse(value: unknown): TurnStartResponse | null {
-  const record = asRecord(value);
+  const record = asOptionalRecord(value);
+  if (!record) {
+    return null;
+  }
   const turn = parseTurnRef(record.turn);
   if (!turn) {
     return null;
@@ -1409,8 +1424,14 @@ function parseTurnStartResponse(value: unknown): TurnStartResponse | null {
 }
 
 function parseThreadResponse(value: unknown): ThreadStartResponse | ThreadResumeResponse | null {
-  const record = asRecord(value);
-  const thread = asRecord(record.thread);
+  const record = asOptionalRecord(value);
+  if (!record) {
+    return null;
+  }
+  const thread = asOptionalRecord(record.thread);
+  if (!thread) {
+    return null;
+  }
   const threadId = asNonEmptyString(thread.id);
   const model = asNonEmptyString(record.model);
   if (!threadId || !model) {
@@ -1424,14 +1445,20 @@ function parseThreadResponse(value: unknown): ThreadStartResponse | ThreadResume
 }
 
 function parseModelListResponse(value: unknown): ModelListResponse | null {
-  const record = asRecord(value);
+  const record = asOptionalRecord(value);
+  if (!record) {
+    return null;
+  }
   if (!Array.isArray(record.data)) {
     return null;
   }
 
   const data = record.data
     .map((entry) => {
-      const item = asRecord(entry);
+      const item = asOptionalRecord(entry);
+      if (!item) {
+        return null;
+      }
       const id = asNonEmptyString(item.id);
       if (!id) {
         return null;

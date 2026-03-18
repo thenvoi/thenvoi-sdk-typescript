@@ -345,6 +345,66 @@ describe("A2AAdapter", () => {
     );
   });
 
+  it("logs per-event handler failures and continues streaming later events", async () => {
+    const client = new FakeA2AClient({
+      streamBatches: [
+        [
+          {
+            kind: "message",
+            parts: [{ kind: "text", text: "first chunk" }],
+          },
+          {
+            kind: "message",
+            parts: [{ kind: "text", text: "second chunk" }],
+          },
+        ],
+      ],
+    });
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const adapter = new A2AAdapter({
+      remoteUrl: "a2a-remote",
+      clientFactory: async () => client,
+      logger,
+    });
+    const tools = new FakeTools({
+      failOn: ["sendMessage"],
+      errorFactory: () => {
+        const error = new Error("downstream send failed");
+        tools.sendMessage = vi.fn(async (content: string) => {
+          tools.messages.push(content);
+          return { ok: true };
+        }) as typeof tools.sendMessage;
+        return error;
+      },
+    });
+
+    await expect(
+      adapter.onMessage(
+        makeMessage("hello", "room-stream"),
+        tools,
+        { contextId: null, taskId: null, taskState: null },
+        null,
+        null,
+        { isSessionBootstrap: false, roomId: "room-stream" },
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(tools.messages).toEqual(["second chunk"]);
+    expect(logger.error).toHaveBeenCalledWith(
+      "A2A stream event handling failed; continuing stream",
+      expect.objectContaining({
+        roomId: "room-stream",
+        remoteUrl: "a2a-remote",
+        streamEventCount: 1,
+      }),
+    );
+  });
+
   it("rejects invalid maxStreamEvents values", () => {
     expect(
       () =>

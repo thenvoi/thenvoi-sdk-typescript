@@ -146,6 +146,17 @@ function makePeerMessage(options: {
 }
 
 describe("A2AGatewayAdapter", () => {
+  it("rejects unauthenticated loopback mode on non-loopback hosts", () => {
+    expect(
+      () =>
+        new A2AGatewayAdapter({
+          thenvoiRest: new FakeRestApi(),
+          allowUnauthenticatedLoopback: true,
+          host: "0.0.0.0",
+        }),
+    ).toThrow("allowUnauthenticatedLoopback");
+  });
+
   it("routes A2A requests into Thenvoi rooms and streams completion", async () => {
     const rest = new FakeRestApi();
 
@@ -235,6 +246,79 @@ describe("A2AGatewayAdapter", () => {
         gateway_peer_slug: "weather-agent",
       },
     });
+  });
+
+  it("forgets room mappings during cleanup", async () => {
+    const adapter = new A2AGatewayAdapter({
+      thenvoiRest: new FakeRestApi(),
+    });
+    const state = adapter as unknown as {
+      contextToRoom: Map<string, string>;
+      roomParticipants: Map<string, Set<string>>;
+      pendingByRoom: Map<string, Map<string, { roomId: string; queue: { cancel(): void } }>>;
+      pendingByTask: Map<string, { roomId: string }>;
+    };
+    let cancelled = false;
+
+    state.contextToRoom.set("ctx-1", "room-1");
+    state.roomParticipants.set("room-1", new Set(["peer-weather"]));
+    state.pendingByRoom.set("room-1", new Map([
+      ["task-1", { roomId: "room-1", queue: { cancel: () => { cancelled = true; } } }],
+    ]));
+    state.pendingByTask.set("task-1", { roomId: "room-1" });
+
+    await adapter.onCleanup("room-1");
+
+    expect(cancelled).toBe(true);
+    expect(state.contextToRoom.size).toBe(0);
+    expect(state.roomParticipants.size).toBe(0);
+    expect(state.pendingByRoom.size).toBe(0);
+    expect(state.pendingByTask.size).toBe(0);
+  });
+
+  it("clears tracked state on runtime stop", async () => {
+    const rest = new FakeRestApi();
+    let stopped = false;
+    const adapter = new A2AGatewayAdapter({
+      thenvoiRest: rest,
+      serverFactory: () => ({
+        start: async () => undefined,
+        stop: async () => {
+          stopped = true;
+        },
+      }),
+    });
+    const state = adapter as unknown as {
+      peersBySlug: Map<string, unknown>;
+      peersById: Map<string, unknown>;
+      contextToRoom: Map<string, string>;
+      roomParticipants: Map<string, Set<string>>;
+      pendingByRoom: Map<string, Map<string, { roomId: string; queue: { cancel(): void } }>>;
+      pendingByTask: Map<string, { roomId: string; queue: { cancel(): void } }>;
+      server: { stop(): Promise<void> } | null;
+    };
+    let cancelled = false;
+
+    await adapter.onStarted("Gateway", "A2A gateway");
+
+    state.contextToRoom.set("ctx-1", "room-1");
+    state.roomParticipants.set("room-1", new Set(["peer-weather"]));
+    state.peersBySlug.set("weather", { id: "peer-weather" });
+    state.peersById.set("peer-weather", { id: "peer-weather" });
+    const pending = { roomId: "room-1", queue: { cancel: () => { cancelled = true; } } };
+    state.pendingByTask.set("task-1", pending);
+    state.pendingByRoom.set("room-1", new Map([["task-1", pending]]));
+
+    await adapter.onRuntimeStop();
+
+    expect(cancelled).toBe(true);
+    expect(stopped).toBe(true);
+    expect(state.peersBySlug.size).toBe(0);
+    expect(state.peersById.size).toBe(0);
+    expect(state.contextToRoom.size).toBe(0);
+    expect(state.roomParticipants.size).toBe(0);
+    expect(state.pendingByRoom.size).toBe(0);
+    expect(state.pendingByTask.size).toBe(0);
   });
 
   it("supports legacy slug peerId aliases in gateway requests", async () => {

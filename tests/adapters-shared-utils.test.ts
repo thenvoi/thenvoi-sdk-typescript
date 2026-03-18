@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { asNonEmptyString, asRecord } from "../src/adapters/shared/coercion";
+import { asNonEmptyString, asOptionalRecord, asRecord } from "../src/adapters/shared/coercion";
 import { findLatestTaskMetadata } from "../src/adapters/shared/history";
 import { mapConversationMessages } from "../src/adapters/tool-calling/valueUtils";
 
 describe("adapter shared utilities", () => {
-  it("normalizes unknown values to a record", () => {
-    expect(asRecord(null)).toEqual({});
+  it("requires object records and keeps optional parsing available", () => {
+    expect(() => asRecord(null)).toThrow("Expected value to be an object record.");
     expect(asRecord({ ok: true })).toEqual({ ok: true });
+    expect(asOptionalRecord(null)).toBeUndefined();
   });
 
   it("extracts non-empty trimmed strings", () => {

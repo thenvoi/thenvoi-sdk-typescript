@@ -5,7 +5,7 @@ import { NoopLogger } from "../../core/logger";
 import { UnsupportedFeatureError } from "../../core/errors";
 import type { PlatformMessage } from "../../runtime/types";
 import { renderSystemPrompt } from "../../runtime/prompts";
-import { asErrorMessage, asNonEmptyString, asRecord } from "../shared/coercion";
+import { asErrorMessage, asNonEmptyString, asOptionalRecord } from "../shared/coercion";
 import { LazyAsyncValue } from "../shared/lazyAsyncValue";
 import {
   ParlantHistoryConverter,
@@ -627,7 +627,7 @@ function extractStatusState(event: Record<string, unknown>): string | null {
     return null;
   }
 
-  const data = asRecord(event.data);
+  const data = asOptionalRecord(event.data) ?? {};
   return asNonEmptyString(data.state) ?? null;
 }
 
@@ -637,7 +637,7 @@ function extractEventMessage(event: Record<string, unknown>): string | null {
     return directData.trim();
   }
 
-  const data = asRecord(directData);
+  const data = asOptionalRecord(directData) ?? {};
 
   const message = data.message;
   if (typeof message === "string" && message.trim().length > 0) {

@@ -6,6 +6,9 @@ export interface Logger {
 }
 
 const noop = (): void => undefined;
+const REDACTED_VALUE = "[REDACTED]";
+const CIRCULAR_VALUE = "[Circular]";
+const SENSITIVE_KEY_PATTERN = /(authorization|api[-_]?key|token|secret|password|cookie)/i;
 
 export class NoopLogger implements Logger {
   public debug = noop;
@@ -28,7 +31,7 @@ export class ConsoleLogger implements Logger {
   }
 
   public error(message: string, context?: Record<string, unknown>): void {
-    const payload = context ? ` ${JSON.stringify(context)}` : "";
+    const payload = context ? ` ${safeSerializeContext(context)}` : "";
     process.stderr.write(`${message}${payload}\n`);
   }
 
@@ -43,6 +46,53 @@ export class ConsoleLogger implements Logger {
       fn(message);
       return;
     }
-    fn(message, context);
+    fn(message, sanitizeValue(context));
   }
+}
+
+function safeSerializeContext(context: Record<string, unknown>): string {
+  try {
+    return JSON.stringify(sanitizeValue(context));
+  } catch {
+    return JSON.stringify({ context: "[Unserializable]" });
+  }
+}
+
+function sanitizeValue(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (value === null || value === undefined) {
+    return value;
+  }
+
+  if (typeof value !== "object") {
+    return value;
+  }
+
+  if (value instanceof Error) {
+    return sanitizeValue(
+      {
+        name: value.name,
+        message: value.message,
+        stack: value.stack,
+        ...(value.cause !== undefined ? { cause: value.cause } : {}),
+      },
+      seen,
+    );
+  }
+
+  if (seen.has(value)) {
+    return CIRCULAR_VALUE;
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => sanitizeValue(entry, seen));
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    sanitized[key] = SENSITIVE_KEY_PATTERN.test(key)
+      ? REDACTED_VALUE
+      : sanitizeValue(entry, seen);
+  }
+  return sanitized;
 }

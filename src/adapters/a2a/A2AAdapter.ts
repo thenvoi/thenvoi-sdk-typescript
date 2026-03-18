@@ -165,13 +165,12 @@ export class A2AAdapter extends SimpleAdapter<A2ASessionState, MessagingTools> {
           try {
             await this.handleEvent(event, tools, context.roomId, message.senderId);
           } catch (handleError) {
-            this.logger.error("A2A stream event handling failed", {
+            this.logger.error("A2A stream event handling failed; continuing stream", {
               roomId: context.roomId,
               remoteUrl: this.remoteUrl,
               streamEventCount,
               error: handleError,
             });
-            throw handleError;
           }
         }
         return;

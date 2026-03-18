@@ -8,3 +8,6 @@ Rationale:
 - Vitest startup/runtime is unaffected at this project size.
 
 When this directory grows substantially beyond the current footprint, group by domain (`adapters/`, `runtime/`, `integrations/`) and keep `examples-*` tests together.
+
+`tests/integration/` is intentionally excluded from the default `vitest run`.
+Those files are operator-driven harnesses for real services and should be run explicitly when validating live adapters or bridge flows.
