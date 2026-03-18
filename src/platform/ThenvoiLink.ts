@@ -1,6 +1,7 @@
 import type { Logger } from "../core/logger";
 import { NoopLogger } from "../core/logger";
 import { FernRestAdapter } from "../client/rest/RestFacade";
+import type { FernThenvoiClientLike } from "../client/rest/types";
 import type { RestRequestOptions } from "../client/rest/requestOptions";
 import { fetchPaginated, type PaginationOptions } from "../client/rest/pagination";
 import type { PaginatedResponse, PlatformChatMessage, ThenvoiLinkRestApi } from "../client/rest/types";
@@ -93,7 +94,7 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
       new ThenvoiClient({
         apiKey: this.apiKey,
         baseUrl: this.restUrl,
-      }) as any, // eslint-disable-line @typescript-eslint/no-explicit-any -- bind() wrappers widen method signatures
+      }) as unknown as FernThenvoiClientLike,
     );
 
     this.rest = restApi;
@@ -150,8 +151,14 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
 
   public async subscribeAgentRooms(): Promise<void> {
     await this.transport.join(`agent_rooms:${this.agentId}`, {
-      room_added: (payload) => this.emit("room_added", payload, typeof payload.id === "string" ? payload.id : String(payload.id ?? "")),
-      room_removed: (payload) => this.emit("room_removed", payload, typeof payload.id === "string" ? payload.id : String(payload.id ?? "")),
+      room_added: (payload) => {
+        const roomId = typeof payload.id === "string" ? payload.id : "";
+        this.emit("room_added", payload, roomId);
+      },
+      room_removed: (payload) => {
+        const roomId = typeof payload.id === "string" ? payload.id : "";
+        this.emit("room_removed", payload, roomId);
+      },
     });
   }
 
@@ -161,13 +168,21 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
     }
 
     await this.transport.join(`chat_room:${roomId}`, {
-      message_created: (payload) => this.emit("message_created", payload, roomId),
+      message_created: (payload) => {
+        this.emit("message_created", payload, roomId);
+      },
     });
 
     await this.transport.join(`room_participants:${roomId}`, {
-      participant_added: (payload) => this.emit("participant_added", payload, roomId),
-      participant_removed: (payload) => this.emit("participant_removed", payload, roomId),
-      room_deleted: (payload) => this.emit("room_deleted", payload, roomId),
+      participant_added: (payload) => {
+        this.emit("participant_added", payload, roomId);
+      },
+      participant_removed: (payload) => {
+        this.emit("participant_removed", payload, roomId);
+      },
+      room_deleted: (payload) => {
+        this.emit("room_deleted", payload, roomId);
+      },
     });
 
     this.subscribedRooms.add(roomId);
@@ -186,10 +201,18 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
   public async subscribeAgentContacts(): Promise<void> {
     assertCapability(this.capabilities, "contacts", "Contacts streaming");
     await this.transport.join(`agent_contacts:${this.agentId}`, {
-      contact_request_received: (payload) => this.emit("contact_request_received", payload, null),
-      contact_request_updated: (payload) => this.emit("contact_request_updated", payload, null),
-      contact_added: (payload) => this.emit("contact_added", payload, null),
-      contact_removed: (payload) => this.emit("contact_removed", payload, null),
+      contact_request_received: (payload) => {
+        this.emit("contact_request_received", payload, null);
+      },
+      contact_request_updated: (payload) => {
+        this.emit("contact_request_updated", payload, null);
+      },
+      contact_added: (payload) => {
+        this.emit("contact_added", payload, null);
+      },
+      contact_removed: (payload) => {
+        this.emit("contact_removed", payload, null);
+      },
     });
   }
 
@@ -345,13 +368,13 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
       status: "processing",
     });
 
-    return (response.data ?? []).map((msg) => toPlatformMessage(roomId, msg));
+    return response.data.map((msg) => toPlatformMessage(roomId, msg));
   }
 
   public async listChats(
     request: { page: number; pageSize: number },
     requestOptions?: RestRequestOptions,
-  ): Promise<PaginatedResponse<MetadataMap>> {
+  ): Promise<PaginatedResponse> {
     if (!this.rest.listChats) {
       throw new UnsupportedFeatureError("Chat listing is not available in current REST adapter");
     }

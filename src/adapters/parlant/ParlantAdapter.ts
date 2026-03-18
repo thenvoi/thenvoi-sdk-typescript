@@ -251,7 +251,10 @@ export class ParlantAdapter
     const pendingBootstrap = this.roomBootstrapInitPromises.get(roomId);
 
     // Await in-flight initialization before deleting state to avoid orphaned writes.
-    await Promise.allSettled([pendingSession, pendingBootstrap].filter(Boolean));
+    const pendingOperations = [pendingSession, pendingBootstrap].filter(
+      (promise): promise is Promise<void> => promise !== undefined,
+    );
+    await Promise.allSettled(pendingOperations);
 
     this.roomSessions.delete(roomId);
     this.roomCustomers.delete(roomId);

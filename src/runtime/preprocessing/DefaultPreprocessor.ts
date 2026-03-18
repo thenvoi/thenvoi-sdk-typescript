@@ -12,18 +12,18 @@ function toPlatformMessage(roomId: string, payload: {
   metadata?: Record<string, unknown> | null;
   inserted_at: string;
 }): PlatformMessage {
-  return {
-    id: payload.id,
-    roomId,
-    content: payload.content,
-    senderId: payload.sender_id,
-    senderType: payload.sender_type,
-    senderName: payload.sender_name ?? null,
-    messageType: payload.message_type,
-    metadata: (payload.metadata ?? {}) as Record<string, unknown>,
-    createdAt: new Date(payload.inserted_at),
-  };
-}
+    return {
+      id: payload.id,
+      roomId,
+      content: payload.content,
+      senderId: payload.sender_id,
+      senderType: payload.sender_type,
+      senderName: payload.sender_name ?? null,
+      messageType: payload.message_type,
+      metadata: payload.metadata ?? {},
+      createdAt: new Date(payload.inserted_at),
+    };
+  }
 
 export class DefaultPreprocessor implements Preprocessor<PlatformEvent> {
   public async process(

@@ -191,7 +191,7 @@ function parseArguments(value: unknown): { input: Record<string, unknown>; parse
   }
 
   try {
-    const parsed = JSON.parse(value);
+    const parsed = JSON.parse(value) as unknown;
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       return { input: parsed as Record<string, unknown> };
     }

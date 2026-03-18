@@ -6,24 +6,26 @@ describe("Agent", () => {
   it("waits for startup to finish before honoring a stop request", async () => {
     let releaseStart!: () => void;
     const startGate = new Promise<void>((resolve) => {
-      releaseStart = () => resolve();
+      releaseStart = () => {
+        resolve();
+      };
     });
     const mockRuntime = {
       start: vi.fn(async () => {
         await startGate;
       }),
-      stop: vi.fn(async () => true),
-      runForever: vi.fn(async () => undefined),
+      stop: vi.fn(() => Promise.resolve(true)),
+      runForever: vi.fn(() => Promise.resolve()),
       name: "test",
       description: "test",
       contactConfiguration: undefined,
       isContactsSubscribed: false,
     };
     const mockAdapter = {
-      onEvent: vi.fn(async () => undefined),
-      onStarted: vi.fn(async () => undefined),
-      onCleanup: vi.fn(async () => undefined),
-      onRuntimeStop: vi.fn(async () => undefined),
+      onEvent: vi.fn(() => Promise.resolve()),
+      onStarted: vi.fn(() => Promise.resolve()),
+      onCleanup: vi.fn(() => Promise.resolve()),
+      onRuntimeStop: vi.fn(() => Promise.resolve()),
     };
     const agent = new Agent(mockRuntime as never, mockAdapter as never);
 
@@ -41,19 +43,19 @@ describe("Agent", () => {
 
   it("does not invoke adapter onRuntimeStop outside PlatformRuntime.stop", async () => {
     const mockRuntime = {
-      start: vi.fn(async () => undefined),
-      stop: vi.fn(async () => true),
-      runForever: vi.fn(async () => undefined),
+      start: vi.fn(() => Promise.resolve()),
+      stop: vi.fn(() => Promise.resolve(true)),
+      runForever: vi.fn(() => Promise.resolve()),
       name: "test",
       description: "test",
       contactConfiguration: undefined,
       isContactsSubscribed: false,
     };
     const mockAdapter = {
-      onEvent: vi.fn(async () => undefined),
-      onStarted: vi.fn(async () => undefined),
-      onCleanup: vi.fn(async () => undefined),
-      onRuntimeStop: vi.fn(async () => undefined),
+      onEvent: vi.fn(() => Promise.resolve()),
+      onStarted: vi.fn(() => Promise.resolve()),
+      onCleanup: vi.fn(() => Promise.resolve()),
+      onRuntimeStop: vi.fn(() => Promise.resolve()),
     };
     const agent = new Agent(mockRuntime as never, mockAdapter as never);
 

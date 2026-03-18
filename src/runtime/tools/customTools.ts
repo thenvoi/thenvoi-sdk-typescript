@@ -2,8 +2,8 @@ import { z, type ZodIssue } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
 export interface CustomToolDef {
-  schema: z.ZodObject<z.ZodRawShape>;
-  handler: (args: Record<string, unknown>) => unknown | Promise<unknown>;
+  schema: z.AnyZodObject;
+  handler: (args: Record<string, unknown>) => unknown;
   name: string;
   description?: string;
 }
@@ -75,7 +75,7 @@ export function customToolToAnthropicSchema(def: CustomToolDef): Record<string, 
   };
 }
 
-function toCleanJsonSchema(schema: z.ZodObject<z.ZodRawShape>): Record<string, unknown> {
+function toCleanJsonSchema(schema: z.AnyZodObject): Record<string, unknown> {
   const jsonSchema = zodToJsonSchema(schema, { target: "jsonSchema7" }) as Record<string, unknown>;
   delete jsonSchema["$schema"];
   delete jsonSchema["additionalProperties"];

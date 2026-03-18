@@ -244,7 +244,7 @@ export class PlatformRuntime {
     }
 
     if (runtimeError) {
-      throw runtimeError;
+      throw runtimeError instanceof Error ? runtimeError : new Error(String(runtimeError));
     }
 
     this.stopping = false;

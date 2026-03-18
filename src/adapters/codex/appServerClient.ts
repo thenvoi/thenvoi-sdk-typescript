@@ -352,8 +352,8 @@ export class CodexAppServerStdioClient implements CodexClientLike {
     this.process = null;
 
     const error = new Error(reason);
-    for (const { reject } of this.pending.values()) {
-      reject(error);
+    for (const pending of this.pending.values()) {
+      pending.reject(error);
     }
     this.pending.clear();
 

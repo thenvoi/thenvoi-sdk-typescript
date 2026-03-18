@@ -1,32 +1,67 @@
 import tseslint from "@typescript-eslint/eslint-plugin";
-import tsparser from "@typescript-eslint/parser";
+
+const STRICT_TS_FILES = ["src/**/*.ts"];
+const RELAXED_TS_FILES = ["tests/**/*.ts", "examples/**/*.ts", "src/testing/**/*.ts"];
+
+const strictTypeCheckedRules = {
+  ...tseslint.configs["recommended-type-checked"].rules,
+  "@typescript-eslint/no-unused-vars": [
+    "warn",
+    { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+  ],
+  "@typescript-eslint/no-explicit-any": "error",
+  "@typescript-eslint/no-empty-object-type": "off",
+  "@typescript-eslint/no-floating-promises": "error",
+  "@typescript-eslint/no-misused-promises": "error",
+  "@typescript-eslint/no-unsafe-assignment": "error",
+  "@typescript-eslint/no-unsafe-member-access": "error",
+  "@typescript-eslint/no-unsafe-call": "error",
+  "@typescript-eslint/no-unsafe-return": "error",
+  "@typescript-eslint/no-unnecessary-type-assertion": "error",
+  "@typescript-eslint/no-base-to-string": "off",
+  "@typescript-eslint/require-await": "off",
+  "no-console": ["warn", { allow: ["warn", "error"] }],
+};
+
+const relaxedRules = {
+  ...tseslint.configs["recommended"].rules,
+  "@typescript-eslint/no-unused-vars": [
+    "warn",
+    { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+  ],
+  "@typescript-eslint/no-explicit-any": "warn",
+  "@typescript-eslint/no-base-to-string": "off",
+  "@typescript-eslint/require-await": "off",
+  "@typescript-eslint/no-unsafe-assignment": "off",
+  "@typescript-eslint/no-unsafe-member-access": "off",
+  "@typescript-eslint/no-unsafe-call": "off",
+  "@typescript-eslint/no-unsafe-return": "off",
+  "@typescript-eslint/no-unsafe-argument": "off",
+  "no-console": ["warn", { allow: ["warn", "error"] }],
+};
 
 export default [
   {
-    files: ["src/**/*.ts", "tests/**/*.ts", "examples/**/*.ts"],
-    ignores: ["tests/integration/**"],
+    ignores: ["dist/**", "node_modules/**", "tests/integration/**", "*.config.*", "scripts/**"],
+  },
+  ...tseslint.configs["flat/recommended"],
+  {
+    files: STRICT_TS_FILES,
     languageOptions: {
-      parser: tsparser,
       parserOptions: {
-        ecmaVersion: 2022,
-        sourceType: "module",
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
       },
     },
-    plugins: {
-      "@typescript-eslint": tseslint,
-    },
-    rules: {
-      ...tseslint.configs.recommended.rules,
-      "@typescript-eslint/no-unused-vars": [
-        "warn",
-        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
-      ],
-      "@typescript-eslint/no-explicit-any": "warn",
-      "@typescript-eslint/no-empty-object-type": "off",
-      "no-console": ["warn", { allow: ["warn", "error"] }],
-    },
+    rules: strictTypeCheckedRules,
   },
   {
-    ignores: ["dist/**", "node_modules/**", "*.config.*", "scripts/**"],
+    files: RELAXED_TS_FILES,
+    languageOptions: {
+      parserOptions: {
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: relaxedRules,
   },
 ];

@@ -611,7 +611,6 @@ async function runLinearThenvoiBridgeServer(): Promise<void> {
   });
   const store = createSqliteSessionRoomStore(stateDbPath);
   const linearAccessToken = getRequiredEnv("LINEAR_ACCESS_TOKEN");
-  const linearClient = createLinearClient(linearAccessToken);
   const linearWebhookSecret = getRequiredEnv("LINEAR_WEBHOOK_SECRET");
   const hostAgentHandle = process.env.THENVOI_HOST_AGENT_HANDLE;
   const roomStrategy = parseRoomStrategy(process.env.LINEAR_THENVOI_ROOM_STRATEGY) ?? "issue";

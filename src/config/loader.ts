@@ -40,7 +40,10 @@ function toAgentConfigResult(section: Record<string, unknown>, sourceLabel: stri
   }
 
   const invalid = REQUIRED_FIELDS.filter(
-    (field) => typeof section[field] !== "string" || (section[field] as string).trim() === "",
+    (field) => {
+      const value = section[field];
+      return typeof value !== "string" || value.trim() === "";
+    },
   );
   if (invalid.length > 0) {
     throw new ValidationError(

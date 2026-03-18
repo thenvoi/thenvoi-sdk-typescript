@@ -350,7 +350,11 @@ async function readRawBody(request: NodeRequestWithBody): Promise<Buffer> {
 
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
-    chunks.push(Buffer.from(chunk));
+    if (typeof chunk === "string") {
+      chunks.push(Buffer.from(chunk));
+    } else {
+      chunks.push(Buffer.from(chunk as Uint8Array));
+    }
   }
   return Buffer.concat(chunks);
 }

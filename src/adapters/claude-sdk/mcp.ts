@@ -121,7 +121,7 @@ function toZodValidator(schema: Record<string, unknown>): ZodTypeAny {
   const type = schema.type;
   if (type === "string") {
     if (Array.isArray(schema.enum) && schema.enum.every((value) => typeof value === "string")) {
-      const values = schema.enum as string[];
+      const values = schema.enum;
       if (values.length > 0) {
         return z.enum(values as [string, ...string[]]);
       }

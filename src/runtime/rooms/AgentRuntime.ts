@@ -165,7 +165,7 @@ export class AgentRuntime {
 
     await this.link.disconnect();
     if (this.fatalError) {
-      throw this.fatalError;
+      throw this.fatalError instanceof Error ? this.fatalError : new Error(String(this.fatalError));
     }
     return graceful;
   }
@@ -182,7 +182,7 @@ export class AgentRuntime {
     }
 
     if (this.fatalError) {
-      throw this.fatalError;
+      throw this.fatalError instanceof Error ? this.fatalError : new Error(String(this.fatalError));
     }
   }
 

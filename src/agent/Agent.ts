@@ -75,7 +75,7 @@ export class Agent {
 
     this.startPromise = this.platformRuntime.start(this.adapter).then(() => {
       this.started = true;
-    }).catch((error) => {
+    }).catch((error: unknown) => {
       this.startPromise = null;
       throw error;
     });

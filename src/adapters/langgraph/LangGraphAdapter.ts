@@ -381,9 +381,8 @@ function extractAssistantText(result: unknown): string | null {
 
 function asMessageText(value: unknown): string | null {
   if (Array.isArray(value) && value.length >= 2 && value[0] === "assistant") {
-    const content = value[1];
-    if (typeof content === "string" && content.trim().length > 0) {
-      return content.trim();
+    if (typeof value[1] === "string" && value[1].trim().length > 0) {
+      return value[1].trim();
     }
     return null;
   }
@@ -421,10 +420,12 @@ function asMessageContent(value: unknown): string | null {
 
 async function loadLangGraphSdk(): Promise<LangGraphSdk> {
   try {
-    const [{ createReactAgent }, { tool }] = await Promise.all([
-      import("@langchain/langgraph/prebuilt"),
-      import("@langchain/core/tools"),
+    const [prebuiltModule, coreToolsModule] = await Promise.all([
+      import("@langchain/langgraph/prebuilt").then((module) => module as { createReactAgent: LangGraphSdk["createReactAgent"] }),
+      import("@langchain/core/tools").then((module) => module as { tool: LangGraphSdk["tool"] }),
     ]);
+    const { createReactAgent } = prebuiltModule;
+    const { tool } = coreToolsModule;
 
     if (typeof createReactAgent !== "function" || typeof tool !== "function") {
       throw new UnsupportedFeatureError("LangGraph SDK exports are unavailable.");
