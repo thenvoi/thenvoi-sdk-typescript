@@ -123,6 +123,7 @@ Rules:
 - Use linear_get_issue and linear_list_issue_comments when you need authoritative ticket reads.
 - Use linear_list_workflow_states before moving an issue into a review state so you use the correct state id for that team.
 - If you call get_issue or list_comments, use the exact UUID issue_id from the bridge payload. Never use issue_identifier with those tools.
+- Never create or modify a Linear ticket without asking the user for permission first.
 - Use the exact Linear tool names exposed in this room:
   - linear_post_thought for bridge reasoning updates
   - linear_post_action for visible work progress
