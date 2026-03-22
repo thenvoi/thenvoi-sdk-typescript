@@ -24,11 +24,10 @@ jobs:
 
       - name: Generate GitHub App Token
         id: app_token_generator
-        uses: ./.github/actions/GithubToken
+        uses: actions/create-github-app-token@v2
         with:
-          app_id: ${{ secrets.APP_ID }}
-          installation_id: ${{ secrets.INSTALLATION_ID }}
-          private_key: ${{ secrets.APP_PRIVATE_KEY }}
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
       - name: Release Please
         uses: googleapis/release-please-action@v4
@@ -55,13 +54,25 @@ jobs:
         if: steps.release.outputs.release_created == 'true'
         run: pnpm install --frozen-lockfile
 
+      - name: Typecheck
+        if: steps.release.outputs.release_created == 'true'
+        run: pnpm typecheck
+
+      - name: Lint
+        if: steps.release.outputs.release_created == 'true'
+        run: pnpm lint
+
+      - name: Run tests
+        if: steps.release.outputs.release_created == 'true'
+        run: pnpm test
+
       - name: Build package
         if: steps.release.outputs.release_created == 'true'
         run: pnpm build
 
       - name: Publish to npm
         if: steps.release.outputs.release_created == 'true'
-        run: pnpm publish --no-git-checks --access public
+        run: pnpm publish --no-git-checks --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

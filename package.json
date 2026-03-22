@@ -63,6 +63,7 @@
     "clean": "rm -rf dist",
     "dev:linear": "tsx examples/linear-thenvoi/linear-thenvoi-bridge-server.ts"
   },
+  "packageManager": "pnpm@10.22.0",
   "engines": {
     "node": ">=22"
   },

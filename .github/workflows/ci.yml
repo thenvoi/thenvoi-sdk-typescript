@@ -37,11 +37,6 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: ['22']
-      fail-fast: false
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -49,10 +44,10 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v4
 
-      - name: Setup Node ${{ matrix.node-version }}
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 22
           cache: pnpm
 
       - name: Install dependencies
@@ -86,26 +81,27 @@ jobs:
       - name: Verify ESM imports
         run: |
           node -e "
-          async function main() {
-            const sdk = await import('./dist/index.js');
-            const { Agent, ThenvoiLink, AgentRuntime, PlatformRuntime, loadAgentConfig } = sdk;
-            console.log('ESM core imports successful');
-
-            const adapters = await import('./dist/adapters.js');
-            const { GenericAdapter, OpenAIAdapter, AnthropicAdapter, GeminiAdapter, LangGraphAdapter, A2AAdapter, A2AGatewayAdapter, ParlantAdapter, ClaudeSDKAdapter, CodexAdapter } = adapters;
-            console.log('ESM adapter imports successful');
+          import { readFileSync } from 'fs';
+          const pkg = JSON.parse(readFileSync('./package.json', 'utf8'));
+          for (const [entry, paths] of Object.entries(pkg.exports)) {
+            const esmPath = paths.import;
+            const mod = await import(esmPath);
+            const keys = Object.keys(mod);
+            if (keys.length === 0) throw new Error('No exports found in ' + esmPath);
+            console.log('ESM ' + entry + ': ' + keys.length + ' exports (' + keys.join(', ') + ')');
           }
-          main();
           "
 
       - name: Verify CJS imports
         run: |
           node --input-type=commonjs -e "
-          const sdk = require('./dist/index.cjs');
-          const { Agent, ThenvoiLink, AgentRuntime, PlatformRuntime, loadAgentConfig } = sdk;
-          console.log('CJS core imports successful');
-
-          const adapters = require('./dist/adapters.cjs');
-          const { GenericAdapter, OpenAIAdapter, AnthropicAdapter, GeminiAdapter, LangGraphAdapter, A2AAdapter, A2AGatewayAdapter, ParlantAdapter, ClaudeSDKAdapter, CodexAdapter } = adapters;
-          console.log('CJS adapter imports successful');
+          const { readFileSync } = require('fs');
+          const pkg = JSON.parse(readFileSync('./package.json', 'utf8'));
+          for (const [entry, paths] of Object.entries(pkg.exports)) {
+            const cjsPath = paths.require;
+            const mod = require(cjsPath);
+            const keys = Object.keys(mod);
+            if (keys.length === 0) throw new Error('No exports found in ' + cjsPath);
+            console.log('CJS ' + entry + ': ' + keys.length + ' exports (' + keys.join(', ') + ')');
+          }
           "
