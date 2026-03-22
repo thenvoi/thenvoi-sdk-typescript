@@ -1,26 +1,49 @@
 name: CI
 
 on:
-  push:
-    branches: [dev]
   pull_request:
-    branches: [dev]
+    branches: [dev, main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  ci:
-    name: CI (Node ${{ matrix.node-version }})
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+
+  test:
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: true
       matrix:
-        node-version: [22]
+        node-version: ['22']
+      fail-fast: false
 
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Install pnpm
@@ -35,14 +58,54 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Lint
-        run: pnpm lint
-
-      - name: Test
+      - name: Run tests
         run: pnpm test
 
-      - name: Build
+
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build package
         run: pnpm build
+
+      - name: Verify ESM imports
+        run: |
+          node -e "
+          async function main() {
+            const sdk = await import('./dist/index.js');
+            const { Agent, ThenvoiLink, AgentRuntime, PlatformRuntime, loadAgentConfig } = sdk;
+            console.log('ESM core imports successful');
+
+            const adapters = await import('./dist/adapters.js');
+            const { GenericAdapter, OpenAIAdapter, AnthropicAdapter, GeminiAdapter, LangGraphAdapter, A2AAdapter, A2AGatewayAdapter, ParlantAdapter, ClaudeSDKAdapter, CodexAdapter } = adapters;
+            console.log('ESM adapter imports successful');
+          }
+          main();
+          "
+
+      - name: Verify CJS imports
+        run: |
+          node --input-type=commonjs -e "
+          const sdk = require('./dist/index.cjs');
+          const { Agent, ThenvoiLink, AgentRuntime, PlatformRuntime, loadAgentConfig } = sdk;
+          console.log('CJS core imports successful');
+
+          const adapters = require('./dist/adapters.cjs');
+          const { GenericAdapter, OpenAIAdapter, AnthropicAdapter, GeminiAdapter, LangGraphAdapter, A2AAdapter, A2AGatewayAdapter, ParlantAdapter, ClaudeSDKAdapter, CodexAdapter } = adapters;
+          console.log('CJS adapter imports successful');
+          "
