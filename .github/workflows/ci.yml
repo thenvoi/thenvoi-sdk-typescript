@@ -12,26 +12,7 @@ concurrency:
 
 jobs:
 
-  setup:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
   lint:
-    needs: setup
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -56,7 +37,6 @@ jobs:
         run: pnpm lint
 
   test:
-    needs: setup
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -78,7 +58,6 @@ jobs:
         run: pnpm test
 
   packaging:
-    needs: setup
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -103,10 +82,13 @@ jobs:
         run: |
           node --input-type=module -e "
           import { readFileSync } from 'fs';
+          import { resolve } from 'path';
+          import { pathToFileURL } from 'url';
           const pkg = JSON.parse(readFileSync('./package.json', 'utf8'));
           for (const [entry, paths] of Object.entries(pkg.exports)) {
             const esmPath = paths.import;
-            const mod = await import(esmPath);
+            const abs = pathToFileURL(resolve(esmPath));
+            const mod = await import(abs);
             const keys = Object.keys(mod);
             if (keys.length === 0) throw new Error('No exports found in ' + esmPath);
             console.log('ESM ' + entry + ': ' + keys.length + ' exports (' + keys.join(', ') + ')');
@@ -115,12 +97,13 @@ jobs:
 
       - name: Verify CJS imports
         run: |
-          node --input-type=commonjs -e "
+          node -e "
           const { readFileSync } = require('fs');
+          const { resolve } = require('path');
           const pkg = JSON.parse(readFileSync('./package.json', 'utf8'));
           for (const [entry, paths] of Object.entries(pkg.exports)) {
             const cjsPath = paths.require;
-            const mod = require(cjsPath);
+            const mod = require(resolve(cjsPath));
             const keys = Object.keys(mod);
             if (keys.length === 0) throw new Error('No exports found in ' + cjsPath);
             console.log('CJS ' + entry + ': ' + keys.length + ' exports (' + keys.join(', ') + ')');

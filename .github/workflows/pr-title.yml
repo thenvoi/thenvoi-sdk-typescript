@@ -12,7 +12,7 @@ jobs:
   validate:
     name: Validate PR Title
     runs-on: ubuntu-latest
-    if: "!contains(github.actor, '[bot]')"
+    if: github.actor_type != 'Bot'
     steps:
       - name: Validate Conventional Commits format
         uses: amannn/action-semantic-pull-request@v6
