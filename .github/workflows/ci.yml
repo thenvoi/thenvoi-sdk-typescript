@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  push:
+    branches: [dev, main]
   pull_request:
     branches: [dev, main]
 
@@ -10,7 +12,26 @@ concurrency:
 
 jobs:
 
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
   lint:
+    needs: setup
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -34,8 +55,8 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-
   test:
+    needs: setup
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -56,8 +77,8 @@ jobs:
       - name: Run tests
         run: pnpm test
 
-
   packaging:
+    needs: setup
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -80,7 +101,7 @@ jobs:
 
       - name: Verify ESM imports
         run: |
-          node -e "
+          node --input-type=module -e "
           import { readFileSync } from 'fs';
           const pkg = JSON.parse(readFileSync('./package.json', 'utf8'));
           for (const [entry, paths] of Object.entries(pkg.exports)) {
