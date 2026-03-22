@@ -17,6 +17,7 @@ interface AgentRuntimeOptions {
   onRoomJoined?: (roomId: string, payload: MetadataMap) => Promise<void> | void;
   onRoomLeft?: (roomId: string) => Promise<void> | void;
   onContactEvent?: (event: ContactEvent) => Promise<void>;
+  onParticipantAdded?: (roomId: string, participant: { id: string; name: string; type: string; handle?: string | null }) => Promise<void> | void;
   onError?: (error: unknown, event: PlatformEvent) => void;
   sessionConfig?: SessionConfig;
   agentConfig?: AgentConfig;
@@ -31,6 +32,7 @@ export class AgentRuntime {
   private readonly onRoomJoined?: (roomId: string, payload: MetadataMap) => Promise<void> | void;
   private readonly onRoomLeft?: (roomId: string) => Promise<void> | void;
   private readonly onContactEvent?: (event: ContactEvent) => Promise<void>;
+  private readonly onParticipantAdded?: (roomId: string, participant: { id: string; name: string; type: string; handle?: string | null }) => Promise<void> | void;
   private readonly onError?: (error: unknown, event: PlatformEvent) => void;
   private readonly sessionConfig: Required<SessionConfig>;
   private readonly autoSubscribeExistingRooms: boolean;
@@ -55,6 +57,7 @@ export class AgentRuntime {
     this.onError = options.onError;
     this.logger = options.logger ?? new NoopLogger();
     this.onContactEvent = options.onContactEvent;
+    this.onParticipantAdded = options.onParticipantAdded;
     this.sessionConfig = {
       enableContextCache: options.sessionConfig?.enableContextCache ?? true,
       contextCacheTtlSeconds: options.sessionConfig?.contextCacheTtlSeconds ?? 300,
@@ -229,12 +232,14 @@ export class AgentRuntime {
       case "participant_added":
         if (event.roomId) {
           const context = this.getOrCreateContext(event.roomId);
-          context.addParticipant({
+          const participant = {
             id: event.payload.id,
             name: event.payload.name,
             type: event.payload.type,
             handle: event.payload.handle,
-          });
+          };
+          context.addParticipant(participant);
+          await this.onParticipantAdded?.(event.roomId, participant);
         }
         return;
       case "participant_removed":
