@@ -47,8 +47,22 @@ export interface LettaAgentCreateParams {
   context_window_limit?: number;
 }
 
+export interface LettaToolReturn {
+  status: "success" | "error";
+  tool_call_id: string;
+  tool_return: string;
+}
+
+export interface LettaToolReturnCreate {
+  type: "tool_return";
+  tool_returns: LettaToolReturn[];
+}
+
 export interface LettaMessageCreateParams {
-  messages?: Array<{ role: string; content: string; tool_call_id?: string }>;
+  messages?: Array<
+    | { role: string; content: string; tool_call_id?: string }
+    | LettaToolReturnCreate
+  >;
   input?: string;
   client_tools?: Array<{
     name: string;
@@ -717,7 +731,7 @@ export class LettaAdapter extends SimpleAdapter<
         client,
         agentId,
         {
-          messages: toolResults,
+          messages: [toolResults],
           client_tools: clientTools.length > 0 ? clientTools : undefined,
         },
         deadline,
@@ -741,16 +755,16 @@ export class LettaAdapter extends SimpleAdapter<
   private async executeToolCalls(
     approvals: ApprovalRequestMessage[],
     tools: AdapterToolsProtocol,
-  ): Promise<Array<{ role: string; tool_call_id: string; content: string }>> {
+  ): Promise<LettaToolReturnCreate> {
     const executions = approvals.map(async (approval) => {
       const { name, arguments: argsJson, tool_call_id } = approval.tool_call;
       try {
         const args = safeParseToolArgs(argsJson, this.logger);
         const result = await tools.executeToolCall(name, args);
         return {
-          role: "tool",
+          status: "success" as const,
           tool_call_id,
-          content: toWireString(result),
+          tool_return: toWireString(result),
         };
       } catch (error) {
         this.logger.warn("Letta client tool execution failed", {
@@ -759,15 +773,15 @@ export class LettaAdapter extends SimpleAdapter<
           error,
         });
         return {
-          role: "tool",
+          status: "error" as const,
           tool_call_id,
-          content: toWireString(asErrorMessage(error)),
+          tool_return: toWireString(asErrorMessage(error)),
         };
       }
     });
 
     const settled = await Promise.allSettled(executions);
-    return settled.map((result, index) => {
+    const toolReturns: LettaToolReturn[] = settled.map((result, index) => {
       if (result.status === "fulfilled") {
         return result.value;
       }
@@ -775,11 +789,13 @@ export class LettaAdapter extends SimpleAdapter<
       // but handle defensively to avoid dropping tool results.
       const toolCallId = approvals[index].tool_call.tool_call_id;
       return {
-        role: "tool",
+        status: "error" as const,
         tool_call_id: toolCallId,
-        content: toWireString(asErrorMessage(result.reason)),
+        tool_return: toWireString(asErrorMessage(result.reason)),
       };
     });
+
+    return { type: "tool_return", tool_returns: toolReturns };
   }
 
   // -----------------------------------------------------------------------
@@ -820,9 +836,9 @@ export class LettaAdapter extends SimpleAdapter<
           cleanup();
           resolve(value);
         },
-        (error) => {
+        (error: unknown) => {
           cleanup();
-          reject(error);
+          reject(error instanceof Error ? error : new Error(String(error)));
         },
       );
     });

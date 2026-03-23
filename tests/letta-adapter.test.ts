@@ -261,8 +261,10 @@ describe("LettaAdapter", () => {
     expect(client.messageCreateCalls).toHaveLength(2);
 
     const toolResultCall = client.messageCreateCalls[1];
-    expect(toolResultCall.params.messages?.[0]?.role).toBe("tool");
-    expect(toolResultCall.params.messages?.[0]?.tool_call_id).toBe("tc-1");
+    const toolReturn = toolResultCall.params.messages?.[0] as { type: string; tool_returns: Array<{ status: string; tool_call_id: string; tool_return: string }> };
+    expect(toolReturn?.type).toBe("tool_return");
+    expect(toolReturn?.tool_returns[0]?.status).toBe("success");
+    expect(toolReturn?.tool_returns[0]?.tool_call_id).toBe("tc-1");
 
     expect(tools.messages).toEqual(["Done!"]);
   });
@@ -294,7 +296,7 @@ describe("LettaAdapter", () => {
     );
 
     const toolCalls = client.messageCreateCalls.filter((c) =>
-      c.params.messages?.some((m) => m.role === "tool"),
+      c.params.messages?.some((m) => "type" in m && m.type === "tool_return"),
     );
     expect(toolCalls).toHaveLength(3);
   });
@@ -355,12 +357,15 @@ describe("LettaAdapter", () => {
       { isSessionBootstrap: false, roomId: "room-parallel" },
     );
 
-    // Both tool results should be sent back in a single API call
+    // Both tool results should be sent back in a single API call as one ToolReturnCreate
     const toolResultCall = client.messageCreateCalls[1];
     const toolMessages = toolResultCall.params.messages ?? [];
-    expect(toolMessages).toHaveLength(2);
-    expect(toolMessages[0].tool_call_id).toBe("tc-a");
-    expect(toolMessages[1].tool_call_id).toBe("tc-b");
+    expect(toolMessages).toHaveLength(1);
+    const toolReturn = toolMessages[0] as { type: string; tool_returns: Array<{ tool_call_id: string }> };
+    expect(toolReturn.type).toBe("tool_return");
+    expect(toolReturn.tool_returns).toHaveLength(2);
+    expect(toolReturn.tool_returns[0].tool_call_id).toBe("tc-a");
+    expect(toolReturn.tool_returns[1].tool_call_id).toBe("tc-b");
 
     // Parallel execution: both should start before either finishes
     expect(executionOrder[0]).toBe("start:tool_a");
@@ -859,9 +864,10 @@ describe("LettaAdapter", () => {
       { isSessionBootstrap: false, roomId: "room-bad-json" },
     );
 
-    const toolResult = client.messageCreateCalls[1]?.params.messages?.[0];
-    expect(toolResult?.role).toBe("tool");
-    expect(toolResult?.content).toContain("not valid JSON");
+    const toolReturn = client.messageCreateCalls[1]?.params.messages?.[0] as { type: string; tool_returns: Array<{ status: string; tool_return: string }> };
+    expect(toolReturn?.type).toBe("tool_return");
+    expect(toolReturn?.tool_returns[0]?.status).toBe("error");
+    expect(toolReturn?.tool_returns[0]?.tool_return).toContain("not valid JSON");
     expect(tools.messages).toEqual(["Recovered"]);
     expect(logger.warn).toHaveBeenCalledWith(
       expect.stringContaining("not valid JSON"),
@@ -1078,7 +1084,7 @@ describe("LettaAdapter", () => {
       // With 5s timeout and 2s per call: initial call (2s) + round 1 (tool exec + call = 2s) + round 2 (2s) = 6s > 5s
       // So the loop should stop after fewer than 100 rounds
       const toolCalls = client.messageCreateCalls.filter((c) =>
-        c.params.messages?.some((m) => m.role === "tool"),
+        c.params.messages?.some((m) => "type" in m && m.type === "tool_return"),
       );
       expect(toolCalls.length).toBeLessThan(100);
       expect(toolCalls.length).toBeGreaterThan(0);
