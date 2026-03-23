@@ -1,5 +1,19 @@
 export { GenericAdapter, type GenericAdapterHandler } from "./GenericAdapter";
 export {
+  ACPClientAdapter,
+  ACPServer,
+  ThenvoiACPServerAdapter,
+  type ACPClientAdapterOptions,
+  type ACPServerOptions,
+  type ThenvoiACPServerAdapterOptions,
+} from "./acp";
+export {
+  AISDKAdapter,
+  AISDKToolCallingModel,
+  type AISDKAdapterOptions,
+  type AISDKToolCallingModelOptions,
+} from "./ai-sdk";
+export {
   OpenAIAdapter,
   OpenAIToolCallingModel,
   type OpenAIAdapterOptions,
@@ -20,6 +34,10 @@ export {
   type GeminiToolCallingModelOptions,
   type GeminiClientFactory,
 } from "./gemini";
+export {
+  GoogleADKAdapter,
+  type GoogleADKAdapterOptions,
+} from "./google-adk";
 export {
   LangGraphAdapter,
   type LangGraphAdapterOptions,
@@ -62,6 +80,17 @@ export {
   type ParlantMessage,
   type ParlantMessages,
 } from "./parlant";
+export {
+  HttpOpencodeClient,
+  HttpStatusError,
+  OpencodeAdapter,
+  type HttpOpencodeClientOptions,
+  type OpencodeAdapterConfig,
+  type OpencodeApprovalMode,
+  type OpencodeApprovalReply,
+  type OpencodeClientLike,
+  type OpencodeQuestionMode,
+} from "./opencode";
 export {
   ClaudeSDKAdapter,
   type ClaudeSDKAdapterOptions,

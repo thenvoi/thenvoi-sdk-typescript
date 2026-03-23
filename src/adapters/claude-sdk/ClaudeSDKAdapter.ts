@@ -5,7 +5,7 @@ import { NoopLogger } from "../../core/logger";
 import type { HistoryProvider, PlatformMessage } from "../../runtime/types";
 import { renderSystemPrompt } from "../../runtime/prompts";
 import { buildConversationPrompt } from "../shared/conversationPrompt";
-import { findLatestTaskMetadata } from "../shared/history";
+import { extractClaudeSessionId } from "../../converters/claude-sdk";
 import {
   createThenvoiMcpBridge,
   type ThenvoiMcpBridge,
@@ -180,7 +180,7 @@ export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
       options.cwd = this.cwd;
     }
     const existingSession = this.sessionIds.get(context.roomId)
-      ?? (context.isSessionBootstrap ? extractSessionIdFromHistory(history.raw) : null);
+      ?? (context.isSessionBootstrap ? extractClaudeSessionId(history.raw) : null);
     if (existingSession) {
       options.resume = existingSession;
     }
@@ -264,7 +264,7 @@ export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
   ): Promise<void> {
     try {
       await tools.sendEvent("Claude SDK session", "task", {
-        claude_session_id: sessionId,
+        claude_sdk_session_id: sessionId,
       });
     } catch (error) {
       this.logger.warn("Claude SDK session marker event failed", {
@@ -298,15 +298,4 @@ function extractAssistantText(event: ClaudeSDKMessageLike): string {
     .map((block: { type?: string; text?: string }) => (block.type === "text" ? block.text ?? "" : ""))
     .filter((text: string) => text.length > 0)
     .join("\n");
-}
-
-function extractSessionIdFromHistory(
-  raw: Array<Record<string, unknown>>,
-): string | null {
-  const metadata = findLatestTaskMetadata(
-    raw,
-    (entry) => typeof entry.claude_session_id === "string" && entry.claude_session_id.length > 0,
-  );
-  const sessionId = metadata?.claude_session_id;
-  return typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
 }

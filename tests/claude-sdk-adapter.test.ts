@@ -174,7 +174,7 @@ describe("ClaudeSDKAdapter", () => {
         {
           message_type: "task",
           metadata: {
-            claude_session_id: "session-from-history",
+            claude_sdk_session_id: "session-from-history",
           },
         },
       ]),

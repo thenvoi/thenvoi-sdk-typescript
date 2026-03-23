@@ -6,11 +6,16 @@ import type { PlatformMessage } from "./types";
 import type { ExecutionContext } from "./ExecutionContext";
 import type { MessageRetryTracker } from "./retryTracker";
 
+export type ExecutionHandler = (
+  context: ExecutionContext,
+  event: PlatformEvent,
+) => Promise<void>;
+
 interface ExecutionOptions {
   roomId: string;
   link: ThenvoiLink;
   context: ExecutionContext;
-  onExecute: (context: ExecutionContext, event: PlatformEvent) => Promise<void>;
+  onExecute: ExecutionHandler;
   onFailure?: (error: unknown, event: PlatformEvent) => void | Promise<void>;
   logger?: Logger;
 }
@@ -40,7 +45,7 @@ export class Execution {
   private readonly link: ThenvoiLink;
   private readonly context: ExecutionContext;
   private readonly retryTracker: MessageRetryTracker;
-  private readonly onExecute: (context: ExecutionContext, event: PlatformEvent) => Promise<void>;
+  private readonly onExecute: ExecutionHandler;
   private readonly onFailure?: (error: unknown, event: PlatformEvent) => void | Promise<void>;
   private readonly logger: Logger;
   private readonly eventQueue: PlatformEvent[] = [];
