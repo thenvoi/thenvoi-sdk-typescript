@@ -334,7 +334,7 @@ describe("ContactEventHandler", () => {
       expect(onBroadcast.mock.calls[1][0]).toContain("was removed");
     });
 
-    it("does not broadcast contact_request events", async () => {
+    it("broadcasts contact_request events with [Contacts] prefix", async () => {
       const onBroadcast = vi.fn();
       const handler = new ContactEventHandler({
         config: { strategy: "callback", broadcastChanges: true, onEvent: vi.fn() },
@@ -343,7 +343,8 @@ describe("ContactEventHandler", () => {
       });
 
       await handler.handle(makeContactRequestReceived(), new FakeTools());
-      expect(onBroadcast).not.toHaveBeenCalled();
+      expect(onBroadcast).toHaveBeenCalledOnce();
+      expect(onBroadcast.mock.calls[0][0]).toContain("[Contacts]:");
     });
   });
 

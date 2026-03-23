@@ -160,30 +160,27 @@ export class PlatformRuntime {
     this.activeAdapter = adapter;
 
     try {
-      const strategy = this.contactConfig?.strategy ?? "disabled";
-      if (strategy !== "disabled") {
-        this.contactHandler = new ContactEventHandler({
-          config: this.contactConfig ?? { strategy: "disabled" },
-          rest: this.link.rest,
-          onBroadcast: (message) => {
-            const runtime = this.runtime;
-            if (!runtime) return;
-            for (const context of runtime.getContexts()) {
-              context.injectSystemMessage(message);
-            }
-          },
-          onHubEvent: async (roomId, event) => {
-            const runtime = this.runtime;
-            if (!runtime) return;
-            await runtime.enqueueEvent(roomId, event);
-          },
-          onHubInit: async (roomId, systemPrompt) => {
-            const runtime = this.runtime;
-            if (!runtime) return;
-            runtime.getOrCreateContext(roomId).injectSystemMessage(systemPrompt);
-          },
-        });
-      }
+      this.contactHandler = new ContactEventHandler({
+        config: this.contactConfig ?? { strategy: "disabled" },
+        rest: this.link.rest,
+        onBroadcast: (message) => {
+          const runtime = this.runtime;
+          if (!runtime) return;
+          for (const context of runtime.getContexts()) {
+            context.injectSystemMessage(message);
+          }
+        },
+        onHubEvent: async (roomId, event) => {
+          const runtime = this.runtime;
+          if (!runtime) return;
+          await runtime.enqueueEvent(roomId, event);
+        },
+        onHubInit: async (roomId, systemPrompt) => {
+          const runtime = this.runtime;
+          if (!runtime) return;
+          runtime.getOrCreateContext(roomId).injectSystemMessage(systemPrompt);
+        },
+      });
 
       this.runtime = new AgentRuntime({
         link: this.link,
@@ -322,42 +319,7 @@ export class PlatformRuntime {
   private async handleContactEvent(event: ContactEvent): Promise<void> {
     if (this.contactHandler) {
       await this.contactHandler.handle(event);
-      return;
     }
-
-    // Legacy fallback: broadcast only
-    if (!this.contactConfig?.broadcastChanges) {
-      return;
-    }
-
-    const runtime = this.runtime;
-    if (!runtime) {
-      return;
-    }
-
-    const message = this.formatContactBroadcast(event);
-    for (const context of runtime.getContexts()) {
-      context.injectSystemMessage(message);
-    }
-  }
-
-  private formatContactBroadcast(event: ContactEvent): string {
-    switch (event.type) {
-      case "contact_request_received":
-        return `[System]: New contact request from ${event.payload.from_name} (${event.payload.from_handle}).`;
-      case "contact_request_updated":
-        return `[System]: Contact request ${event.payload.id} updated to ${event.payload.status}.`;
-      case "contact_added": {
-        const handle = event.payload.handle?.startsWith("@")
-          ? event.payload.handle
-          : `@${event.payload.handle}`;
-        return `[Contacts]: ${handle} (${event.payload.name}) is now a contact`;
-      }
-      case "contact_removed":
-        return `[Contacts]: Contact ${event.payload.id} was removed`;
-    }
-
-    return assertNever(event);
   }
 }
 

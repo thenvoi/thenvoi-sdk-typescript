@@ -83,11 +83,6 @@ export class ContactEventHandler {
   public async handle(event: ContactEvent, tools?: AdapterToolsProtocol): Promise<void> {
     const strategy = this.config.strategy ?? "disabled";
 
-    if (strategy === "disabled") {
-      this.logger.debug("Contact event ignored (strategy=disabled)", { type: event.type });
-      return;
-    }
-
     const dedupKey = this.buildDedupKey(event);
     if (this.dedup.has(dedupKey)) {
       this.logger.debug("Duplicate contact event skipped", { key: dedupKey });
@@ -105,12 +100,13 @@ export class ContactEventHandler {
         });
       }
 
-      // Broadcast for contact_added and contact_removed
+      // Broadcast runs regardless of strategy
       if (this.config.broadcastChanges && this.onBroadcast) {
-        if (event.type === "contact_added" || event.type === "contact_removed") {
-          const broadcastMsg = this.formatBroadcast(event);
-          this.onBroadcast(broadcastMsg);
-        }
+        this.onBroadcast(this.formatBroadcast(event));
+      }
+
+      if (strategy === "disabled") {
+        return;
       }
 
       if (strategy === "callback") {
@@ -253,6 +249,10 @@ export class ContactEventHandler {
 
   private formatBroadcast(event: ContactEvent): string {
     switch (event.type) {
+      case "contact_request_received":
+        return `[Contacts]: New contact request from ${event.payload.from_name} (${event.payload.from_handle}).`;
+      case "contact_request_updated":
+        return `[Contacts]: Contact request ${event.payload.id} updated to ${event.payload.status}.`;
       case "contact_added": {
         const handle = event.payload.handle?.startsWith("@")
           ? event.payload.handle
@@ -263,7 +263,7 @@ export class ContactEventHandler {
         return `[Contacts]: Contact ${event.payload.id} was removed`;
     }
 
-    return `[Contacts]: Contact event: ${event.type}`;
+    return assertNever(event);
   }
 
   private cacheRequestInfo(id: string, info: RequestInfo): void {

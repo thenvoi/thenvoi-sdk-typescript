@@ -6,6 +6,7 @@ import { ThenvoiLink } from "../src/platform/ThenvoiLink";
 import type { StreamingTransport } from "../src/platform/streaming/transport";
 import type { ContactEvent } from "../src/platform/events";
 import { AgentRuntime } from "../src/runtime/rooms/AgentRuntime";
+import { ContactEventHandler } from "../src/runtime/ContactEventHandler";
 import { FakeRestApi } from "./testUtils";
 
 class MinimalTransport implements StreamingTransport {
@@ -140,7 +141,14 @@ describe("PlatformRuntime coverage", () => {
     expect(adapter.onRuntimeStop).toHaveBeenCalledOnce();
   });
 
-  it("formats legacy contact broadcasts for every event type", async () => {
+  it("formats contact broadcasts for every event type via ContactEventHandler", async () => {
+    const injected: string[] = [];
+    const fakeContext = {
+      injectSystemMessage: (message: string) => {
+        injected.push(message);
+      },
+    };
+
     const runtime = new PlatformRuntime({
       agentId: "a1",
       apiKey: "k",
@@ -156,20 +164,24 @@ describe("PlatformRuntime coverage", () => {
       },
     });
 
-    const injected: string[] = [];
-    const fakeContext = {
-      injectSystemMessage: (message: string) => {
-        injected.push(message);
-      },
-    };
-
-    (
-      runtime as unknown as {
-        runtime: { getContexts(): Array<{ injectSystemMessage(message: string): void }> };
-      }
-    ).runtime = {
+    // Stub internals so handleContactEvent can delegate through contactHandler
+    (runtime as unknown as {
+      runtime: { getContexts(): Array<{ injectSystemMessage(message: string): void }> };
+    }).runtime = {
       getContexts: () => [fakeContext],
     };
+
+    const handler = new ContactEventHandler({
+      config: { strategy: "disabled", broadcastChanges: true },
+      rest: new FakeRestApi() as never,
+      onBroadcast: (message) => {
+        for (const ctx of [fakeContext]) {
+          ctx.injectSystemMessage(message);
+        }
+      },
+    });
+
+    (runtime as unknown as { contactHandler: ContactEventHandler }).contactHandler = handler;
 
     const events: ContactEvent[] = [
       {
@@ -218,8 +230,8 @@ describe("PlatformRuntime coverage", () => {
     }
 
     expect(injected).toEqual([
-      "[System]: New contact request from Jane (@jane).",
-      "[System]: Contact request r1 updated to approved.",
+      "[Contacts]: New contact request from Jane (@jane).",
+      "[Contacts]: Contact request r1 updated to approved.",
       "[Contacts]: @jane (Jane) is now a contact",
       "[Contacts]: Contact c1 was removed",
     ]);
