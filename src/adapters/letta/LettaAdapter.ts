@@ -931,10 +931,11 @@ function safeParseToolArgs(
 }
 
 /**
- * Keep only paired user→assistant exchanges; unpaired messages,
- * consecutive same-role messages (e.g. system injections, edits),
- * and orphaned assistant messages without a preceding user turn are
- * dropped so that Letta receives a clean alternating conversation.
+ * Keep paired user→assistant exchanges and an optional trailing user
+ * message. Unpaired messages in the middle, consecutive same-role
+ * messages (e.g. system injections, edits), and orphaned assistant
+ * messages without a preceding user turn are dropped so that Letta
+ * receives a clean alternating conversation.
  */
 function selectCompleteExchanges(history: LettaMessages): LettaMessages {
   const complete: LettaMessages = [];
@@ -950,6 +951,12 @@ function selectCompleteExchanges(history: LettaMessages): LettaMessages {
         complete.push(next);
         index += 2;
         continue;
+      }
+
+      // Include a trailing user message (no assistant reply yet) so the
+      // agent has context about the most recent unanswered question.
+      if (index === history.length - 1) {
+        complete.push(current);
       }
 
       index += 1;

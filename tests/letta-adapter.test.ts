@@ -1595,6 +1595,43 @@ describe("LettaAdapter", () => {
     expect(tools.messages).toHaveLength(1);
     expect(tools.messages[0]).toBe("Clamped");
   });
+
+  it("includes a trailing user message in history injection", async () => {
+    const client = new FakeLettaClient();
+    client.responseBatches.push(
+      assistantResponse("History ack"),
+      assistantResponse("Response"),
+    );
+
+    const adapter = new LettaAdapter({
+      clientFactory: async () => client,
+    });
+
+    await adapter.onStarted("Agent", "An agent");
+
+    // History ends with an unanswered user message
+    const history = [
+      { role: "user" as const, content: "[A]: First", sender: "A", senderType: "User" },
+      { role: "assistant" as const, content: "Reply 1", sender: "Bot", senderType: "Agent" },
+      { role: "user" as const, content: "[A]: Unanswered", sender: "A", senderType: "User" },
+    ];
+
+    const tools = new FakeTools();
+    await adapter.onMessage(
+      makeMessage("Now", "room-trailing"),
+      tools,
+      history,
+      null,
+      null,
+      { isSessionBootstrap: true, roomId: "room-trailing" },
+    );
+
+    const historyCall = client.messageCreateCalls[0];
+    const injectedContent = historyCall.params.messages?.[0]?.content ?? "";
+    expect(injectedContent).toContain("First");
+    expect(injectedContent).toContain("Reply 1");
+    expect(injectedContent).toContain("Unanswered");
+  });
 });
 
 // ---------------------------------------------------------------------------
