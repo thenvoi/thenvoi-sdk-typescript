@@ -972,11 +972,20 @@ function sanitizeHistoryContent(content: string): string {
 
 const SYSTEM_DELIMITER = "[System Update]:";
 
+/**
+ * Strip platform UUID mention syntax (e.g. `@[[some-uuid]]`) so that
+ * Letta / the underlying LLM sees clean text instead of raw IDs.
+ */
+function stripUuidMentions(content: string): string {
+  return content.replace(/@\[\[[^\]]+\]\]/g, "").trim();
+}
+
 function buildUserMessage(input: {
   content: string;
   participantsMessage: string | null;
   contactsMessage: string | null;
 }): string {
+  const content = stripUuidMentions(input.content);
   const updates: string[] = [];
   if (input.participantsMessage) {
     updates.push(`${SYSTEM_DELIMITER} ${input.participantsMessage}`);
@@ -986,10 +995,10 @@ function buildUserMessage(input: {
   }
 
   if (updates.length === 0) {
-    return input.content;
+    return content;
   }
 
-  return `${updates.join("\n\n")}\n\n${input.content}`;
+  return `${updates.join("\n\n")}\n\n${content}`;
 }
 
 async function loadLettaClientFactory(config: {

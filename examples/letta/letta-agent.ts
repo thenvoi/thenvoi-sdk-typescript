@@ -1,4 +1,5 @@
 import { Agent, LettaAdapter, loadAgentConfig, isDirectExecution } from "../../src/index";
+import { ConsoleLogger } from "../../src/core/logger";
 
 export function createLettaAgent(
   options: {
@@ -12,6 +13,7 @@ export function createLettaAgent(
     model: options.model ?? "openai/gpt-4o",
     lettaApiKey: options.lettaApiKey,
     lettaBaseUrl: options.lettaBaseUrl,
+    logger: new ConsoleLogger(),
   });
 
   return Agent.create({
@@ -34,6 +36,9 @@ if (isDirectExecution(import.meta.url)) {
   }
 
   const config = loadAgentConfig("letta_agent");
+  console.log("[letta-agent] Starting with config:", JSON.stringify(config));
+  console.log("[letta-agent] Model:", process.env.LETTA_MODEL ?? "openai/gpt-4o");
+  console.log("[letta-agent] Base URL:", lettaBaseUrl ?? "cloud");
   void createLettaAgent(
     {
       model: process.env.LETTA_MODEL,
@@ -41,5 +46,5 @@ if (isDirectExecution(import.meta.url)) {
       lettaBaseUrl,
     },
     config,
-  ).run();
+  ).run().then(() => console.log("[letta-agent] run() resolved")).catch((e) => console.error("[letta-agent] run() error:", e));
 }
