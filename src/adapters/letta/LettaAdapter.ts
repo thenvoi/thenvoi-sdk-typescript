@@ -442,7 +442,7 @@ export class LettaAdapter extends SimpleAdapter<
           const client = this.clientLoader.current;
           if (client?.agents.delete) {
             await this.raceTimeout(
-              client.agents.delete(agentId),
+              () => client.agents.delete!(agentId),
               this.responseTimeoutSeconds * 1_000,
               "Letta agent deletion timed out",
             );
@@ -505,22 +505,23 @@ export class LettaAdapter extends SimpleAdapter<
 
     const initPromise = (async (): Promise<string> => {
       const agent = await this.raceTimeout(
-        client.agents.create(
-          {
-            name: `thenvoi-room-${roomId.slice(0, 16)}`,
-            model: this.model,
-            ...(this.embedding ? { embedding: this.embedding } : {}),
-            system: this.systemPrompt || undefined, // intentional: empty string treated as no system prompt
-            memory_blocks:
-              this.memoryBlocks.length > 0 ? this.memoryBlocks : undefined,
-            tools: this.serverTools.length > 0 ? this.serverTools : undefined,
-            include_base_tools: this.includeBaseTools,
-            ...(this.contextWindowLimit
-              ? { context_window_limit: this.contextWindowLimit }
-              : {}),
-          },
-          signal ? { signal } : undefined,
-        ),
+        (s) =>
+          client.agents.create(
+            {
+              name: `thenvoi-room-${roomId.slice(0, 16)}`,
+              model: this.model,
+              ...(this.embedding ? { embedding: this.embedding } : {}),
+              system: this.systemPrompt || undefined, // intentional: empty string treated as no system prompt
+              memory_blocks:
+                this.memoryBlocks.length > 0 ? this.memoryBlocks : undefined,
+              tools: this.serverTools.length > 0 ? this.serverTools : undefined,
+              include_base_tools: this.includeBaseTools,
+              ...(this.contextWindowLimit
+                ? { context_window_limit: this.contextWindowLimit }
+                : {}),
+            },
+            { signal: s },
+          ),
         this.responseTimeoutSeconds * 1_000,
         "Letta agent creation timed out",
         signal,
@@ -663,14 +664,15 @@ export class LettaAdapter extends SimpleAdapter<
     // acknowledges it without running tools. The response is intentionally
     // discarded — it exists only to seed the agent's context window.
     await this.raceTimeout(
-      client.agents.messages.create(
-        agentId,
-        {
-          messages: [{ role: "user", content: lines.join("\n\n") }],
-          max_steps: 1,
-        },
-        signal ? { signal } : undefined,
-      ),
+      (s) =>
+        client.agents.messages.create(
+          agentId,
+          {
+            messages: [{ role: "user", content: lines.join("\n\n") }],
+            max_steps: 1,
+          },
+          { signal: s },
+        ),
       this.responseTimeoutSeconds * 1_000,
       "Letta history injection timed out",
       signal,
@@ -803,40 +805,54 @@ export class LettaAdapter extends SimpleAdapter<
   // -----------------------------------------------------------------------
 
   private raceTimeout<T>(
-    promise: Promise<T>,
+    fn: (signal: AbortSignal) => Promise<T>,
     timeoutMs: number,
     message: string,
-    signal?: AbortSignal,
+    parentSignal?: AbortSignal,
   ): Promise<T> {
+    if (parentSignal?.aborted) {
+      return Promise.reject(new Error("Operation aborted"));
+    }
+
+    // Derived controller: aborted by either the parent signal or the timeout.
+    // Because the derived signal is passed into the API call, the underlying
+    // HTTP request is actually cancelled on timeout — no dangling promise.
+    const controller = new AbortController();
+    const { signal } = controller;
+
+    const onParentAbort = () => controller.abort();
+    parentSignal?.addEventListener("abort", onParentAbort, { once: true });
+
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    // Allow the Node.js process to exit even if the timer is still pending.
+    if (typeof timer === "object" && "unref" in timer) {
+      timer.unref();
+    }
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      parentSignal?.removeEventListener("abort", onParentAbort);
+    };
+
     return new Promise<T>((resolve, reject) => {
-      if (signal?.aborted) {
-        reject(new Error("Operation aborted"));
-        return;
-      }
-
-      const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
-      // Allow the Node.js process to exit even if the timer is still pending.
-      if (typeof timer === "object" && "unref" in timer) {
-        timer.unref();
-      }
-
-      const cleanup = () => {
-        clearTimeout(timer);
-        signal?.removeEventListener("abort", onAbort);
-      };
-
       const onAbort = () => {
         cleanup();
-        reject(new Error("Operation aborted"));
+        reject(
+          parentSignal?.aborted
+            ? new Error("Operation aborted")
+            : new Error(message),
+        );
       };
-      signal?.addEventListener("abort", onAbort, { once: true });
+      signal.addEventListener("abort", onAbort, { once: true });
 
-      promise.then(
+      fn(signal).then(
         (value) => {
+          signal.removeEventListener("abort", onAbort);
           cleanup();
           resolve(value);
         },
         (error: unknown) => {
+          signal.removeEventListener("abort", onAbort);
           cleanup();
           reject(error instanceof Error ? error : new Error(String(error)));
         },
@@ -857,7 +873,7 @@ export class LettaAdapter extends SimpleAdapter<
     }
 
     return this.raceTimeout(
-      client.agents.messages.create(agentId, params, signal ? { signal } : undefined),
+      (s) => client.agents.messages.create(agentId, params, { signal: s }),
       remaining,
       "Letta API call timed out",
       signal,

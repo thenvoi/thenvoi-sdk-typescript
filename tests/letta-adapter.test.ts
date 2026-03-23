@@ -1065,24 +1065,30 @@ describe("LettaAdapter", () => {
       const tools = new FakeTools();
 
       // Advance time past the deadline inside the tool loop by
-      // making each messages.create call advance the clock by 2s
+      // making each messages.create call advance the clock by 2s.
+      // With the derived AbortController, the per-call timeout properly
+      // cancels the request when the remaining deadline is exceeded.
       const originalCreate = client.agents.messages.create;
       client.agents.messages.create = async (agentId, params) => {
         vi.advanceTimersByTime(2_000);
         return originalCreate.call(client.agents.messages, agentId, params);
       };
 
-      await adapter.onMessage(
-        makeMessage("Tick", "room-timeout"),
-        tools,
-        [],
-        null,
-        null,
-        { isSessionBootstrap: false, roomId: "room-timeout" },
-      );
+      // With 5s timeout and 2s per call: initial call (2s, remaining 5s OK) +
+      // round 1 tool result call (2s, remaining 3s OK) + round 2 tool result
+      // call (2s > remaining 1s) → per-call timeout fires and aborts the request.
+      await expect(
+        adapter.onMessage(
+          makeMessage("Tick", "room-timeout"),
+          tools,
+          [],
+          null,
+          null,
+          { isSessionBootstrap: false, roomId: "room-timeout" },
+        ),
+      ).rejects.toThrow("Letta API call timed out");
 
-      // With 5s timeout and 2s per call: initial call (2s) + round 1 (tool exec + call = 2s) + round 2 (2s) = 6s > 5s
-      // So the loop should stop after fewer than 100 rounds
+      // Some tool rounds should have completed before the timeout
       const toolCalls = client.messageCreateCalls.filter((c) =>
         c.params.messages?.some((m) => "type" in m && m.type === "tool_return"),
       );
