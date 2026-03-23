@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import * as adapters from "../src/adapters";
 import * as sdk from "../src/index";
 import * as linear from "../src/linear";
+import * as mcp from "../src/mcp";
 import * as rest from "../src/rest";
 import * as testing from "../src/testing";
 
@@ -105,5 +106,13 @@ describe("sdk public surface", () => {
     expect(adapters).toHaveProperty("CodexJsonRpcError");
     expect(adapters).toHaveProperty("CODEX_REASONING_EFFORTS");
     expect(adapters).toHaveProperty("CODEX_WEB_SEARCH_MODES");
+  });
+
+  it("exposes MCP registration and server via mcp subpath", () => {
+    expect(mcp).toHaveProperty("buildRoomScopedRegistrations");
+    expect(mcp).toHaveProperty("buildSingleContextRegistrations");
+    expect(mcp).toHaveProperty("ThenvoiMcpServer");
+    expect(mcp).toHaveProperty("successResult");
+    expect(mcp).toHaveProperty("errorResult");
   });
 });

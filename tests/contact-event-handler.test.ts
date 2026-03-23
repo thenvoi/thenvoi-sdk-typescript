@@ -7,7 +7,6 @@ import {
 } from "../src/runtime/ContactEventHandler";
 import type { ContactEvent, MessageEvent } from "../src/platform/events";
 import type { ContactEventConfig } from "../src/runtime/types";
-import { FakeTools } from "./testUtils";
 
 function makeRest() {
   return {
@@ -86,26 +85,30 @@ describe("ContactEventHandler", () => {
   });
 
   describe("callback strategy", () => {
-    it("calls onEvent callback with event and tools", async () => {
+    it("calls onEvent callback with event and contact tools", async () => {
       const onEvent = vi.fn().mockResolvedValue(undefined);
-      const tools = new FakeTools();
       const config: ContactEventConfig = { strategy: "callback", onEvent };
       const handler = new ContactEventHandler({ config, rest: makeRest() });
 
       const event = makeContactAdded();
-      await handler.handle(event, tools);
+      await handler.handle(event);
 
-      expect(onEvent).toHaveBeenCalledWith(event, tools);
+      expect(onEvent).toHaveBeenCalledWith(event, expect.objectContaining({
+        listContacts: expect.any(Function),
+        addContact: expect.any(Function),
+        removeContact: expect.any(Function),
+        listContactRequests: expect.any(Function),
+        respondContactRequest: expect.any(Function),
+      }));
     });
 
     it("rethrows callback errors with retry signal and deterministic logging", async () => {
       const onEvent = vi.fn().mockRejectedValue(new Error("callback failed"));
-      const tools = new FakeTools();
       const logger = makeLogger();
       const config: ContactEventConfig = { strategy: "callback", onEvent };
       const handler = new ContactEventHandler({ config, rest: makeRest(), logger });
 
-      await expect(handler.handle(makeContactAdded(), tools)).rejects.toMatchObject({
+      await expect(handler.handle(makeContactAdded())).rejects.toMatchObject({
         name: "ContactEventHandlerError",
         stage: "callback",
         retryable: false,
@@ -406,8 +409,8 @@ describe("ContactEventHandler", () => {
         onBroadcast,
       });
 
-      await handler.handle(makeContactAdded(), new FakeTools());
-      await handler.handle(makeContactRemoved(), new FakeTools());
+      await handler.handle(makeContactAdded());
+      await handler.handle(makeContactRemoved());
 
       expect(onBroadcast).toHaveBeenCalledTimes(2);
       expect(onBroadcast.mock.calls[0][0]).toContain("is now a contact");
@@ -422,7 +425,7 @@ describe("ContactEventHandler", () => {
         onBroadcast,
       });
 
-      await handler.handle(makeContactRequestReceived(), new FakeTools());
+      await handler.handle(makeContactRequestReceived());
       expect(onBroadcast).not.toHaveBeenCalled();
     });
   });

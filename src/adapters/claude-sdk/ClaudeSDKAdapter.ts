@@ -10,6 +10,7 @@ import {
   createThenvoiMcpBridge,
   type ThenvoiMcpBridge,
 } from "./mcp";
+import type { McpToolRegistration } from "../../mcp/registrations";
 
 export type ClaudePermissionMode =
   | "default"
@@ -65,6 +66,7 @@ export interface ClaudeSDKAdapterOptions {
   enableExecutionReporting?: boolean;
   enableMemoryTools?: boolean;
   enableMcpTools?: boolean;
+  additionalMcpTools?: McpToolRegistration[];
   cwd?: string;
   queryFn?: ClaudeSDKQuery;
   logger?: Logger;
@@ -81,6 +83,7 @@ export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
   private readonly enableExecutionReporting: boolean;
   private readonly enableMemoryTools: boolean;
   private readonly enableMcpTools: boolean;
+  private readonly additionalMcpTools: McpToolRegistration[];
   private readonly cwd?: string;
   private readonly queryFnOverride?: ClaudeSDKQuery;
   private readonly logger: Logger;
@@ -100,6 +103,7 @@ export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
     this.enableExecutionReporting = options?.enableExecutionReporting ?? false;
     this.enableMemoryTools = options?.enableMemoryTools ?? false;
     this.enableMcpTools = options?.enableMcpTools ?? true;
+    this.additionalMcpTools = options?.additionalMcpTools ?? [];
     this.cwd = options?.cwd;
     this.queryFnOverride = options?.queryFn;
     this.logger = options?.logger ?? new NoopLogger();
@@ -118,6 +122,7 @@ export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
       this.mcpBridge = createThenvoiMcpBridge({
         enableMemoryTools: this.enableMemoryTools,
         getToolsForRoom: (roomId) => this.roomTools.get(roomId),
+        additionalTools: this.additionalMcpTools.length > 0 ? this.additionalMcpTools : undefined,
       });
     }
   }

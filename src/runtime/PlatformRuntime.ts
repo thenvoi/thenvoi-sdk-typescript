@@ -5,11 +5,11 @@ import { AgentRuntime } from "./rooms/AgentRuntime";
 import type { AgentConfig, ContactEventConfig, SessionConfig } from "./types";
 import type { PlatformMessage } from "./types";
 import { SYNTHETIC_SENDER_TYPE, SYNTHETIC_CONTACT_EVENTS_SENDER_ID } from "./types";
-import type { ParticipantRecord } from "../contracts/dtos";
+import type { ParticipantRecord, MetadataMap } from "../contracts/dtos";
 import { RuntimeStateError, ValidationError } from "../core/errors";
 import { DefaultPreprocessor } from "./preprocessing/DefaultPreprocessor";
 import { ContactEventHandler } from "./ContactEventHandler";
-import type { ExecutionContext } from "./ExecutionContext";
+import type { ExecutionContext, ExecutionContextOptions } from "./ExecutionContext";
 import type { Logger } from "../core/logger";
 import { NoopLogger } from "../core/logger";
 
@@ -27,6 +27,8 @@ export interface PlatformRuntimeOptions {
   logger?: Logger;
   onParticipantAdded?: (roomId: string, participant: ParticipantRecord) => Promise<void> | void;
   onParticipantRemoved?: (roomId: string, participantId: string) => Promise<void> | void;
+  roomFilter?: (room: MetadataMap) => boolean;
+  contextFactory?: (roomId: string, defaults: ExecutionContextOptions) => ExecutionContext;
   identity?: {
     name: string;
     description?: string | null;
@@ -50,6 +52,8 @@ export class PlatformRuntime {
   private readonly logger: Logger;
   private readonly _onParticipantAdded?: (roomId: string, participant: ParticipantRecord) => Promise<void> | void;
   private readonly _onParticipantRemoved?: (roomId: string, participantId: string) => Promise<void> | void;
+  private readonly _roomFilter?: (room: MetadataMap) => boolean;
+  private readonly _contextFactory?: (roomId: string, defaults: ExecutionContextOptions) => ExecutionContext;
 
   private linkInstance?: ThenvoiLink;
   private initPromise: Promise<void> | null = null;
@@ -88,6 +92,8 @@ export class PlatformRuntime {
     this.configuredIdentity = options.identity;
     this._onParticipantAdded = options.onParticipantAdded;
     this._onParticipantRemoved = options.onParticipantRemoved;
+    this._roomFilter = options.roomFilter;
+    this._contextFactory = options.contextFactory;
   }
 
   public get link(): ThenvoiLink {
@@ -193,6 +199,8 @@ export class PlatformRuntime {
         onContactEvent: (event) => this.handleContactEvent(event),
         onParticipantAdded: this._onParticipantAdded,
         onParticipantRemoved: this._onParticipantRemoved,
+        roomFilter: this._roomFilter,
+        contextFactory: this._contextFactory,
       });
 
       await this.runtime.start();

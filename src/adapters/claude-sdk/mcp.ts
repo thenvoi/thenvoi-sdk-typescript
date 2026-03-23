@@ -6,23 +6,17 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { z, type ZodTypeAny } from "zod";
 
+import type { AdapterToolsProtocol } from "../../contracts/protocols";
 import {
-  type AdapterToolsProtocol,
-  isToolExecutorError,
-  toLegacyToolExecutorErrorMessage,
-} from "../../contracts/protocols";
-import { toWireString } from "../shared/coercion";
-import {
-  BASE_TOOL_NAMES,
-  MEMORY_TOOL_NAMES,
-  TOOL_MODELS,
-  getToolDescription,
-  mcpToolNames,
-} from "../../runtime/tools/schemas";
+  buildRoomScopedRegistrations,
+  type McpToolRegistration,
+} from "../../mcp/registrations";
+import { mcpToolNames } from "../../runtime/tools/schemas";
 
 interface CreateThenvoiMcpBridgeOptions {
   enableMemoryTools: boolean;
   getToolsForRoom(roomId: string): AdapterToolsProtocol | undefined;
+  additionalTools?: McpToolRegistration[];
 }
 
 export interface ThenvoiMcpBridge {
@@ -35,66 +29,17 @@ export interface ThenvoiMcpBridge {
 export function createThenvoiMcpBridge(
   options: CreateThenvoiMcpBridgeOptions,
 ): ThenvoiMcpBridge {
-  const toolNames = new Set<string>([...BASE_TOOL_NAMES]);
-  if (options.enableMemoryTools) {
-    for (const name of MEMORY_TOOL_NAMES) {
-      toolNames.add(name);
-    }
-  }
+  const registrations = buildRoomScopedRegistrations(
+    options.getToolsForRoom,
+    {
+      enableMemoryTools: options.enableMemoryTools,
+      enableContactTools: true,
+      additionalTools: options.additionalTools,
+    },
+  );
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- matches SDK's own SdkMcpToolDefinition<any> signature
-  const toolDefinitions: Array<SdkMcpToolDefinition<any>> = [];
-  for (const toolName of toolNames) {
-    const model = TOOL_MODELS[toolName as keyof typeof TOOL_MODELS];
-    if (!model) {
-      continue;
-    }
-
-    const required = new Set<string>([
-      ...model.required,
-      "room_id",
-    ]);
-    const shape: Record<string, ZodTypeAny> = {
-      room_id: z.string(),
-    };
-
-    for (const [propertyName, propertySchema] of Object.entries(model.properties)) {
-      const validator = toZodValidator(propertySchema as Record<string, unknown>);
-      shape[propertyName] = required.has(propertyName) ? validator : validator.optional();
-    }
-
-    toolDefinitions.push(
-      tool(
-        toolName,
-        getToolDescription(toolName),
-        shape,
-        async (args: Record<string, unknown>) => {
-          const roomId = asRoomId(args.room_id);
-          if (!roomId) {
-            return asErrorResult("Missing required room_id");
-          }
-
-          const roomTools = options.getToolsForRoom(roomId);
-          if (!roomTools) {
-            return asErrorResult(`No tool context found for room_id ${roomId}`);
-          }
-
-          const toolArgs = { ...args } as Record<string, unknown>;
-          delete toolArgs.room_id;
-
-          try {
-            const result = await roomTools.executeToolCall(toolName, toolArgs);
-            if (isToolExecutorError(result)) {
-              return asErrorResult(toLegacyToolExecutorErrorMessage(result) ?? result.message);
-            }
-            return asSuccessResult(result);
-          } catch (error) {
-            return asErrorResult(error instanceof Error ? error.message : String(error));
-          }
-        },
-      ),
-    );
-  }
+  const toolDefinitions = registrations.map(toSdkToolDefinition);
+  const toolNames = new Set(registrations.map((r) => r.name));
 
   const serverConfig = createSdkMcpServer({
     name: "thenvoi",
@@ -108,13 +53,22 @@ export function createThenvoiMcpBridge(
   };
 }
 
-function asRoomId(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- matches SDK's own SdkMcpToolDefinition<any> signature
+function toSdkToolDefinition(registration: McpToolRegistration): SdkMcpToolDefinition<any> {
+  const shape: Record<string, ZodTypeAny> = {};
+  const requiredSet = new Set(registration.inputSchema.required);
+
+  for (const [propertyName, propertySchema] of Object.entries(registration.inputSchema.properties)) {
+    const validator = toZodValidator(propertySchema as Record<string, unknown>);
+    shape[propertyName] = requiredSet.has(propertyName) ? validator : validator.optional();
   }
 
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  return tool(
+    registration.name,
+    registration.description,
+    shape,
+    async (args: Record<string, unknown>) => registration.execute(args),
+  );
 }
 
 function toZodValidator(schema: Record<string, unknown>): ZodTypeAny {
@@ -150,30 +104,4 @@ function toZodValidator(schema: Record<string, unknown>): ZodTypeAny {
   }
 
   return z.unknown();
-}
-
-function asSuccessResult(value: unknown): { content: Array<{ type: "text"; text: string }> } {
-  return {
-    content: [
-      {
-        type: "text",
-        text: toWireString(value),
-      },
-    ],
-  };
-}
-
-function asErrorResult(message: string): {
-  content: Array<{ type: "text"; text: string }>;
-  isError: true;
-} {
-  return {
-    content: [
-      {
-        type: "text",
-        text: message,
-      },
-    ],
-    isError: true,
-  };
 }

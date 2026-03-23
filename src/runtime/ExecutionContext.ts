@@ -15,7 +15,7 @@ interface ExecutionContextLink {
   capabilities?: Partial<AgentToolsCapabilities>;
 }
 
-interface ExecutionContextOptions {
+export interface ExecutionContextOptions {
   roomId: string;
   link: ExecutionContextLink;
   maxContextMessages: number;

@@ -1,9 +1,10 @@
 import type { Logger } from "../core/logger";
 import { NoopLogger } from "../core/logger";
 import type { ContactEvent, MessageEvent } from "../platform/events";
-import type { AdapterToolsProtocol } from "../contracts/protocols";
+import type { ContactTools } from "../contracts/protocols";
 import type { ChatMessagingRestApi, ChatRoomRestApi, ContactRestApi } from "../client/rest/types";
 import type { ContactEventConfig } from "./types";
+import { ContactToolsImpl } from "./tools/ContactToolsImpl";
 import {
   SYNTHETIC_SENDER_TYPE,
   SYNTHETIC_CONTACT_EVENTS_SENDER_ID,
@@ -108,7 +109,7 @@ export class ContactEventHandler {
     this.onHubInit = options.onHubInit;
   }
 
-  public async handle(event: ContactEvent, tools?: AdapterToolsProtocol): Promise<void> {
+  public async handle(event: ContactEvent): Promise<void> {
     const strategy = this.config.strategy ?? "disabled";
     const hasBroadcast = this.config.broadcastChanges && this.onBroadcast;
 
@@ -146,7 +147,7 @@ export class ContactEventHandler {
       }
 
       if (strategy === "callback") {
-        await this.handleCallback(event, tools);
+        await this.handleCallback(event);
       } else if (strategy === "hub_room") {
         await this.handleHubRoom(event);
       }
@@ -156,20 +157,17 @@ export class ContactEventHandler {
     }
   }
 
-  private async handleCallback(event: ContactEvent, tools?: AdapterToolsProtocol): Promise<void> {
+  private async handleCallback(event: ContactEvent): Promise<void> {
     const callback = this.config.onEvent;
     if (!callback) {
       this.logger.warn("Contact event callback strategy configured but no onEvent callback provided");
       return;
     }
 
-    if (!tools) {
-      this.logger.warn("Contact event callback requires tools but none provided");
-      return;
-    }
+    const contactTools: ContactTools = new ContactToolsImpl(this.rest);
 
     try {
-      await callback(event, tools);
+      await callback(event, contactTools);
     } catch (error) {
       const failure = this.buildHandlerError(event, "callback", error, false);
       this.logFailure(event, failure.stage, failure.retryable, error);

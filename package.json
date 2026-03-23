@@ -51,6 +51,11 @@
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js",
       "require": "./dist/testing.cjs"
+    },
+    "./mcp": {
+      "types": "./dist/mcp.d.ts",
+      "import": "./dist/mcp.js",
+      "require": "./dist/mcp.cjs"
     }
   },
   "scripts": {
@@ -82,6 +87,7 @@
     "@langchain/core": "^1.1.31",
     "@langchain/langgraph": "^1.2.0",
     "@linear/sdk": "^76.0.0",
+    "@modelcontextprotocol/sdk": "^1.10.0",
     "@openai/codex-sdk": "^0.107.0",
     "express": "^5.2.1",
     "openai": "^6.27.0",
@@ -109,6 +115,9 @@
     "@linear/sdk": {
       "optional": true
     },
+    "@modelcontextprotocol/sdk": {
+      "optional": true
+    },
     "@openai/codex-sdk": {
       "optional": true
     },
@@ -125,6 +134,7 @@
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.63",
     "@linear/sdk": "^76.0.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@openai/codex-sdk": "^0.107.0",
     "@types/express": "^5.0.6",
     "@types/js-yaml": "^4.0.9",

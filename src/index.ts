@@ -3,7 +3,9 @@ export type { AgentCreateOptions } from "./agent/Agent";
 
 export { ThenvoiLink } from "./platform/ThenvoiLink";
 export { PlatformRuntime } from "./runtime/PlatformRuntime";
+export type { PlatformRuntimeOptions } from "./runtime/PlatformRuntime";
 export { AgentRuntime } from "./runtime/rooms/AgentRuntime";
+export type { ExecutionContextOptions } from "./runtime/ExecutionContext";
 export { DefaultPreprocessor } from "./runtime/preprocessing/DefaultPreprocessor";
 
 export type { PlatformEvent, ContactEvent } from "./platform/events";
