@@ -328,13 +328,11 @@ describe("ContactEventHandler", () => {
       await handler.handle(makeContactRemoved(), new FakeTools());
 
       expect(onBroadcast).toHaveBeenCalledTimes(2);
-      expect(onBroadcast.mock.calls[0][0]).toContain("[Contacts]:");
       expect(onBroadcast.mock.calls[0][0]).toContain("is now a contact");
-      expect(onBroadcast.mock.calls[1][0]).toContain("[Contacts]:");
       expect(onBroadcast.mock.calls[1][0]).toContain("was removed");
     });
 
-    it("broadcasts contact_request events with [Contacts] prefix", async () => {
+    it("does not broadcast contact_request events", async () => {
       const onBroadcast = vi.fn();
       const handler = new ContactEventHandler({
         config: { strategy: "callback", broadcastChanges: true, onEvent: vi.fn() },
@@ -343,8 +341,7 @@ describe("ContactEventHandler", () => {
       });
 
       await handler.handle(makeContactRequestReceived(), new FakeTools());
-      expect(onBroadcast).toHaveBeenCalledOnce();
-      expect(onBroadcast.mock.calls[0][0]).toContain("[Contacts]:");
+      expect(onBroadcast).not.toHaveBeenCalled();
     });
   });
 
@@ -356,6 +353,7 @@ describe("ContactEventHandler", () => {
       });
 
       const msg = handler.formatEventMessage(makeContactRequestReceived());
+      expect(msg).toContain("[Contact Request]");
       expect(msg).toContain("Alice");
       expect(msg).toContain("@alice");
       expect(msg).toContain('Message: "Hello!"');
@@ -368,7 +366,7 @@ describe("ContactEventHandler", () => {
       });
 
       const msg = handler.formatEventMessage(makeContactAdded());
-      expect(msg).toContain("Contact added");
+      expect(msg).toContain("[Contact Added]");
       expect(msg).toContain("Alice");
     });
 
@@ -379,7 +377,7 @@ describe("ContactEventHandler", () => {
       });
 
       const msg = handler.formatEventMessage(makeContactRemoved());
-      expect(msg).toContain("Contact removed");
+      expect(msg).toContain("[Contact Removed]");
       expect(msg).toContain("contact-1");
     });
   });

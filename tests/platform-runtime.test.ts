@@ -399,7 +399,7 @@ describe("PlatformRuntime", () => {
     expect(seenInputs).toEqual([
       {
         contactsMessage: HUB_ROOM_SYSTEM_PROMPT,
-        content: "New contact request from Alice (@alice). Message: \"Hello!\"",
+        content: "[Contact Request] Alice (@alice) wants to connect.\nMessage: \"Hello!\"\nRequest ID: req-1",
       },
     ]);
 

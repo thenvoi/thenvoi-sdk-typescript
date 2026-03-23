@@ -100,9 +100,12 @@ export class ContactEventHandler {
         });
       }
 
-      // Broadcast runs regardless of strategy
+      // Broadcast runs regardless of strategy (only for added/removed)
       if (this.config.broadcastChanges && this.onBroadcast) {
-        this.onBroadcast(this.formatBroadcast(event));
+        const broadcastMsg = this.formatBroadcast(event);
+        if (broadcastMsg) {
+          this.onBroadcast(broadcastMsg);
+        }
       }
 
       if (strategy === "disabled") {
@@ -228,42 +231,40 @@ export class ContactEventHandler {
   public formatEventMessage(event: ContactEvent): string {
     switch (event.type) {
       case "contact_request_received": {
-        const msg = event.payload.message ? ` Message: "${event.payload.message}"` : "";
-        return `New contact request from ${event.payload.from_name} (@${event.payload.from_handle}).${msg}`;
+        const msg = event.payload.message ? `\nMessage: "${event.payload.message}"` : "";
+        const handle = normalizeHandle(event.payload.from_handle);
+        return `[Contact Request] ${event.payload.from_name} (${handle}) wants to connect.${msg}\nRequest ID: ${event.payload.id}`;
       }
       case "contact_request_updated": {
         const cached = this.requestCache.get(event.payload.id);
         if (cached) {
-          return `Contact request from ${cached.fromName} (@${cached.fromHandle}) updated to ${event.payload.status}.`;
+          const handle = normalizeHandle(cached.fromHandle);
+          return `[Contact Request Update] Request from ${cached.fromName} (${handle}) status changed to: ${event.payload.status}\nRequest ID: ${event.payload.id}`;
         }
-        return `Contact request ${event.payload.id} updated to ${event.payload.status}.`;
+        return `[Contact Request Update] Request ${event.payload.id} status changed to: ${event.payload.status}`;
       }
-      case "contact_added":
-        return `Contact added: ${event.payload.name} (@${event.payload.handle}), type: ${event.payload.type}.`;
+      case "contact_added": {
+        const handle = normalizeHandle(event.payload.handle);
+        return `[Contact Added] ${event.payload.name} (${handle}) is now a contact.\nType: ${event.payload.type}, ID: ${event.payload.id}`;
+      }
       case "contact_removed":
-        return `Contact removed: ${event.payload.id}.`;
+        return `[Contact Removed] Contact ${event.payload.id} was removed.`;
     }
 
     return assertNever(event);
   }
 
-  private formatBroadcast(event: ContactEvent): string {
+  private formatBroadcast(event: ContactEvent): string | null {
     switch (event.type) {
-      case "contact_request_received":
-        return `[Contacts]: New contact request from ${event.payload.from_name} (${event.payload.from_handle}).`;
-      case "contact_request_updated":
-        return `[Contacts]: Contact request ${event.payload.id} updated to ${event.payload.status}.`;
       case "contact_added": {
-        const handle = event.payload.handle?.startsWith("@")
-          ? event.payload.handle
-          : `@${event.payload.handle}`;
-        return `[Contacts]: ${handle} (${event.payload.name}) is now a contact`;
+        const handle = normalizeHandle(event.payload.handle);
+        return `${handle} (${event.payload.name}) is now a contact`;
       }
       case "contact_removed":
-        return `[Contacts]: Contact ${event.payload.id} was removed`;
+        return `Contact ${event.payload.id} was removed`;
+      default:
+        return null;
     }
-
-    return assertNever(event);
   }
 
   private cacheRequestInfo(id: string, info: RequestInfo): void {
@@ -363,4 +364,9 @@ export class ContactEventHandler {
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled contact event: ${JSON.stringify(value)}`);
+}
+
+function normalizeHandle(handle: string | null | undefined): string {
+  if (!handle) return "@unknown";
+  return handle.startsWith("@") ? handle : `@${handle}`;
 }
