@@ -22,6 +22,9 @@ export function createLettaAgent(
       agentId: overrides?.agentId ?? "agent-letta",
       apiKey: overrides?.apiKey ?? "api-key",
     },
+    agentConfig: {
+      autoSubscribeExistingRooms: true,
+    },
   });
 }
 
