@@ -7,6 +7,7 @@ import {
   buildRoomScopedRegistrations,
   buildSingleContextRegistrations,
 } from "./registrations";
+import { buildZodShape } from "./zod";
 
 export interface ThenvoiMcpServerOptions {
   /** Single tools instance (no room scoping) or a resolver function for room-scoped tools. */
@@ -25,6 +26,16 @@ export interface ThenvoiMcpServerOptions {
 
 const PORT_RANGE_START = 50000;
 const PORT_RANGE_END = 60000;
+const MCP_SERVER_VERSION = "1.0.0";
+const SESSION_IDLE_TTL_MS = 15 * 60 * 1000;
+const SESSION_SWEEP_INTERVAL_MS = 60 * 1000;
+
+interface SessionRecord {
+  mcpServer: InstanceType<typeof import("@modelcontextprotocol/sdk/server/mcp.js").McpServer>;
+  transport: import("@modelcontextprotocol/sdk/server/streamableHttp.js").StreamableHTTPServerTransport;
+  createdAt: number;
+  lastSeenAt: number;
+}
 
 /**
  * Standalone MCP server that exposes Thenvoi agent tools over Streamable HTTP.
@@ -37,6 +48,8 @@ export class ThenvoiMcpServer {
   private readonly registrations: McpToolRegistration[];
   private httpServer: import("node:http").Server | null = null;
   private actualPort: number | null = null;
+  private readonly sessions = new Map<string, SessionRecord>();
+  private sessionSweepTimer: ReturnType<typeof setInterval> | null = null;
 
   public constructor(options: ThenvoiMcpServerOptions) {
     this.options = options;
@@ -76,27 +89,14 @@ export class ThenvoiMcpServer {
     // Lazy imports — these are optional peer dependencies.
     const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js");
     const { StreamableHTTPServerTransport } = await import("@modelcontextprotocol/sdk/server/streamableHttp.js");
+    const { isInitializeRequest } = await import("@modelcontextprotocol/sdk/types.js");
     const expressModule = await import("express");
     const express = expressModule.default ?? expressModule;
     const http = await import("node:http");
+    const { randomUUID } = await import("node:crypto");
     const { z } = await import("zod");
 
     const serverName = this.options.name ?? "thenvoi";
-    const mcpServer = new McpServer({ name: serverName, version: "1.0.0" });
-
-    for (const reg of this.registrations) {
-      const zodShape = buildZodShape(z, reg.inputSchema.properties, new Set(reg.inputSchema.required));
-
-      mcpServer.registerTool(
-        reg.name,
-        {
-          description: reg.description,
-          inputSchema: z.object(zodShape),
-        },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- MCP SDK handler signature is complex; our McpToolResult is compatible
-        async (args: Record<string, unknown>): Promise<any> => reg.execute(args),
-      );
-    }
 
     const app = express();
     app.use(express.json());
@@ -105,12 +105,48 @@ export class ThenvoiMcpServer {
       res.json({ status: "ok" });
     });
 
+    const handleMcpRequest = async (
+      req: import("express").Request,
+      res: import("express").Response,
+    ): Promise<void> => {
+      try {
+        const sessionId = getSessionIdHeader(req.headers["mcp-session-id"]);
+        let session = sessionId ? this.sessions.get(sessionId) : undefined;
+
+        if (!session) {
+          if (req.method !== "POST" || sessionId || !isInitializeRequest(req.body)) {
+            sendMcpError(res, sessionId ? 404 : 400, sessionId ? "Session not found" : "Bad Request: No valid session ID provided");
+            return;
+          }
+
+          session = await this.createSession({
+            McpServer,
+            StreamableHTTPServerTransport,
+            serverName,
+            sessionIdGenerator: randomUUID,
+            z,
+          });
+        }
+
+        session.lastSeenAt = Date.now();
+        await session.transport.handleRequest(req, res, req.body);
+      } catch (error) {
+        if (!res.headersSent) {
+          sendMcpError(res, 500, "Internal server error");
+        }
+      }
+    };
+
     app.post("/mcp", async (req, res) => {
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined,
-      });
-      await mcpServer.connect(transport);
-      await transport.handleRequest(req, res, req.body);
+      await handleMcpRequest(req, res);
+    });
+
+    app.get("/mcp", async (req, res) => {
+      await handleMcpRequest(req, res);
+    });
+
+    app.delete("/mcp", async (req, res) => {
+      await handleMcpRequest(req, res);
     });
 
     const port = this.options.port ?? await findAvailablePort(http);
@@ -121,12 +157,20 @@ export class ThenvoiMcpServer {
       server.listen(port, "127.0.0.1", () => {
         this.httpServer = server;
         this.actualPort = port;
+        this.startSessionSweep();
         resolve();
       });
     });
   }
 
   public async stop(): Promise<void> {
+    this.stopSessionSweep();
+    const activeSessions = [...this.sessions.values()];
+    this.sessions.clear();
+    await Promise.all(activeSessions.map(async (session) => {
+      await session.transport.close();
+    }));
+
     if (!this.httpServer) {
       return;
     }
@@ -143,60 +187,120 @@ export class ThenvoiMcpServer {
       });
     });
   }
-}
 
-function buildZodShape(
-  z: typeof import("zod").z,
-  properties: Record<string, unknown>,
-  required: Set<string>,
-): Record<string, import("zod").ZodTypeAny> {
-  const shape: Record<string, import("zod").ZodTypeAny> = {};
+  private async createSession(input: {
+    McpServer: typeof import("@modelcontextprotocol/sdk/server/mcp.js").McpServer;
+    StreamableHTTPServerTransport: typeof import("@modelcontextprotocol/sdk/server/streamableHttp.js").StreamableHTTPServerTransport;
+    serverName: string;
+    sessionIdGenerator: () => string;
+    z: typeof import("zod").z;
+  }): Promise<SessionRecord> {
+    const createdAt = Date.now();
+    const mcpServer = new input.McpServer({ name: input.serverName, version: MCP_SERVER_VERSION });
+    registerTools(mcpServer, input.z, this.registrations);
 
-  for (const [name, schema] of Object.entries(properties)) {
-    const validator = jsonSchemaToZod(z, schema as Record<string, unknown>);
-    shape[name] = required.has(name) ? validator : validator.optional();
-  }
+    let record: SessionRecord | null = null;
+    const transport = new input.StreamableHTTPServerTransport({
+      sessionIdGenerator: input.sessionIdGenerator,
+      onsessioninitialized: (sessionId) => {
+        if (!record) {
+          return;
+        }
+        this.sessions.set(sessionId, record);
+      },
+      onsessionclosed: (sessionId) => {
+        this.sessions.delete(sessionId);
+      },
+    });
 
-  return shape;
-}
-
-function jsonSchemaToZod(
-  z: typeof import("zod").z,
-  schema: Record<string, unknown>,
-): import("zod").ZodTypeAny {
-  const type = schema.type;
-
-  if (type === "string") {
-    if (Array.isArray(schema.enum) && schema.enum.every((v) => typeof v === "string")) {
-      const values = schema.enum;
-      if (values.length > 0) {
-        return z.enum(values as [string, ...string[]]);
+    transport.onclose = () => {
+      const sessionId = transport.sessionId;
+      if (sessionId) {
+        this.sessions.delete(sessionId);
       }
+    };
+
+    await mcpServer.connect(transport);
+    record = {
+      mcpServer,
+      transport,
+      createdAt,
+      lastSeenAt: createdAt,
+    };
+    return record;
+  }
+
+  private startSessionSweep(): void {
+    if (this.sessionSweepTimer) {
+      return;
     }
-    return z.string();
+
+    this.sessionSweepTimer = setInterval(() => {
+      void this.closeIdleSessions();
+    }, SESSION_SWEEP_INTERVAL_MS);
+    this.sessionSweepTimer.unref?.();
   }
 
-  if (type === "integer" || type === "number") {
-    return z.number();
-  }
-
-  if (type === "boolean") {
-    return z.boolean();
-  }
-
-  if (type === "array") {
-    const itemSchema = schema.items;
-    if (itemSchema && typeof itemSchema === "object") {
-      return z.array(jsonSchemaToZod(z, itemSchema as Record<string, unknown>));
+  private stopSessionSweep(): void {
+    if (!this.sessionSweepTimer) {
+      return;
     }
-    return z.array(z.unknown());
+
+    clearInterval(this.sessionSweepTimer);
+    this.sessionSweepTimer = null;
   }
 
-  if (type === "object") {
-    return z.record(z.string(), z.unknown());
+  private async closeIdleSessions(): Promise<void> {
+    const cutoff = Date.now() - SESSION_IDLE_TTL_MS;
+    const idleSessions = [...this.sessions.values()].filter((session) => session.lastSeenAt < cutoff);
+
+    await Promise.all(idleSessions.map(async (session) => {
+      await session.transport.close();
+    }));
+  }
+}
+
+function getSessionIdHeader(headerValue: string | string[] | undefined): string | null {
+  if (typeof headerValue === "string" && headerValue.length > 0) {
+    return headerValue;
   }
 
-  return z.unknown();
+  return null;
+}
+
+function sendMcpError(
+  res: import("express").Response,
+  status: number,
+  message: string,
+): void {
+  res.status(status).json({
+    jsonrpc: "2.0",
+    error: {
+      code: -32000,
+      message,
+    },
+    id: null,
+  });
+}
+
+function registerTools(
+  mcpServer: InstanceType<typeof import("@modelcontextprotocol/sdk/server/mcp.js").McpServer>,
+  z: typeof import("zod").z,
+  registrations: McpToolRegistration[],
+): void {
+  for (const reg of registrations) {
+    const zodShape = buildZodShape(z, reg.inputSchema.properties, new Set(reg.inputSchema.required));
+
+    mcpServer.registerTool(
+      reg.name,
+      {
+        description: reg.description,
+        inputSchema: z.object(zodShape),
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- MCP SDK handler signature is complex; our McpToolResult is compatible
+      async (args: Record<string, unknown>): Promise<any> => reg.execute(args),
+    );
+  }
 }
 
 async function findAvailablePort(http: typeof import("node:http")): Promise<number> {

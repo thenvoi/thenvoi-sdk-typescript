@@ -1,7 +1,6 @@
 import type { ParticipantRecord } from "../contracts/dtos";
 import type {
   AdapterToolsProtocol,
-  ContactTools,
   FrameworkAdapterInput,
   HistoryConverter,
   PlatformMessageLike,
@@ -23,7 +22,7 @@ export type ContactEventStrategy = "disabled" | "callback" | "hub_room";
 
 export type ContactEventCallback = (
   event: import("../platform/events").ContactEvent,
-  tools: ContactTools,
+  tools: AdapterToolsProtocol,
 ) => Promise<void>;
 
 export interface ContactEventConfig {

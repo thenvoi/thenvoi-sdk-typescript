@@ -12,6 +12,11 @@ function makeRest() {
   return {
     createChat: vi.fn().mockResolvedValue({ id: "hub-room-1" }),
     createChatEvent: vi.fn().mockResolvedValue({}),
+    listContacts: vi.fn().mockResolvedValue({ data: [] }),
+    addContact: vi.fn().mockResolvedValue({ ok: true }),
+    removeContact: vi.fn().mockResolvedValue({ ok: true }),
+    listContactRequests: vi.fn().mockResolvedValue({ received: [], sent: [] }),
+    respondContactRequest: vi.fn().mockResolvedValue({ ok: true }),
   };
 }
 
@@ -94,12 +99,47 @@ describe("ContactEventHandler", () => {
       await handler.handle(event);
 
       expect(onEvent).toHaveBeenCalledWith(event, expect.objectContaining({
+        capabilities: expect.objectContaining({
+          contacts: true,
+        }),
+        sendMessage: expect.any(Function),
+        sendEvent: expect.any(Function),
+        executeToolCall: expect.any(Function),
         listContacts: expect.any(Function),
         addContact: expect.any(Function),
         removeContact: expect.any(Function),
         listContactRequests: expect.any(Function),
         respondContactRequest: expect.any(Function),
       }));
+    });
+
+    it("routes callback tool calls through the adapter-tools surface", async () => {
+      const rest = {
+        ...makeRest(),
+        createChatMessage: vi.fn().mockResolvedValue({ ok: true }),
+        listContacts: vi.fn().mockResolvedValue({ data: [] }),
+      };
+      const onEvent = vi.fn(async (_event, tools) => {
+        await tools.sendMessage("hello");
+        await tools.executeToolCall("thenvoi_list_contacts", {});
+      });
+      const config: ContactEventConfig = { strategy: "callback", onEvent };
+      const handler = new ContactEventHandler({ config, rest });
+
+      await handler.handle({
+        ...makeContactAdded(),
+        roomId: "room-1",
+      });
+
+      expect(rest.createChatMessage).toHaveBeenCalledWith(
+        "room-1",
+        { content: "hello" },
+        expect.any(Object),
+      );
+      expect(rest.listContacts).toHaveBeenCalledWith(
+        { page: 1, pageSize: 50 },
+        expect.any(Object),
+      );
     });
 
     it("rethrows callback errors with retry signal and deterministic logging", async () => {

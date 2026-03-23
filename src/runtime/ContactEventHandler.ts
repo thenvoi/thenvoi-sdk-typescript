@@ -1,10 +1,10 @@
 import type { Logger } from "../core/logger";
 import { NoopLogger } from "../core/logger";
 import type { ContactEvent, MessageEvent } from "../platform/events";
-import type { ContactTools } from "../contracts/protocols";
-import type { ChatMessagingRestApi, ChatRoomRestApi, ContactRestApi } from "../client/rest/types";
+import type { AdapterToolsProtocol } from "../contracts/protocols";
+import type { AgentToolsRestApi, ChatMessagingRestApi, ChatRoomRestApi, ContactRestApi } from "../client/rest/types";
 import type { ContactEventConfig } from "./types";
-import { ContactToolsImpl } from "./tools/ContactToolsImpl";
+import { ContactCallbackTools } from "./tools/ContactCallbackTools";
 import {
   SYNTHETIC_SENDER_TYPE,
   SYNTHETIC_CONTACT_EVENTS_SENDER_ID,
@@ -51,6 +51,7 @@ interface RequestInfo {
 }
 
 type ContactHandlerRestApi =
+  & Partial<AgentToolsRestApi>
   & Pick<ChatMessagingRestApi, "createChatEvent">
   & Pick<ChatRoomRestApi, "createChat">
   & Partial<Pick<ContactRestApi, "listContactRequests">>;
@@ -109,7 +110,7 @@ export class ContactEventHandler {
     this.onHubInit = options.onHubInit;
   }
 
-  public async handle(event: ContactEvent): Promise<void> {
+  public async handle(event: ContactEvent, tools?: AdapterToolsProtocol): Promise<void> {
     const strategy = this.config.strategy ?? "disabled";
     const hasBroadcast = this.config.broadcastChanges && this.onBroadcast;
 
@@ -147,7 +148,7 @@ export class ContactEventHandler {
       }
 
       if (strategy === "callback") {
-        await this.handleCallback(event);
+        await this.handleCallback(event, tools);
       } else if (strategy === "hub_room") {
         await this.handleHubRoom(event);
       }
@@ -157,17 +158,17 @@ export class ContactEventHandler {
     }
   }
 
-  private async handleCallback(event: ContactEvent): Promise<void> {
+  private async handleCallback(event: ContactEvent, tools?: AdapterToolsProtocol): Promise<void> {
     const callback = this.config.onEvent;
     if (!callback) {
       this.logger.warn("Contact event callback strategy configured but no onEvent callback provided");
       return;
     }
 
-    const contactTools: ContactTools = new ContactToolsImpl(this.rest);
+    const callbackTools = tools ?? new ContactCallbackTools(this.rest, event.roomId);
 
     try {
-      await callback(event, contactTools);
+      await callback(event, callbackTools);
     } catch (error) {
       const failure = this.buildHandlerError(event, "callback", error, false);
       this.logFailure(event, failure.stage, failure.retryable, error);
