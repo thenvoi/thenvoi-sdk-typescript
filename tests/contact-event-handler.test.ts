@@ -297,19 +297,20 @@ describe("ContactEventHandler", () => {
       // First, receive the request to populate cache
       await handler.handle(makeContactRequestReceived("req-1"));
 
-      const formatted = handler.formatEventMessage(makeContactRequestUpdated("req-1", "accepted"));
+      const formatted = await handler.formatEventMessage(makeContactRequestUpdated("req-1", "accepted"));
       expect(formatted).toContain("Alice");
       expect(formatted).toContain("@alice");
       expect(formatted).toContain("accepted");
+      expect(formatted).toContain("Request ID: req-1");
     });
 
-    it("falls back to ID when cache miss", () => {
+    it("falls back to ID when cache miss", async () => {
       const handler = new ContactEventHandler({
         config: { strategy: "hub_room", hubTaskId: "task-1" },
         rest: makeRest(),
       });
 
-      const formatted = handler.formatEventMessage(makeContactRequestUpdated("req-99", "rejected"));
+      const formatted = await handler.formatEventMessage(makeContactRequestUpdated("req-99", "rejected"));
       expect(formatted).toContain("req-99");
       expect(formatted).toContain("rejected");
     });
@@ -346,37 +347,37 @@ describe("ContactEventHandler", () => {
   });
 
   describe("event formatting", () => {
-    it("formats contact_request_received", () => {
+    it("formats contact_request_received", async () => {
       const handler = new ContactEventHandler({
         config: { strategy: "disabled" },
         rest: makeRest(),
       });
 
-      const msg = handler.formatEventMessage(makeContactRequestReceived());
+      const msg = await handler.formatEventMessage(makeContactRequestReceived());
       expect(msg).toContain("[Contact Request]");
       expect(msg).toContain("Alice");
       expect(msg).toContain("@alice");
       expect(msg).toContain('Message: "Hello!"');
     });
 
-    it("formats contact_added", () => {
+    it("formats contact_added", async () => {
       const handler = new ContactEventHandler({
         config: { strategy: "disabled" },
         rest: makeRest(),
       });
 
-      const msg = handler.formatEventMessage(makeContactAdded());
+      const msg = await handler.formatEventMessage(makeContactAdded());
       expect(msg).toContain("[Contact Added]");
       expect(msg).toContain("Alice");
     });
 
-    it("formats contact_removed", () => {
+    it("formats contact_removed", async () => {
       const handler = new ContactEventHandler({
         config: { strategy: "disabled" },
         rest: makeRest(),
       });
 
-      const msg = handler.formatEventMessage(makeContactRemoved());
+      const msg = await handler.formatEventMessage(makeContactRemoved());
       expect(msg).toContain("[Contact Removed]");
       expect(msg).toContain("contact-1");
     });
