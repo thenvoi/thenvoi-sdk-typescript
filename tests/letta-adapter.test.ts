@@ -1638,6 +1638,89 @@ describe("LettaAdapter", () => {
     expect(injectedContent).toContain("Reply 1");
     expect(injectedContent).toContain("Unanswered");
   });
+
+  it("merges consecutive same-role user messages instead of dropping them", async () => {
+    const client = new FakeLettaClient();
+    client.responseBatches.push(
+      assistantResponse("History ack"),
+      assistantResponse("Response"),
+    );
+
+    const adapter = new LettaAdapter({
+      clientFactory: async () => client,
+    });
+
+    await adapter.onStarted("Agent", "An agent");
+
+    // Multi-participant: two consecutive user messages before one assistant reply
+    const history = [
+      { role: "user" as const, content: "[Alice]: Hey", sender: "Alice", senderType: "User" },
+      { role: "user" as const, content: "[Bob]: Hi there", sender: "Bob", senderType: "User" },
+      { role: "assistant" as const, content: "Hello both!", sender: "Bot", senderType: "Agent" },
+    ];
+
+    const tools = new FakeTools();
+    await adapter.onMessage(
+      makeMessage("Now", "room-merge"),
+      tools,
+      history,
+      null,
+      null,
+      { isSessionBootstrap: true, roomId: "room-merge" },
+    );
+
+    const historyCall = client.messageCreateCalls[0];
+    const firstMsg = historyCall.params.messages?.[0];
+    const injectedContent = (firstMsg && "content" in firstMsg ? firstMsg.content : "") ?? "";
+    // Both user messages should be present (merged), not just the first one
+    expect(injectedContent).toContain("Alice");
+    expect(injectedContent).toContain("Bob");
+    expect(injectedContent).toContain("Hello both!");
+  });
+
+  it("enforces character budget on injected history, dropping oldest entries first", async () => {
+    const client = new FakeLettaClient();
+    client.responseBatches.push(
+      assistantResponse("History ack"),
+      assistantResponse("Response"),
+    );
+
+    const adapter = new LettaAdapter({
+      clientFactory: async () => client,
+    });
+
+    await adapter.onStarted("Agent", "An agent");
+
+    // Create history entries with large content to exceed the 32k char budget
+    const largeContent = "x".repeat(10_000);
+    const history = [
+      { role: "user" as const, content: `[A]: OLD_${largeContent}`, sender: "A", senderType: "User" },
+      { role: "assistant" as const, content: `OLD_REPLY_${largeContent}`, sender: "Bot", senderType: "Agent" },
+      { role: "user" as const, content: `[A]: MID_${largeContent}`, sender: "A", senderType: "User" },
+      { role: "assistant" as const, content: `MID_REPLY_${largeContent}`, sender: "Bot", senderType: "Agent" },
+      { role: "user" as const, content: "[A]: RECENT_short", sender: "A", senderType: "User" },
+      { role: "assistant" as const, content: "RECENT_REPLY_short", sender: "Bot", senderType: "Agent" },
+    ];
+
+    const tools = new FakeTools();
+    await adapter.onMessage(
+      makeMessage("Now", "room-budget"),
+      tools,
+      history,
+      null,
+      null,
+      { isSessionBootstrap: true, roomId: "room-budget" },
+    );
+
+    const historyCall = client.messageCreateCalls[0];
+    const firstMsg = historyCall.params.messages?.[0];
+    const injectedContent = (firstMsg && "content" in firstMsg ? firstMsg.content : "") ?? "";
+    // Recent entries should be preserved
+    expect(injectedContent).toContain("RECENT_short");
+    expect(injectedContent).toContain("RECENT_REPLY_short");
+    // The total payload should be within the budget (32k chars)
+    expect(injectedContent.length).toBeLessThanOrEqual(32_000);
+  });
 });
 
 // ---------------------------------------------------------------------------
