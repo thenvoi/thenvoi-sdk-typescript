@@ -258,10 +258,10 @@ export class ContactEventHandler {
     switch (event.type) {
       case "contact_added": {
         const handle = normalizeHandle(event.payload.handle);
-        return `${handle} (${event.payload.name}) is now a contact`;
+        return `[Contacts]: ${handle} (${event.payload.name}) is now a contact`;
       }
       case "contact_removed":
-        return `Contact ${event.payload.id} was removed`;
+        return `[Contacts]: Contact ${event.payload.id} was removed`;
       default:
         return null;
     }

@@ -223,8 +223,8 @@ describe("PlatformRuntime coverage", () => {
     }
 
     expect(injected).toEqual([
-      "@jane (Jane) is now a contact",
-      "Contact c1 was removed",
+      "[Contacts]: @jane (Jane) is now a contact",
+      "[Contacts]: Contact c1 was removed",
     ]);
   });
 });
