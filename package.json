@@ -82,6 +82,7 @@
     "@langchain/core": "^1.1.31",
     "@langchain/langgraph": "^1.2.0",
     "@linear/sdk": "^76.0.0",
+    "@letta-ai/letta-client": "^1.7.0",
     "@openai/codex-sdk": "^0.107.0",
     "express": "^5.2.1",
     "openai": "^6.27.0",
@@ -104,6 +105,9 @@
       "optional": true
     },
     "@langchain/langgraph": {
+      "optional": true
+    },
+    "@letta-ai/letta-client": {
       "optional": true
     },
     "@linear/sdk": {
