@@ -9,10 +9,10 @@ export {
 } from "./acp-server";
 
 export {
-  AISDKHistoryConverter,
-  type AISDKMessage,
-  type AISDKMessages,
-} from "./ai-sdk";
+  VercelAISDKHistoryConverter,
+  type VercelAISDKMessage,
+  type VercelAISDKMessages,
+} from "./vercel-ai-sdk";
 
 export {
   A2AHistoryConverter,

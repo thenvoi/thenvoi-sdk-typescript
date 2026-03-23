@@ -35,7 +35,7 @@ export {
   CODEX_REASONING_EFFORTS,
   CODEX_REASONING_SUMMARIES,
   CODEX_WEB_SEARCH_MODES,
-  AISDKAdapter,
+  VercelAISDKAdapter,
   GenericAdapter,
   OpenAIAdapter,
   AnthropicAdapter,
@@ -68,7 +68,7 @@ export type {
 } from "./core";
 
 export type {
-  AISDKAdapterOptions,
+  VercelAISDKAdapterOptions,
   GenericAdapterHandler,
   OpenAIAdapterOptions,
   AnthropicAdapterOptions,

@@ -1,13 +1,16 @@
 import { ToolCallingAdapter, type ToolCallingAdapterOptions } from "../tool-calling";
 
-import { AISDKToolCallingModel, type AISDKToolCallingModelOptions } from "./model";
+import {
+  VercelAISDKToolCallingModel,
+  type VercelAISDKToolCallingModelOptions,
+} from "./model";
 
-export interface AISDKAdapterOptions
+export interface VercelAISDKAdapterOptions
   extends Omit<ToolCallingAdapterOptions, "toolFormat" | "model">,
-    AISDKToolCallingModelOptions {}
+    VercelAISDKToolCallingModelOptions {}
 
-export class AISDKAdapter extends ToolCallingAdapter {
-  public constructor(options: AISDKAdapterOptions) {
+export class VercelAISDKAdapter extends ToolCallingAdapter {
+  public constructor(options: VercelAISDKAdapterOptions) {
     const {
       model,
       generateText,
@@ -17,7 +20,7 @@ export class AISDKAdapter extends ToolCallingAdapter {
 
     super({
       ...adapterOptions,
-      model: new AISDKToolCallingModel({
+      model: new VercelAISDKToolCallingModel({
         model,
         generateText,
         toolFactory,

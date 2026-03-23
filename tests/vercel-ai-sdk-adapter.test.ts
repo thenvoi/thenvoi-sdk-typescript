@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { HistoryProvider } from "../src/runtime";
-import { AISDKAdapter } from "../src/index";
+import { VercelAISDKAdapter } from "../src/index";
 import { FakeTools, makeMessage } from "./testUtils";
 
-class AISDKTestTools extends FakeTools {
+class VercelAISDKTestTools extends FakeTools {
   public readonly executed: Array<{ name: string; input: Record<string, unknown> }> = [];
 
   public override getToolSchemas(
@@ -46,8 +46,8 @@ const history = {
   length: 0,
 } as unknown as HistoryProvider;
 
-describe("AISDKAdapter", () => {
-  it("uses AI SDK style tool definitions and completes the tool loop", async () => {
+describe("VercelAISDKAdapter", () => {
+  it("uses Vercel AI SDK style tool definitions and completes the tool loop", async () => {
     const requests: Array<Record<string, unknown>> = [];
     const responses = [
       {
@@ -58,24 +58,24 @@ describe("AISDKAdapter", () => {
         }],
       },
       {
-        text: "AI SDK final response",
+        text: "Vercel AI SDK final response",
       },
     ];
 
-    const adapter = new AISDKAdapter({
+    const adapter = new VercelAISDKAdapter({
       model: { id: "test-model" },
       systemPrompt: "You are a strict test agent.",
       generateText: async (params) => {
         requests.push(params);
         const next = responses.shift();
         if (!next) {
-          throw new Error("No mock AI SDK response available");
+          throw new Error("No mock Vercel AI SDK response available");
         }
         return next;
       },
       toolFactory: (definition) => definition,
     });
-    const tools = new AISDKTestTools();
+    const tools = new VercelAISDKTestTools();
 
     await adapter.onMessage(
       makeMessage("hello"),
@@ -93,7 +93,7 @@ describe("AISDKAdapter", () => {
       name: "thenvoi_get_participants",
       input: {},
     }]);
-    expect(tools.messages).toEqual(["AI SDK final response"]);
+    expect(tools.messages).toEqual(["Vercel AI SDK final response"]);
     expect(requests).toHaveLength(2);
 
     expect(requests[0]).toMatchObject({
@@ -137,12 +137,12 @@ describe("AISDKAdapter", () => {
   });
 
   it("sends final text when used directly", async () => {
-    const adapter = new AISDKAdapter({
+    const adapter = new VercelAISDKAdapter({
       model: { id: "test-model" },
       generateText: async () => ({ text: "alias works" }),
       toolFactory: (definition) => definition,
     });
-    const tools = new AISDKTestTools();
+    const tools = new VercelAISDKTestTools();
 
     await adapter.onMessage(
       makeMessage("hello"),

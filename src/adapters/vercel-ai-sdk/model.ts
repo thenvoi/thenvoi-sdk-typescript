@@ -9,32 +9,32 @@ import { LazyAsyncValue } from "../shared/lazyAsyncValue";
 import { toDisplayText } from "../shared/coercion";
 import { mapConversationMessages, normalizeConversationRole } from "../tool-calling/valueUtils";
 
-interface AISDKToolDefinition {
+interface VercelAISDKToolDefinition {
   description?: string;
   inputSchema: Record<string, unknown>;
 }
 
-type AISDKGenerateText = (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
-type AISDKToolFactory = (definition: AISDKToolDefinition) => unknown;
+type VercelAISDKGenerateText = (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+type VercelAISDKToolFactory = (definition: VercelAISDKToolDefinition) => unknown;
 
-interface AISDKRuntime {
-  generateText: AISDKGenerateText;
-  tool: AISDKToolFactory;
+interface VercelAISDKRuntime {
+  generateText: VercelAISDKGenerateText;
+  tool: VercelAISDKToolFactory;
 }
 
-export interface AISDKToolCallingModelOptions {
+export interface VercelAISDKToolCallingModelOptions {
   model: unknown;
-  generateText?: AISDKGenerateText;
-  toolFactory?: AISDKToolFactory;
+  generateText?: VercelAISDKGenerateText;
+  toolFactory?: VercelAISDKToolFactory;
 }
 
-export class AISDKToolCallingModel implements ToolCallingModel {
+export class VercelAISDKToolCallingModel implements ToolCallingModel {
   private readonly model: unknown;
-  private readonly generateTextOverride?: AISDKGenerateText;
-  private readonly toolFactoryOverride?: AISDKToolFactory;
-  private readonly runtimeLoader: LazyAsyncValue<AISDKRuntime>;
+  private readonly generateTextOverride?: VercelAISDKGenerateText;
+  private readonly toolFactoryOverride?: VercelAISDKToolFactory;
+  private readonly runtimeLoader: LazyAsyncValue<VercelAISDKRuntime>;
 
-  public constructor(options: AISDKToolCallingModelOptions) {
+  public constructor(options: VercelAISDKToolCallingModelOptions) {
     this.model = options.model;
     this.generateTextOverride = options.generateText;
     this.toolFactoryOverride = options.toolFactory;
@@ -47,7 +47,7 @@ export class AISDKToolCallingModel implements ToolCallingModel {
           };
         }
 
-        const runtime = await loadAISDKRuntime();
+        const runtime = await loadVercelAISDKRuntime();
         return {
           generateText: this.generateTextOverride ?? runtime.generateText,
           tool: this.toolFactoryOverride ?? runtime.tool,
@@ -58,21 +58,21 @@ export class AISDKToolCallingModel implements ToolCallingModel {
 
   public async complete(request: ToolCallingModelRequest): Promise<ToolCallingResponse> {
     const runtime = await this.runtimeLoader.get();
-    const tools = toAISDKTools(request.tools, runtime.tool);
+    const tools = toVercelAISDKTools(request.tools, runtime.tool);
 
     const response = await runtime.generateText({
       model: this.model,
       ...(request.systemPrompt?.trim() ? { system: request.systemPrompt.trim() } : {}),
-      messages: toAISDKMessages(request),
+      messages: toVercelAISDKMessages(request),
       ...(Object.keys(tools).length > 0 ? { tools } : {}),
     });
 
-    return parseAISDKResponse(response);
+    return parseVercelAISDKResponse(response);
   }
 }
 
-function toAISDKMessages(request: ToolCallingModelRequest): Array<Record<string, unknown>> {
-  const messages = mapConversationMessages(request, toAISDKMessage);
+function toVercelAISDKMessages(request: ToolCallingModelRequest): Array<Record<string, unknown>> {
+  const messages = mapConversationMessages(request, toVercelAISDKMessage);
 
   for (const round of request.toolRounds ?? []) {
     messages.push({
@@ -99,7 +99,7 @@ function toAISDKMessages(request: ToolCallingModelRequest): Array<Record<string,
   return messages;
 }
 
-function toAISDKMessage(entry: Record<string, unknown>): Record<string, unknown> | null {
+function toVercelAISDKMessage(entry: Record<string, unknown>): Record<string, unknown> | null {
   const role = normalizeConversationRole(entry.role);
   if (!role) {
     return null;
@@ -111,9 +111,9 @@ function toAISDKMessage(entry: Record<string, unknown>): Record<string, unknown>
   };
 }
 
-function toAISDKTools(
+function toVercelAISDKTools(
   schemas: Array<Record<string, unknown>>,
-  toolFactory: AISDKToolFactory,
+  toolFactory: VercelAISDKToolFactory,
 ): Record<string, unknown> {
   const tools: Record<string, unknown> = {};
 
@@ -145,9 +145,9 @@ function toAISDKTools(
   return tools;
 }
 
-function parseAISDKResponse(response: Record<string, unknown>): ToolCallingResponse {
+function parseVercelAISDKResponse(response: Record<string, unknown>): ToolCallingResponse {
   const text = typeof response.text === "string" ? response.text.trim() : "";
-  const toolCalls = parseAISDKToolCalls(response.toolCalls);
+  const toolCalls = parseVercelAISDKToolCalls(response.toolCalls);
 
   return {
     ...(text ? { text } : {}),
@@ -155,7 +155,7 @@ function parseAISDKResponse(response: Record<string, unknown>): ToolCallingRespo
   };
 }
 
-function parseAISDKToolCalls(raw: unknown): ToolCall[] {
+function parseVercelAISDKToolCalls(raw: unknown): ToolCall[] {
   if (!Array.isArray(raw)) {
     return [];
   }
@@ -176,7 +176,7 @@ function parseAISDKToolCalls(raw: unknown): ToolCall[] {
     const input = toolCall.input;
     const error = toolCall.error;
     const parseError = toolCall.invalid === true
-      ? (error instanceof Error ? error.message : (typeof error === "string" ? error : "AI SDK returned an invalid tool call."))
+      ? (error instanceof Error ? error.message : (typeof error === "string" ? error : "Vercel AI SDK returned an invalid tool call."))
       : undefined;
 
     toolCalls.push({
@@ -192,19 +192,19 @@ function parseAISDKToolCalls(raw: unknown): ToolCall[] {
   return toolCalls;
 }
 
-async function loadAISDKRuntime(): Promise<AISDKRuntime> {
+async function loadVercelAISDKRuntime(): Promise<VercelAISDKRuntime> {
   const module = (await import("ai").catch((error: unknown) => {
     throw new UnsupportedFeatureError(
-      `AISDKAdapter requires optional dependency "ai". Install it with "pnpm add ai". (${error instanceof Error ? error.message : String(error)})`,
+      `VercelAISDKAdapter requires optional dependency "ai". Install it with "pnpm add ai". (${error instanceof Error ? error.message : String(error)})`,
     );
   })) as {
-    generateText?: AISDKGenerateText;
-    tool?: AISDKToolFactory;
+    generateText?: VercelAISDKGenerateText;
+    tool?: VercelAISDKToolFactory;
   };
 
   if (!module.generateText || !module.tool) {
     throw new UnsupportedFeatureError(
-      'AISDKAdapter requires optional dependency "ai". Install it with "pnpm add ai".',
+      'VercelAISDKAdapter requires optional dependency "ai". Install it with "pnpm add ai".',
     );
   }
 

@@ -16,7 +16,7 @@ describe("converter exports", () => {
     expect(converters).toHaveProperty("LangChainHistoryConverter");
     expect(converters).toHaveProperty("ACPClientHistoryConverter");
     expect(converters).toHaveProperty("ACPServerHistoryConverter");
-    expect(converters).toHaveProperty("AISDKHistoryConverter");
+    expect(converters).toHaveProperty("VercelAISDKHistoryConverter");
   });
 
   it("extracts Claude, Codex, Google ADK, and Opencode session ids from history markers", () => {
@@ -269,8 +269,8 @@ describe("converter exports", () => {
     ]);
   });
 
-  it("converts history into AI SDK transcripts", () => {
-    const converter = new converters.AISDKHistoryConverter("Weather Agent");
+  it("converts history into Vercel AI SDK transcripts", () => {
+    const converter = new converters.VercelAISDKHistoryConverter("Weather Agent");
     const result = converter.convert([
       {
         sender_name: "Jane",

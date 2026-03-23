@@ -8,11 +8,11 @@ export {
   type ThenvoiACPServerAdapterOptions,
 } from "./acp";
 export {
-  AISDKAdapter,
-  AISDKToolCallingModel,
-  type AISDKAdapterOptions,
-  type AISDKToolCallingModelOptions,
-} from "./ai-sdk";
+  VercelAISDKAdapter,
+  VercelAISDKToolCallingModel,
+  type VercelAISDKAdapterOptions,
+  type VercelAISDKToolCallingModelOptions,
+} from "./vercel-ai-sdk";
 export {
   OpenAIAdapter,
   OpenAIToolCallingModel,

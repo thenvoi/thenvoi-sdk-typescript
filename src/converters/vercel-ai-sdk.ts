@@ -2,7 +2,7 @@ import type { HistoryConverter } from "../contracts/protocols";
 
 import { parseToolCall, parseToolResult } from "./shared";
 
-export type AISDKMessage =
+export type VercelAISDKMessage =
   | { role: "system"; content: string }
   | { role: "user"; content: string }
   | {
@@ -22,23 +22,23 @@ export type AISDKMessage =
     }>;
   };
 
-export type AISDKMessages = AISDKMessage[];
+export type VercelAISDKMessages = VercelAISDKMessage[];
 
-type AISDKToolCallPart = {
+type VercelAISDKToolCallPart = {
   type: "tool-call";
   toolCallId: string;
   toolName: string;
   input: Record<string, unknown>;
 };
 
-type AISDKToolResultPart = {
+type VercelAISDKToolResultPart = {
   type: "tool-result";
   toolCallId: string;
   toolName: string;
   output: unknown;
 };
 
-function flushPendingToolCalls(messages: AISDKMessages, pendingToolCalls: AISDKToolCallPart[]): void {
+function flushPendingToolCalls(messages: VercelAISDKMessages, pendingToolCalls: VercelAISDKToolCallPart[]): void {
   if (pendingToolCalls.length === 0) {
     return;
   }
@@ -51,8 +51,8 @@ function flushPendingToolCalls(messages: AISDKMessages, pendingToolCalls: AISDKT
 }
 
 function flushPendingToolResults(
-  messages: AISDKMessages,
-  pendingToolResults: AISDKToolResultPart[],
+  messages: VercelAISDKMessages,
+  pendingToolResults: VercelAISDKToolResultPart[],
 ): void {
   if (pendingToolResults.length === 0) {
     return;
@@ -65,7 +65,7 @@ function flushPendingToolResults(
   pendingToolResults.length = 0;
 }
 
-export class AISDKHistoryConverter implements HistoryConverter<AISDKMessages> {
+export class VercelAISDKHistoryConverter implements HistoryConverter<VercelAISDKMessages> {
   private agentName: string;
 
   public constructor(agentName = "") {
@@ -76,10 +76,10 @@ export class AISDKHistoryConverter implements HistoryConverter<AISDKMessages> {
     this.agentName = name;
   }
 
-  public convert(raw: Array<Record<string, unknown>>): AISDKMessages {
-    const messages: AISDKMessages = [];
-    const pendingToolCalls: AISDKToolCallPart[] = [];
-    const pendingToolResults: AISDKToolResultPart[] = [];
+  public convert(raw: Array<Record<string, unknown>>): VercelAISDKMessages {
+    const messages: VercelAISDKMessages = [];
+    const pendingToolCalls: VercelAISDKToolCallPart[] = [];
+    const pendingToolResults: VercelAISDKToolResultPart[] = [];
 
     for (const entry of raw) {
       const messageType = String(entry.message_type ?? "text");
