@@ -2,7 +2,7 @@ import type { ThenvoiLink } from "../../platform/ThenvoiLink";
 import type { ContactEvent, PlatformEvent } from "../../platform/events";
 import type { Logger } from "../../core/logger";
 import { NoopLogger } from "../../core/logger";
-import type { MetadataMap } from "../../contracts/dtos";
+import type { MetadataMap, ParticipantRecord } from "../../contracts/dtos";
 import { Execution } from "../Execution";
 import { ExecutionContext } from "../ExecutionContext";
 import { hydrateTrackedRooms, trackRoomJoin, trackRoomLeave } from "./subscriptions";
@@ -17,7 +17,7 @@ interface AgentRuntimeOptions {
   onRoomJoined?: (roomId: string, payload: MetadataMap) => Promise<void> | void;
   onRoomLeft?: (roomId: string) => Promise<void> | void;
   onContactEvent?: (event: ContactEvent) => Promise<void>;
-  onParticipantAdded?: (roomId: string, participant: { id: string; name: string; type: string; handle?: string | null }) => Promise<void> | void;
+  onParticipantAdded?: (roomId: string, participant: ParticipantRecord) => Promise<void> | void;
   onError?: (error: unknown, event: PlatformEvent) => void;
   sessionConfig?: SessionConfig;
   agentConfig?: AgentConfig;
@@ -32,7 +32,7 @@ export class AgentRuntime {
   private readonly onRoomJoined?: (roomId: string, payload: MetadataMap) => Promise<void> | void;
   private readonly onRoomLeft?: (roomId: string) => Promise<void> | void;
   private readonly onContactEvent?: (event: ContactEvent) => Promise<void>;
-  private readonly onParticipantAdded?: (roomId: string, participant: { id: string; name: string; type: string; handle?: string | null }) => Promise<void> | void;
+  private readonly onParticipantAdded?: (roomId: string, participant: ParticipantRecord) => Promise<void> | void;
   private readonly onError?: (error: unknown, event: PlatformEvent) => void;
   private readonly sessionConfig: Required<SessionConfig>;
   private readonly autoSubscribeExistingRooms: boolean;
