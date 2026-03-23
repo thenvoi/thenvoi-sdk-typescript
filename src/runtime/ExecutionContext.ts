@@ -6,6 +6,7 @@ import { UnsupportedFeatureError } from "../core/errors";
 import type { ConversationContext, PlatformMessage } from "./types";
 import { AgentTools } from "./tools/AgentTools";
 import { MessageRetryTracker } from "./retryTracker";
+import { buildParticipantsMessage } from "./formatters";
 
 export type ExecutionState = "starting" | "idle" | "processing";
 
@@ -24,6 +25,8 @@ interface ExecutionContextOptions {
   enableContextHydration?: boolean;
 }
 
+const DEDUP_CACHE_MAX = 500;
+
 export class ExecutionContext {
   public readonly roomId: string;
   public readonly link: ExecutionContextLink;
@@ -33,10 +36,12 @@ export class ExecutionContext {
   private readonly enableContextHydration: boolean;
   private readonly history: PlatformMessage[] = [];
   private messageIds = new Set<string>();
+  private readonly dedupCache = new Map<string, true>();
   private participants: ParticipantRecord[] = [];
   private readonly tools: AgentTools;
   private readonly adapterTools: AdapterToolsProtocol;
   private participantsMessage: string | null = null;
+  private lastSentParticipantIds: Set<string> | null = null;
   private contactsMessage: string | null = null;
   private contextCache: ConversationContext | null = null;
   private contextCacheExpiresAt = 0;
@@ -98,7 +103,7 @@ export class ExecutionContext {
   }
 
   public hasMessage(messageId: string): boolean {
-    return this.messageIds.has(messageId);
+    return this.messageIds.has(messageId) || this.dedupCache.has(messageId);
   }
 
   public recordMessage(message: PlatformMessage): void {
@@ -106,6 +111,7 @@ export class ExecutionContext {
       return;
     }
 
+    this.trackDedup(message.id);
     this.history.push(message);
     if (this.history.length > this.maxContextMessages) {
       this.history.splice(0, this.history.length - this.maxContextMessages);
@@ -168,9 +174,33 @@ export class ExecutionContext {
   }
 
   public consumeParticipantsMessage(): string | null {
-    const value = this.participantsMessage;
-    this.participantsMessage = null;
-    return value;
+    const currentIds = new Set(this.participants.map((p) => String(p.id)));
+    const changed = !this.lastSentParticipantIds
+      || currentIds.size !== this.lastSentParticipantIds.size
+      || [...currentIds].some((id) => !this.lastSentParticipantIds!.has(id));
+
+    if (!changed && !this.participantsMessage) {
+      return null;
+    }
+
+    const parts: string[] = [];
+    if (this.participantsMessage) {
+      parts.push(this.participantsMessage);
+      this.participantsMessage = null;
+    }
+
+    if (changed) {
+      const asRecords = this.participants.map((p) => ({
+        id: p.id,
+        name: p.name,
+        type: p.type,
+        handle: p.handle ?? null,
+      }));
+      parts.push(buildParticipantsMessage(asRecords));
+    }
+
+    this.lastSentParticipantIds = currentIds;
+    return parts.length > 0 ? parts.join("\n") : null;
   }
 
   public consumeContactsMessage(): string | null {
@@ -333,5 +363,15 @@ export class ExecutionContext {
 
   private rebuildMessageIds(): void {
     this.messageIds = new Set(this.history.map((entry) => entry.id));
+  }
+
+  private trackDedup(messageId: string): void {
+    this.dedupCache.set(messageId, true);
+    if (this.dedupCache.size > DEDUP_CACHE_MAX) {
+      const first = this.dedupCache.keys().next();
+      if (!first.done) {
+        this.dedupCache.delete(first.value);
+      }
+    }
   }
 }

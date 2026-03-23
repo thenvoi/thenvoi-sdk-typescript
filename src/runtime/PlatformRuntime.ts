@@ -4,6 +4,8 @@ import { ThenvoiLink, type ThenvoiLinkOptions } from "../platform/ThenvoiLink";
 import { AgentRuntime } from "./rooms/AgentRuntime";
 import type { AgentConfig, ContactEventConfig, SessionConfig } from "./types";
 import type { PlatformMessage } from "./types";
+import { SYNTHETIC_SENDER_TYPE, SYNTHETIC_CONTACT_EVENTS_SENDER_ID } from "./types";
+import type { ParticipantRecord } from "../contracts/dtos";
 import { RuntimeStateError, ValidationError } from "../core/errors";
 import { DefaultPreprocessor } from "./preprocessing/DefaultPreprocessor";
 import { ContactEventHandler } from "./ContactEventHandler";
@@ -23,6 +25,8 @@ export interface PlatformRuntimeOptions {
   contactConfig?: ContactEventConfig;
   agentConfig?: AgentConfig;
   logger?: Logger;
+  onParticipantAdded?: (roomId: string, participant: ParticipantRecord) => Promise<void> | void;
+  onParticipantRemoved?: (roomId: string, participantId: string) => Promise<void> | void;
   identity?: {
     name: string;
     description?: string | null;
@@ -44,6 +48,8 @@ export class PlatformRuntime {
     description?: string | null;
   };
   private readonly logger: Logger;
+  private readonly _onParticipantAdded?: (roomId: string, participant: ParticipantRecord) => Promise<void> | void;
+  private readonly _onParticipantRemoved?: (roomId: string, participantId: string) => Promise<void> | void;
 
   private linkInstance?: ThenvoiLink;
   private initPromise: Promise<void> | null = null;
@@ -80,6 +86,8 @@ export class PlatformRuntime {
     this.agentConfig = options.agentConfig;
     this.logger = options.logger ?? new NoopLogger();
     this.configuredIdentity = options.identity;
+    this._onParticipantAdded = options.onParticipantAdded;
+    this._onParticipantRemoved = options.onParticipantRemoved;
   }
 
   public get link(): ThenvoiLink {
@@ -186,6 +194,8 @@ export class PlatformRuntime {
         onExecute: (context, event) => this.executeAdapter(context, event, adapter),
         onSessionCleanup: (roomId) => adapter.onCleanup(roomId),
         onContactEvent: (event) => this.handleContactEvent(event),
+        onParticipantAdded: this._onParticipantAdded,
+        onParticipantRemoved: this._onParticipantRemoved,
       });
 
       await this.runtime.start();
@@ -287,20 +297,22 @@ export class PlatformRuntime {
 
     const messageId = String(input.message.id ?? "");
     const roomId = input.roomId;
+    const isSynthetic = input.message.senderType === SYNTHETIC_SENDER_TYPE
+      && input.message.senderId === SYNTHETIC_CONTACT_EVENTS_SENDER_ID;
     const messageMarkOptions = { bestEffort: true } as const;
 
-    if (messageId) {
+    if (messageId && !isSynthetic) {
       await this.link.markProcessing(roomId, messageId, messageMarkOptions);
     }
 
     try {
       await adapter.onEvent(input);
-      if (messageId) {
+      if (messageId && !isSynthetic) {
         await this.link.markProcessed(roomId, messageId, messageMarkOptions);
       }
     } catch (error) {
       const label = error instanceof Error ? error.message : String(error);
-      if (messageId) {
+      if (messageId && !isSynthetic) {
         await this.link.markFailed(roomId, messageId, label, messageMarkOptions);
       }
       throw error;
@@ -335,10 +347,14 @@ export class PlatformRuntime {
         return `[System]: New contact request from ${event.payload.from_name} (${event.payload.from_handle}).`;
       case "contact_request_updated":
         return `[System]: Contact request ${event.payload.id} updated to ${event.payload.status}.`;
-      case "contact_added":
-        return `[System]: Contact added: ${event.payload.name} (${event.payload.handle}).`;
+      case "contact_added": {
+        const handle = event.payload.handle?.startsWith("@")
+          ? event.payload.handle
+          : `@${event.payload.handle}`;
+        return `[Contacts]: ${handle} (${event.payload.name}) is now a contact`;
+      }
       case "contact_removed":
-        return `[System]: Contact removed: ${event.payload.id}.`;
+        return `[Contacts]: Contact ${event.payload.id} was removed`;
     }
 
     return assertNever(event);

@@ -220,8 +220,8 @@ describe("PlatformRuntime coverage", () => {
     expect(injected).toEqual([
       "[System]: New contact request from Jane (@jane).",
       "[System]: Contact request r1 updated to approved.",
-      "[System]: Contact added: Jane (@jane).",
-      "[System]: Contact removed: c1.",
+      "[Contacts]: @jane (Jane) is now a contact",
+      "[Contacts]: Contact c1 was removed",
     ]);
   });
 });

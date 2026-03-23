@@ -18,6 +18,7 @@ interface AgentRuntimeOptions {
   onRoomLeft?: (roomId: string) => Promise<void> | void;
   onContactEvent?: (event: ContactEvent) => Promise<void>;
   onParticipantAdded?: (roomId: string, participant: ParticipantRecord) => Promise<void> | void;
+  onParticipantRemoved?: (roomId: string, participantId: string) => Promise<void> | void;
   onError?: (error: unknown, event: PlatformEvent) => void;
   sessionConfig?: SessionConfig;
   agentConfig?: AgentConfig;
@@ -33,6 +34,7 @@ export class AgentRuntime {
   private readonly onRoomLeft?: (roomId: string) => Promise<void> | void;
   private readonly onContactEvent?: (event: ContactEvent) => Promise<void>;
   private readonly onParticipantAdded?: (roomId: string, participant: ParticipantRecord) => Promise<void> | void;
+  private readonly onParticipantRemoved?: (roomId: string, participantId: string) => Promise<void> | void;
   private readonly onError?: (error: unknown, event: PlatformEvent) => void;
   private readonly sessionConfig: Required<SessionConfig>;
   private readonly autoSubscribeExistingRooms: boolean;
@@ -58,6 +60,7 @@ export class AgentRuntime {
     this.logger = options.logger ?? new NoopLogger();
     this.onContactEvent = options.onContactEvent;
     this.onParticipantAdded = options.onParticipantAdded;
+    this.onParticipantRemoved = options.onParticipantRemoved;
     this.sessionConfig = {
       enableContextCache: options.sessionConfig?.enableContextCache ?? true,
       contextCacheTtlSeconds: options.sessionConfig?.contextCacheTtlSeconds ?? 300,
@@ -246,6 +249,7 @@ export class AgentRuntime {
         if (event.roomId) {
           const context = this.getOrCreateContext(event.roomId);
           context.removeParticipant(event.payload.id);
+          await this.onParticipantRemoved?.(event.roomId, event.payload.id);
         }
         return;
       case "contact_request_received":

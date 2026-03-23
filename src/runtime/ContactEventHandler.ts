@@ -253,13 +253,17 @@ export class ContactEventHandler {
 
   private formatBroadcast(event: ContactEvent): string {
     switch (event.type) {
-      case "contact_added":
-        return `[System]: Contact added: ${event.payload.name} (@${event.payload.handle}).`;
+      case "contact_added": {
+        const handle = event.payload.handle?.startsWith("@")
+          ? event.payload.handle
+          : `@${event.payload.handle}`;
+        return `[Contacts]: ${handle} (${event.payload.name}) is now a contact`;
+      }
       case "contact_removed":
-        return `[System]: Contact removed: ${event.payload.id}.`;
+        return `[Contacts]: Contact ${event.payload.id} was removed`;
     }
 
-    return `[System]: Contact event: ${event.type}.`;
+    return `[Contacts]: Contact event: ${event.type}`;
   }
 
   private cacheRequestInfo(id: string, info: RequestInfo): void {

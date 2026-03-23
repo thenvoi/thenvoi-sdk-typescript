@@ -328,8 +328,10 @@ describe("ContactEventHandler", () => {
       await handler.handle(makeContactRemoved(), new FakeTools());
 
       expect(onBroadcast).toHaveBeenCalledTimes(2);
-      expect(onBroadcast.mock.calls[0][0]).toContain("Contact added");
-      expect(onBroadcast.mock.calls[1][0]).toContain("Contact removed");
+      expect(onBroadcast.mock.calls[0][0]).toContain("[Contacts]:");
+      expect(onBroadcast.mock.calls[0][0]).toContain("is now a contact");
+      expect(onBroadcast.mock.calls[1][0]).toContain("[Contacts]:");
+      expect(onBroadcast.mock.calls[1][0]).toContain("was removed");
     });
 
     it("does not broadcast contact_request events", async () => {
