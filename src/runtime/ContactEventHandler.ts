@@ -49,9 +49,14 @@ interface RequestInfo {
   message: string | null;
 }
 
+type ContactHandlerRestApi =
+  & Pick<ChatMessagingRestApi, "createChatEvent">
+  & Pick<ChatRoomRestApi, "createChat">
+  & Partial<Pick<ContactRestApi, "listContactRequests">>;
+
 interface ContactEventHandlerOptions {
   config: ContactEventConfig;
-  rest: Pick<ChatMessagingRestApi, "createChatEvent"> & Pick<ChatRoomRestApi, "createChat"> & Partial<Pick<ContactRestApi, "listContactRequests">>;
+  rest: ContactHandlerRestApi;
   logger?: Logger;
   onBroadcast?: (message: string) => void;
   onHubEvent?: (roomId: string, event: MessageEvent) => Promise<void>;
@@ -81,7 +86,7 @@ export class ContactEventHandlerError extends Error {
 
 export class ContactEventHandler {
   private readonly config: ContactEventConfig;
-  private readonly rest: Pick<ChatMessagingRestApi, "createChatEvent"> & Pick<ChatRoomRestApi, "createChat"> & Partial<Pick<ContactRestApi, "listContactRequests">>;
+  private readonly rest: ContactHandlerRestApi;
   private readonly logger: Logger;
   private readonly onBroadcast?: (message: string) => void;
   private readonly onHubEvent?: (roomId: string, event: MessageEvent) => Promise<void>;
@@ -105,6 +110,11 @@ export class ContactEventHandler {
 
   public async handle(event: ContactEvent, tools?: AdapterToolsProtocol): Promise<void> {
     const strategy = this.config.strategy ?? "disabled";
+    const hasBroadcast = this.config.broadcastChanges && this.onBroadcast;
+
+    if (strategy === "disabled" && !hasBroadcast) {
+      return;
+    }
 
     const dedupKey = this.buildDedupKey(event);
     if (this.dedup.has(dedupKey)) {
@@ -124,10 +134,10 @@ export class ContactEventHandler {
       }
 
       // Broadcast runs regardless of strategy (only for added/removed)
-      if (this.config.broadcastChanges && this.onBroadcast) {
+      if (hasBroadcast) {
         const broadcastMsg = this.formatBroadcast(event);
         if (broadcastMsg) {
-          this.onBroadcast(broadcastMsg);
+          this.onBroadcast!(broadcastMsg);
         }
       }
 

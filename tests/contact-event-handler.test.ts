@@ -314,6 +314,87 @@ describe("ContactEventHandler", () => {
       expect(formatted).toContain("req-99");
       expect(formatted).toContain("rejected");
     });
+
+    it("fetches from API on cache miss (received request)", async () => {
+      const rest = {
+        ...makeRest(),
+        listContactRequests: vi.fn().mockResolvedValue({
+          received: [
+            { id: "req-api", from_handle: "bob", from_name: "Bob", message: null },
+          ],
+          sent: [],
+        }),
+      };
+      const handler = new ContactEventHandler({
+        config: { strategy: "hub_room", hubTaskId: "task-1" },
+        rest,
+      });
+
+      const formatted = await handler.formatEventMessage(makeContactRequestUpdated("req-api", "approved"));
+      expect(formatted).toContain("Bob");
+      expect(formatted).toContain("@bob");
+      expect(formatted).toContain("approved");
+      expect(formatted).toContain("from");
+      expect(rest.listContactRequests).toHaveBeenCalledOnce();
+    });
+
+    it("fetches from API on cache miss (sent request)", async () => {
+      const rest = {
+        ...makeRest(),
+        listContactRequests: vi.fn().mockResolvedValue({
+          received: [],
+          sent: [
+            { id: "req-sent", to_handle: "carol", to_name: "Carol", message: null },
+          ],
+        }),
+      };
+      const handler = new ContactEventHandler({
+        config: { strategy: "hub_room", hubTaskId: "task-1" },
+        rest,
+      });
+
+      const formatted = await handler.formatEventMessage(makeContactRequestUpdated("req-sent", "rejected"));
+      expect(formatted).toContain("Carol");
+      expect(formatted).toContain("@carol");
+      expect(formatted).toContain("to");
+      expect(rest.listContactRequests).toHaveBeenCalledOnce();
+    });
+
+    it("caches API-fetched results for subsequent lookups", async () => {
+      const rest = {
+        ...makeRest(),
+        listContactRequests: vi.fn().mockResolvedValue({
+          received: [
+            { id: "req-cached", from_handle: "dave", from_name: "Dave", message: null },
+          ],
+          sent: [],
+        }),
+      };
+      const handler = new ContactEventHandler({
+        config: { strategy: "hub_room", hubTaskId: "task-1" },
+        rest,
+      });
+
+      await handler.formatEventMessage(makeContactRequestUpdated("req-cached", "approved"));
+      await handler.formatEventMessage(makeContactRequestUpdated("req-cached", "confirmed"));
+      expect(rest.listContactRequests).toHaveBeenCalledOnce();
+    });
+
+    it("degrades gracefully on API failure", async () => {
+      const rest = {
+        ...makeRest(),
+        listContactRequests: vi.fn().mockRejectedValue(new Error("network error")),
+      };
+      const handler = new ContactEventHandler({
+        config: { strategy: "hub_room", hubTaskId: "task-1" },
+        rest,
+      });
+
+      const formatted = await handler.formatEventMessage(makeContactRequestUpdated("req-fail", "approved"));
+      expect(formatted).toContain("req-fail");
+      expect(formatted).toContain("approved");
+      expect(formatted).not.toContain("undefined");
+    });
   });
 
   describe("broadcast", () => {
