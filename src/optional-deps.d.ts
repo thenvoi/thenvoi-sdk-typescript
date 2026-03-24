@@ -9,3 +9,4 @@ declare module "@langchain/core/tools";
 declare module "ai";
 declare module "openai";
 declare module "parlant-client";
+declare module "@letta-ai/letta-client";

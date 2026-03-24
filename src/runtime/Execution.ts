@@ -86,6 +86,10 @@ export class Execution {
   }
 
   public async bootstrapMessage(message: PlatformMessage): Promise<void> {
+    // Record the ID before executing so that the concurrent synchronizeWithNext()
+    // loop (started in the constructor) will skip this message if it encounters
+    // it in the REST queue, preventing duplicate processing.
+    this.syncProcessedIds.add(message.id);
     await this.executeSyncMessage(toMessageEvent(message), message.id);
   }
 

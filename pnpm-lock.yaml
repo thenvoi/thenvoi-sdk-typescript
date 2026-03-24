@@ -26,6 +26,9 @@ importers:
       '@langchain/langgraph':
         specifier: ^1.2.0
         version: 1.2.0(@langchain/core@1.1.31(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-base@2.6.0(@opentelemetry/api@1.9.0))(openai@6.27.0(ws@8.19.0)(zod@3.25.76)))(zod-to-json-schema@3.25.1(zod@3.25.76))(zod@3.25.76)
+      '@letta-ai/letta-client':
+        specifier: ^1.7.0
+        version: 1.7.12
       '@thenvoi/rest-client':
         specifier: 0.0.112-rc.0
         version: 0.0.112-rc.0
@@ -92,7 +95,7 @@ importers:
         version: 3.2.4(vitest@3.2.4(@types/node@22.19.13)(tsx@4.21.0))
       ai:
         specifier: ^6.0.137
-        version: 6.0.137(zod@3.25.76)
+        version: 6.0.138(zod@3.25.76)
       eslint:
         specifier: ^9.22.0
         version: 9.39.3
@@ -131,8 +134,8 @@ packages:
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
 
-  '@ai-sdk/gateway@3.0.79':
-    resolution: {integrity: sha512-Wk2QJpqd0em5YcR49uoMCy9msyANAYgjXdlRcqqRt2fz4rNLnMMrKOlLwAXoFzR1ElR3bj4e/k6hscRfjpzSGA==}
+  '@ai-sdk/gateway@3.0.80':
+    resolution: {integrity: sha512-uM7kpZB5l977lW7+2X1+klBUxIZQ78+1a9jHlaHFEzcOcmmslTl3sdP0QqfuuBcO0YBM2gwOiqVdp8i4TRQYcw==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -732,6 +735,9 @@ packages:
     peerDependenciesMeta:
       zod-to-json-schema:
         optional: true
+
+  '@letta-ai/letta-client@1.7.12':
+    resolution: {integrity: sha512-OV3YuT+f8iVfu56JugDEz/29tBm3SZXMgdNAG016Lu1zneDSSt+7tFpI6eetrKRhJ8RWLJzCwnrkmXNnph1Wuw==}
 
   '@linear/sdk@76.0.0':
     resolution: {integrity: sha512-Xt0x5Kl6qBoWhGFypb8ykyP+c5kT7scmRPs1uJidSPOaRgkMJ/4y41QpmZCWCBUMmZtf/O0VktgQio6rLXT94w==}
@@ -1379,8 +1385,8 @@ packages:
     resolution: {integrity: sha512-4I7Td01quW/RpocfNayFdFVk1qSuoh0E7JrbRJ16nH01HhKFQ88INq9Sd+nd72zqRySlr9BmDA8xlEJ6vJMrYA==}
     engines: {node: '>=8'}
 
-  ai@6.0.137:
-    resolution: {integrity: sha512-9e/mNMTmXmMkmldEJPIumy9FFBuUWHUyj2yF8EglC3VVOhVVBwlnpeHYSFKdNc13Jj6Hso3EJcZioMaofgCs4A==}
+  ai@6.0.138:
+    resolution: {integrity: sha512-49OfPe0f5uxJ6jUdA5BBXjIinP6+ZdYfAtpF2aEH64GA5wPcxH2rf/TBUQQ0bbamBz/D+TLMV18xilZqOC+zaA==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -3712,7 +3718,7 @@ snapshots:
     dependencies:
       zod: 3.25.76
 
-  '@ai-sdk/gateway@3.0.79(zod@3.25.76)':
+  '@ai-sdk/gateway@3.0.80(zod@3.25.76)':
     dependencies:
       '@ai-sdk/provider': 3.0.8
       '@ai-sdk/provider-utils': 4.0.21(zod@3.25.76)
@@ -4344,6 +4350,8 @@ snapshots:
     transitivePeerDependencies:
       - react
       - react-dom
+
+  '@letta-ai/letta-client@1.7.12': {}
 
   '@linear/sdk@76.0.0(graphql@16.13.0)':
     dependencies:
@@ -5158,9 +5166,9 @@ snapshots:
       indent-string: 4.0.0
     optional: true
 
-  ai@6.0.137(zod@3.25.76):
+  ai@6.0.138(zod@3.25.76):
     dependencies:
-      '@ai-sdk/gateway': 3.0.79(zod@3.25.76)
+      '@ai-sdk/gateway': 3.0.80(zod@3.25.76)
       '@ai-sdk/provider': 3.0.8
       '@ai-sdk/provider-utils': 4.0.21(zod@3.25.76)
       '@opentelemetry/api': 1.9.0

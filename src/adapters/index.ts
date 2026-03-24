@@ -81,6 +81,20 @@ export {
   type ParlantMessages,
 } from "./parlant";
 export {
+  LettaAdapter,
+  LettaHistoryConverter,
+  type LettaAdapterOptions,
+  type LettaAgentCreateParams,
+  type LettaClientFactory,
+  type LettaClientLike,
+  type LettaMessage,
+  type LettaMessageCreateParams,
+  type LettaMessages,
+  type LettaRequestOptions,
+  type LettaResponse,
+  type LettaResponseMessage,
+} from "./letta";
+export {
   HttpOpencodeClient,
   HttpStatusError,
   OpencodeAdapter,
