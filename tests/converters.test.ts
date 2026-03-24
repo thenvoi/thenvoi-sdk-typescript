@@ -25,6 +25,11 @@ describe("converter exports", () => {
       { message_type: "task", metadata: { claude_sdk_session_id: "claude-123" } },
     ])).toBe("claude-123");
 
+    expect(converters.extractClaudeSessionId([
+      { id: "1" },
+      { message_type: "task", metadata: { claude_session_id: "claude-legacy-123" } },
+    ])).toBe("claude-legacy-123");
+
     expect(converters.extractCodexSessionId([
       { id: "1" },
       { message_type: "task", metadata: { codex_thread_id: "codex-thread-456" } },

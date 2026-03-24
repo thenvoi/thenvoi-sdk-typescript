@@ -159,4 +159,59 @@ describe("ThenvoiACPServerAdapter", () => {
     })).rejects.toThrow("bootstrap failed")
     expect(adapter.getSessionIds()).toEqual([])
   })
+
+  it("completes ACP prompts after tool-only room updates", async () => {
+    const sentMessages: Array<Record<string, unknown>> = []
+    const adapter = new ThenvoiACPServerAdapter({
+      thenvoiRest: new FakeRestApi({
+        createChat: async () => ({ id: "room-tools" }),
+        createChatMessage: async (_chatId, message) => {
+          sentMessages.push(message as Record<string, unknown>)
+          return { ok: true }
+        },
+        listChatParticipants: async () => [
+          { id: "agent-1", name: "Thenvoi Agent", type: "Agent", handle: "thenvoi" },
+          { id: "peer-1", name: "Codex", type: "Agent", handle: "codex" },
+        ],
+      }, { id: "agent-1", name: "Thenvoi Agent", description: null }),
+      promptCompletionGraceMs: 5,
+      responseTimeoutMs: 100,
+      slashCommands: {
+        codex: "Codex",
+      },
+    })
+    await adapter.onStarted("Thenvoi Agent", "ACP server")
+
+    adapter.bindConnection({
+      signal: new AbortController().signal,
+      closed: Promise.resolve(),
+      sessionUpdate: vi.fn(async () => undefined),
+    } as never)
+
+    const sessionId = await adapter.createSession()
+    const promptPromise = adapter.handlePrompt(sessionId, "/codex use tools only")
+    await vi.waitFor(() => {
+      expect(sentMessages).toHaveLength(1)
+    })
+
+    const toolOnlyMessage = {
+      ...makeMessage("{\"name\":\"lookup_weather\",\"tool_call_id\":\"call-1\",\"args\":{\"city\":\"Vancouver\"}}", "room-tools"),
+      messageType: "tool_call" as const,
+    }
+
+    await adapter.onMessage(
+      toolOnlyMessage,
+      new FakeTools(),
+      {
+        sessionToRoom: {},
+        sessionCwd: {},
+        sessionMcpServers: {},
+      },
+      null,
+      null,
+      { isSessionBootstrap: false, roomId: "room-tools" },
+    )
+
+    await expect(promptPromise).resolves.toBeUndefined()
+  })
 });

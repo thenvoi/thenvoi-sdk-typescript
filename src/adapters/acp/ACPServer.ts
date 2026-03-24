@@ -35,17 +35,21 @@ import {
 } from "@agentclientprotocol/sdk";
 
 import { ThenvoiACPServerAdapter } from "./ThenvoiACPServerAdapter";
+import { CursorExtensionHandler } from "./cursorExtensions";
+import type { ACPExtensionHandler } from "./extensions";
 
 export interface ACPServerOptions {
   modes?: SessionMode[];
   authMethods?: InitializeResponse["authMethods"];
   agentInfo?: Partial<Implementation>;
+  extensionHandler?: ACPExtensionHandler;
 }
 
 export class ACPServer implements Agent {
   private readonly adapter: ThenvoiACPServerAdapter
   private readonly authMethods: InitializeResponse["authMethods"]
   private readonly agentInfo: Partial<Implementation>
+  private readonly extensionHandler: ACPExtensionHandler
   private connection: AgentSideConnection | null = null
 
   public constructor(
@@ -62,6 +66,7 @@ export class ACPServer implements Agent {
       description: "Authenticate with THENVOI_API_KEY.",
     }]
     this.agentInfo = options?.agentInfo ?? {}
+    this.extensionHandler = options?.extensionHandler ?? new CursorExtensionHandler()
   }
 
   public connectStream(stream: Stream): AgentSideConnection {
@@ -126,7 +131,7 @@ export class ACPServer implements Agent {
       },
       agentInfo: {
         name: this.agentInfo.name ?? "thenvoi-agent",
-        title: this.agentInfo.title ?? this.adapter["agentName"] ?? "Thenvoi Agent",
+        title: this.agentInfo.title ?? this.adapter.displayName ?? "Thenvoi Agent",
         version: this.agentInfo.version ?? "0.1.0",
       },
       authMethods: this.authMethods,
@@ -283,30 +288,10 @@ export class ACPServer implements Agent {
     method: string,
     params: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    if (method === "cursor/ask_question") {
-      const options = Array.isArray(params.options) ? params.options : []
-      const first = options.find((option) => !!option && typeof option === "object") as Record<string, unknown> | undefined
-      if (!first) {
-        return {
-          outcome: {
-            type: "cancelled",
-          },
-        }
-      }
-
-      return {
-        outcome: {
-          type: "selected",
-          optionId: String(first.optionId ?? first.id ?? "0"),
-        },
-      }
-    }
-
-    if (method === "cursor/create_plan") {
-      return {
-        outcome: {
-          type: "approved",
-        },
+    if (this.extensionHandler.extMethod) {
+      const result = await this.extensionHandler.extMethod(method, params)
+      if (result) {
+        return result
       }
     }
 
@@ -331,39 +316,8 @@ export class ACPServer implements Agent {
       return
     }
 
-    if (method === "cursor/update_todos") {
-      const todos = Array.isArray(params.todos) ? params.todos : []
-      const text = todos
-        .filter((todo): todo is Record<string, unknown> => !!todo && typeof todo === "object")
-        .map((todo) => `- [${todo.completed === true ? "x" : " "}] ${String(todo.content ?? "")}`)
-        .join("\n")
-
-      if (text.length > 0) {
-        await connection.sessionUpdate({
-          sessionId,
-          update: {
-            sessionUpdate: "agent_message_chunk",
-            content: {
-              type: "text",
-              text,
-            },
-          },
-        })
-      }
-      return
-    }
-
-    if (method === "cursor/task" && typeof params.result === "string" && params.result.length > 0) {
-      await connection.sessionUpdate({
-        sessionId,
-        update: {
-          sessionUpdate: "agent_message_chunk",
-          content: {
-            type: "text",
-            text: `[Task completed] ${params.result}`,
-          },
-        },
-      })
+    if (this.extensionHandler.extNotification) {
+      await this.extensionHandler.extNotification(method, params, { sessionId, connection })
     }
   }
 }

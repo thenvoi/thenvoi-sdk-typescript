@@ -98,6 +98,10 @@ export class ThenvoiACPServerAdapter extends SimpleAdapter<ACPServerSessionState
     return this.roomToSession.get(roomId) ?? null
   }
 
+  public get displayName(): string {
+    return this.agentName
+  }
+
   public getSessionCwd(sessionId: string): string {
     return this.sessionCwds.get(sessionId) ?? "."
   }
@@ -171,12 +175,12 @@ export class ThenvoiACPServerAdapter extends SimpleAdapter<ACPServerSessionState
       mcpServers?: readonly McpServer[];
     } = {},
   ): Promise<string> {
+    this.sessionsInFlight += 1
     const activeCount = this.sessionToRoom.size + this.sessionsInFlight
-    if (activeCount >= this.maxSessions) {
+    if (activeCount > this.maxSessions) {
+      this.sessionsInFlight = Math.max(0, this.sessionsInFlight - 1)
       throw new Error(`Maximum ACP sessions (${this.maxSessions}) reached`)
     }
-
-    this.sessionsInFlight += 1
     try {
       const room = await this.thenvoiRest.createChat()
       const sessionId = randomUUID()
@@ -280,7 +284,7 @@ export class ThenvoiACPServerAdapter extends SimpleAdapter<ACPServerSessionState
         pending.terminalMessageSeen = true
       }
 
-      if (pending.terminalMessageSeen) {
+      if (update || pending.terminalMessageSeen) {
         this.schedulePromptCompletion(context.roomId, pending)
       }
       return

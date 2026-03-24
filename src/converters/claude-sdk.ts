@@ -29,9 +29,13 @@ export class ClaudeSDKHistoryConverter implements HistoryConverter<ClaudeSDKSess
 export function extractClaudeSessionId(raw: Array<Record<string, unknown>>): string | null {
   const metadata = findLatestTaskMetadata(
     raw,
-    (entry) => typeof entry.claude_sdk_session_id === "string" && entry.claude_sdk_session_id.length > 0,
+    (entry) => (
+      typeof entry.claude_sdk_session_id === "string" && entry.claude_sdk_session_id.length > 0
+    ) || (
+      typeof entry.claude_session_id === "string" && entry.claude_session_id.length > 0
+    ),
   );
-  const sessionId = metadata?.claude_sdk_session_id;
+  const sessionId = metadata?.claude_sdk_session_id ?? metadata?.claude_session_id;
   return typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
 }
 

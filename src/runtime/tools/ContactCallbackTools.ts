@@ -29,7 +29,8 @@ import type {
   AdapterToolsProtocol,
   AgentToolsCapabilities,
 } from "../../contracts/protocols";
-import { UnsupportedFeatureError, ValidationError } from "../../core/errors";
+import { UnsupportedFeatureError } from "../../core/errors";
+import { ContactToolsImpl } from "./ContactToolsImpl";
 
 type ContactCallbackRestApi =
   & Partial<AgentToolsRestApi>
@@ -62,19 +63,24 @@ export class ContactCallbackTools implements AdapterToolsProtocol {
   public readonly capabilities: Readonly<AgentToolsCapabilities>;
   private readonly rest: ContactCallbackRestApi;
   private readonly roomId: string | null;
+  private readonly contactTools: ContactToolsImpl | null;
 
   public constructor(rest: ContactCallbackRestApi, roomId: string | null) {
     this.rest = rest;
     this.roomId = roomId;
+
+    const hasContactMethods = Boolean(
+      rest.listContacts
+      || rest.addContact
+      || rest.removeContact
+      || rest.listContactRequests
+      || rest.respondContactRequest
+    );
+    this.contactTools = hasContactMethods ? new ContactToolsImpl(rest as ContactRestApi) : null;
+
     this.capabilities = Object.freeze({
       peers: Boolean(rest.listPeers),
-      contacts: Boolean(
-        rest.listContacts
-        || rest.addContact
-        || rest.removeContact
-        || rest.listContactRequests
-        || rest.respondContactRequest
-      ),
+      contacts: hasContactMethods,
       memory: Boolean(
         rest.listMemories
         || rest.storeMemory
@@ -183,109 +189,40 @@ export class ContactCallbackTools implements AdapterToolsProtocol {
   }
 
   public async listContacts(request: ListContactsArgs = {}): Promise<PaginatedList<ContactRecord>> {
-    if (!this.rest.listContacts) {
+    if (!this.contactTools) {
       throw new UnsupportedFeatureError("Contact listing is not available in current REST adapter");
     }
-
-    return this.rest.listContacts(
-      {
-        page: request.page ?? 1,
-        pageSize: request.pageSize ?? 50,
-      },
-      DEFAULT_REQUEST_OPTIONS,
-    );
+    return this.contactTools.listContacts(request);
   }
 
   public async addContact(request: AddContactArgs): Promise<ToolOperationResult> {
-    if (!this.rest.addContact) {
+    if (!this.contactTools) {
       throw new UnsupportedFeatureError("Contact creation is not available in current REST adapter");
     }
-
-    const handle = request.handle.trim();
-    if (handle.length === 0) {
-      throw new ValidationError("handle is required");
-    }
-
-    return this.rest.addContact(
-      {
-        handle,
-        ...(request.message ? { message: request.message } : {}),
-      },
-      DEFAULT_REQUEST_OPTIONS,
-    );
+    return this.contactTools.addContact(request);
   }
 
   public async removeContact(request: RemoveContactArgs): Promise<ToolOperationResult> {
-    if (!this.rest.removeContact) {
+    if (!this.contactTools) {
       throw new UnsupportedFeatureError("Contact removal is not available in current REST adapter");
     }
-
-    if (request.target === "handle") {
-      const handle = request.handle.trim();
-      if (handle.length === 0) {
-        throw new ValidationError("handle is required");
-      }
-
-      return this.rest.removeContact(
-        { target: "handle", handle },
-        DEFAULT_REQUEST_OPTIONS,
-      );
-    }
-
-    const contactId = request.contactId.trim();
-    if (contactId.length === 0) {
-      throw new ValidationError("contactId is required");
-    }
-
-    return this.rest.removeContact(
-      { target: "contactId", contactId },
-      DEFAULT_REQUEST_OPTIONS,
-    );
+    return this.contactTools.removeContact(request);
   }
 
   public async listContactRequests(
     request: ListContactRequestsArgs = {},
   ): Promise<ContactRequestsResult> {
-    if (!this.rest.listContactRequests) {
+    if (!this.contactTools) {
       throw new UnsupportedFeatureError("Contact request listing is not available in current REST adapter");
     }
-
-    return this.rest.listContactRequests(
-      {
-        page: request.page ?? 1,
-        pageSize: request.pageSize ?? 50,
-        sentStatus: request.sentStatus ?? "pending",
-      },
-      DEFAULT_REQUEST_OPTIONS,
-    );
+    return this.contactTools.listContactRequests(request);
   }
 
   public async respondContactRequest(request: RespondContactRequestArgs): Promise<ToolOperationResult> {
-    if (!this.rest.respondContactRequest) {
+    if (!this.contactTools) {
       throw new UnsupportedFeatureError("Contact request responses are not available in current REST adapter");
     }
-
-    if (request.target === "handle") {
-      const handle = request.handle.trim();
-      if (handle.length === 0) {
-        throw new ValidationError("handle is required");
-      }
-
-      return this.rest.respondContactRequest(
-        { action: request.action, target: "handle", handle },
-        DEFAULT_REQUEST_OPTIONS,
-      );
-    }
-
-    const requestId = request.requestId.trim();
-    if (requestId.length === 0) {
-      throw new ValidationError("requestId is required");
-    }
-
-    return this.rest.respondContactRequest(
-      { action: request.action, target: "requestId", requestId },
-      DEFAULT_REQUEST_OPTIONS,
-    );
+    return this.contactTools.respondContactRequest(request);
   }
 
   public async listMemories(args: ListMemoriesArgs = {}): Promise<PaginatedList<MemoryRecord>> {

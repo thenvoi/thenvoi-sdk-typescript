@@ -230,14 +230,15 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
       throw new Error("ACPClientAdapter was not started")
     }
 
-    if (!this.spawnPromise) {
+    const isCreator = !this.spawnPromise
+    if (isCreator) {
       this.spawnPromise = this.spawnConnection()
     }
 
     try {
-      return await this.spawnPromise
+      return await this.spawnPromise!
     } finally {
-      this.spawnPromise = null
+      if (isCreator) this.spawnPromise = null
     }
   }
 
@@ -483,7 +484,7 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
   }
 }
 
-async function createSubprocessConnection(
+export async function createSubprocessConnection(
   client: Client,
   options: {
     command: string[];
@@ -514,13 +515,33 @@ async function createSubprocessConnection(
   return {
     connection,
     stop: async () => {
-      if (!child.killed) {
-        child.kill()
-      }
-
       await new Promise<void>((resolve) => {
-        child.once("exit", () => resolve())
-        child.once("close", () => resolve())
+        if (child.exitCode !== null || child.signalCode !== null) {
+          resolve()
+          return
+        }
+
+        let settled = false
+        const finish = (): void => {
+          if (settled) {
+            return
+          }
+          settled = true
+          child.off("exit", finish)
+          child.off("close", finish)
+          resolve()
+        }
+
+        child.once("exit", finish)
+        child.once("close", finish)
+
+        if (!child.killed) {
+          child.kill()
+        }
+
+        if (child.exitCode !== null || child.signalCode !== null) {
+          finish()
+        }
       })
     },
   }

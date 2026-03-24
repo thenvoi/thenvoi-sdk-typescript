@@ -100,11 +100,11 @@ export function asJsonSafe(value: unknown): unknown {
 
   if (typeof value === "object") {
     if ("model_dump" in value && typeof value.model_dump === "function") {
-      return asJsonSafe(value.model_dump())
+      return asJsonSafe((value.model_dump as () => unknown)())
     }
 
     if ("toJSON" in value && typeof value.toJSON === "function") {
-      return asJsonSafe(value.toJSON())
+      return asJsonSafe((value.toJSON as () => unknown)())
     }
 
     return Object.fromEntries(

@@ -333,7 +333,7 @@ export class GoogleADKAdapter extends SimpleAdapter<GoogleADKMessages, AdapterTo
     sdk: GoogleAdkSdkLike,
     tools: AdapterToolsProtocol,
     schema: Record<string, unknown>,
-  ): unknown | null {
+  ): unknown {
     const functionDef = asOptionalRecord(schema.function) ?? {};
     const name = functionDef?.name;
     if (typeof name !== "string" || name.length === 0) {

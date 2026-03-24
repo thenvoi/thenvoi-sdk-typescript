@@ -106,7 +106,7 @@ interface OpencodeAdapterOptions {
   logger?: Logger;
 }
 
-function createDeferred(): { promise: Promise<void>; resolve(): void } {
+function createDeferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;
   const promise = new Promise<void>((innerResolve) => {
     resolve = innerResolve;

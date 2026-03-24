@@ -1,28 +1,11 @@
 import { findLatestTaskMetadata } from "../adapters/shared/history";
+import { asOptionalString, parseDate } from "./shared";
 
 export interface OpencodeSessionState {
   sessionId: string | null;
   roomId: string | null;
   createdAt: Date | null;
   replayMessages: string[];
-}
-
-function parseDate(value: unknown): Date | null {
-  if (typeof value !== "string" || value.length === 0) {
-    return null;
-  }
-
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function asOptionalString(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
 }
 
 export class OpencodeHistoryConverter {
@@ -56,10 +39,12 @@ export class OpencodeHistoryConverter {
 export function extractOpencodeSessionId(
   raw: Array<Record<string, unknown>>,
 ): string | null {
-  return findLatestTaskMetadata(
-    raw,
-    (entry) => typeof entry.opencode_session_id === "string" && entry.opencode_session_id.length > 0,
-  )?.opencode_session_id as string | null ?? null;
+  return asOptionalString(
+    findLatestTaskMetadata(
+      raw,
+      (entry) => typeof entry.opencode_session_id === "string" && entry.opencode_session_id.length > 0,
+    )?.opencode_session_id,
+  );
 }
 
 function buildReplayMessages(raw: Array<Record<string, unknown>>): string[] {

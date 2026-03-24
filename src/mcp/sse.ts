@@ -21,10 +21,13 @@ export interface ThenvoiMcpSseServerOptions {
 interface SessionRecord {
   mcpServer: InstanceType<typeof import("@modelcontextprotocol/sdk/server/mcp.js").McpServer>;
   transport: import("@modelcontextprotocol/sdk/server/sse.js").SSEServerTransport;
+  lastSeenAt: number;
 }
 
 const PORT_RANGE_START = 50000
 const PORT_RANGE_END = 60000
+const SESSION_IDLE_TTL_MS = 15 * 60 * 1000
+const SESSION_SWEEP_INTERVAL_MS = 60 * 1000
 
 export class ThenvoiMcpSseServer {
   private readonly options: ThenvoiMcpSseServerOptions
@@ -32,6 +35,7 @@ export class ThenvoiMcpSseServer {
   private httpServer: import("node:http").Server | null = null
   private actualPort: number | null = null
   private readonly sessions = new Map<string, SessionRecord>()
+  private sweepTimer: ReturnType<typeof setInterval> | null = null
 
   public constructor(options: ThenvoiMcpSseServerOptions) {
     this.options = options
@@ -96,7 +100,15 @@ export class ThenvoiMcpSseServer {
       this.sessions.set(sessionId, {
         mcpServer,
         transport,
+        lastSeenAt: Date.now(),
       })
+
+      transport.onclose = () => {
+        this.sessions.delete(sessionId)
+      }
+      transport.onerror = () => {
+        this.sessions.delete(sessionId)
+      }
 
       res.on("close", () => {
         this.sessions.delete(sessionId)
@@ -116,6 +128,7 @@ export class ThenvoiMcpSseServer {
         return
       }
 
+      session.lastSeenAt = Date.now()
       await session.transport.handlePostMessage(req, res, req.body)
     })
 
@@ -126,12 +139,14 @@ export class ThenvoiMcpSseServer {
       server.listen(port, "127.0.0.1", () => {
         this.httpServer = server
         this.actualPort = port
+        this.startSessionSweep()
         resolve()
       })
     })
   }
 
   public async stop(): Promise<void> {
+    this.stopSessionSweep()
     const sessions = [...this.sessions.values()]
     this.sessions.clear()
     await Promise.all(sessions.map(async (session) => {
@@ -155,6 +170,34 @@ export class ThenvoiMcpSseServer {
         resolve()
       })
     })
+  }
+
+  private startSessionSweep(): void {
+    if (this.sweepTimer) {
+      return
+    }
+
+    this.sweepTimer = setInterval(() => {
+      this.closeIdleSessions()
+    }, SESSION_SWEEP_INTERVAL_MS)
+    this.sweepTimer.unref?.()
+  }
+
+  private stopSessionSweep(): void {
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer)
+      this.sweepTimer = null
+    }
+  }
+
+  private closeIdleSessions(): void {
+    const cutoff = Date.now() - SESSION_IDLE_TTL_MS
+    for (const [sessionId, session] of this.sessions) {
+      if (session.lastSeenAt < cutoff) {
+        this.sessions.delete(sessionId)
+        void session.transport.close()
+      }
+    }
   }
 }
 

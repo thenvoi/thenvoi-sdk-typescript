@@ -22,7 +22,7 @@ export interface ThenvoiMcpBackend {
 export interface CreateThenvoiMcpBackendOptions {
   kind: ThenvoiMcpBackendKind;
   enableMemoryTools: boolean;
-  getToolsForRoom(roomId: string): AdapterToolsProtocol | undefined;
+  getToolsForRoom: (roomId: string) => AdapterToolsProtocol | undefined;
   additionalTools?: McpToolRegistration[];
 }
 

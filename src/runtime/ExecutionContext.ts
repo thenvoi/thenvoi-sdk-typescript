@@ -175,9 +175,16 @@ export class ExecutionContext {
 
   public consumeParticipantsMessage(): string | null {
     const currentIds = new Set(this.participants.map((p) => String(p.id)));
-    const changed = !this.lastSentParticipantIds
-      || currentIds.size !== this.lastSentParticipantIds.size
-      || [...currentIds].some((id) => !this.lastSentParticipantIds!.has(id));
+    let changed = !this.lastSentParticipantIds
+      || currentIds.size !== this.lastSentParticipantIds.size;
+    if (!changed) {
+      for (const id of currentIds) {
+        if (!this.lastSentParticipantIds!.has(id)) {
+          changed = true;
+          break;
+        }
+      }
+    }
 
     if (!changed && !this.participantsMessage) {
       return null;

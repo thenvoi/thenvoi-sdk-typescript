@@ -12,3 +12,6 @@ export {
   ThenvoiACPServerAdapter,
   type ThenvoiACPServerAdapterOptions,
 } from "./ThenvoiACPServerAdapter";
+
+export type { ACPExtensionHandler } from "./extensions";
+export { CursorExtensionHandler } from "./cursorExtensions";

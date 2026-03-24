@@ -139,7 +139,7 @@ export class ContactEventHandler {
       if (hasBroadcast) {
         const broadcastMsg = this.formatBroadcast(event);
         if (broadcastMsg) {
-          this.onBroadcast!(broadcastMsg);
+          this.onBroadcast(broadcastMsg);
         }
       }
 
