@@ -307,6 +307,8 @@ The root `@thenvoi/sdk` import covers the common runtime, adapters, and config. 
 |--------|----------|
 | `@thenvoi/sdk` | Agent, adapters, config loaders, core types |
 | `@thenvoi/sdk/adapters` | Adapter classes and helper types (e.g., `CodexAppServerStdioClient`, `GeminiToolCallingModel`) |
+| `@thenvoi/sdk/mcp` | Generic MCP registrations and HTTP/SSE/stdio backends without Claude-specific dependencies |
+| `@thenvoi/sdk/mcp/claude` | Claude Agent SDK MCP bridge (`createThenvoiSdkMcpServer`) |
 | `@thenvoi/sdk/rest` | `FernRestAdapter`, `RestFacade` for direct REST API access |
 | `@thenvoi/sdk/linear` | Linear tools plus bridge/webhook helpers (`createLinearTools`, webhook handler, dispatchers, room store) |
 | `@thenvoi/sdk/testing` | `FakeAgentTools` and test utilities |
