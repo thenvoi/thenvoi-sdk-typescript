@@ -2,13 +2,10 @@ import type { AdapterToolsProtocol } from "../contracts/protocols";
 import { mcpToolNames } from "../runtime/tools/schemas";
 import type { McpToolRegistration } from "./registrations";
 import { buildRoomScopedRegistrations } from "./registrations";
-import {
-  createThenvoiSdkMcpServer,
-  type ThenvoiSdkMcpServer,
-} from "./sdk";
 import { ThenvoiMcpStdioServer } from "./stdio";
 import { ThenvoiMcpServer } from "./server";
 import { ThenvoiMcpSseServer } from "./sse";
+import type { ThenvoiSdkMcpServer } from "./sdk";
 
 export type ThenvoiMcpBackendKind = "sdk" | "http" | "sse" | "stdio";
 
@@ -41,6 +38,7 @@ export async function createThenvoiMcpBackend(
   const allowedTools = mcpToolNames(new Set(registrations.map((registration) => registration.name)));
 
   if (options.kind === "sdk") {
+    const { createThenvoiSdkMcpServer } = await import("./sdk");
     const server = createThenvoiSdkMcpServer({
       enableMemoryTools: options.enableMemoryTools,
       getToolsForRoom: options.getToolsForRoom,
