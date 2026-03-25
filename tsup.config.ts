@@ -38,6 +38,7 @@ export default defineConfig({
     rest: "src/rest/index.ts",
     runtime: "src/runtime/index.ts",
     mcp: "src/mcp/index.ts",
+    "mcp-claude": "src/mcp/claude.ts",
     testing: "src/testing/index.ts",
   },
   external: EXTERNAL,

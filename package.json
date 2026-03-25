@@ -61,6 +61,11 @@
       "types": "./dist/mcp.d.ts",
       "import": "./dist/mcp.js",
       "require": "./dist/mcp.cjs"
+    },
+    "./mcp/claude": {
+      "types": "./dist/mcp-claude.d.ts",
+      "import": "./dist/mcp-claude.js",
+      "require": "./dist/mcp-claude.cjs"
     }
   },
   "scripts": {

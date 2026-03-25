@@ -29,5 +29,3 @@ export { ThenvoiMcpSseServer } from "./sse";
 export type { ThenvoiMcpSseServerOptions } from "./sse";
 export { ThenvoiMcpStdioServer } from "./stdio";
 export type { ThenvoiMcpStdioServerOptions } from "./stdio";
-export { createThenvoiSdkMcpServer } from "./sdk";
-export type { ThenvoiSdkMcpServer, CreateThenvoiSdkMcpServerOptions } from "./sdk";
