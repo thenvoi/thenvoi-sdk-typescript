@@ -7,7 +7,14 @@ describe("FernRestAdapter contact and memory parity", () => {
     const rest = new RestFacade({
       api: new FernRestAdapter({
         agentApiIdentity: {
-          getAgentMe: async () => ({ data: { id: "agent-1", name: "Weather", description: "Forecasts" } }),
+          getAgentMe: async () => ({
+            data: {
+              id: "agent-1",
+              name: "Weather",
+              description: "Forecasts",
+              owner_uuid: "owner-123",
+            },
+          }),
         },
         agentApiPeers: {
           listAgentPeers: async () => ({
@@ -115,6 +122,7 @@ describe("FernRestAdapter contact and memory parity", () => {
       name: "Weather",
       description: "Forecasts",
       handle: null,
+      ownerUuid: "owner-123",
     });
     await expect(rest.listMessages({ chatId: "room-1", page: 1, pageSize: 10 })).resolves.toEqual({
       data: [{

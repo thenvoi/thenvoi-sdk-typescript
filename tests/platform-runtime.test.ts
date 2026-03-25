@@ -130,7 +130,14 @@ describe("PlatformRuntime", () => {
   it("exposes fern adapter for duck-typed client", async () => {
     const adapter = new FernRestAdapter({
       agentApiIdentity: {
-        getAgentMe: async () => ({ data: { id: "a1", name: "Agent", description: null } }),
+        getAgentMe: async () => ({
+          data: {
+            id: "a1",
+            name: "Agent",
+            description: null,
+            owner_uuid: "owner-1",
+          },
+        }),
       },
       agentApiMessages: {
         createAgentChatMessage: async () => ({ ok: true }),
@@ -154,6 +161,7 @@ describe("PlatformRuntime", () => {
       name: "Agent",
       description: null,
       handle: null,
+      ownerUuid: "owner-1",
     });
   });
 

@@ -24,6 +24,7 @@ export interface AgentIdentity {
   name: string;
   description: string | null;
   handle?: string | null;
+  ownerUuid?: string | null;
 }
 
 export interface ChatParticipant {
