@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/thenvoi/thenvoi-sdk-typescript/compare/sdk-v0.1.1...sdk-v0.1.2) (2026-03-25)
+
+
+### Bug Fixes
+
+* split Claude MCP bridge from generic MCP exports ([#11](https://github.com/thenvoi/thenvoi-sdk-typescript/issues/11)) ([#12](https://github.com/thenvoi/thenvoi-sdk-typescript/issues/12)) ([2f4d050](https://github.com/thenvoi/thenvoi-sdk-typescript/commit/2f4d0500a1f91e5fafb9567863e59fa848b60c22))
+
 ## [0.1.1](https://github.com/thenvoi/thenvoi-sdk-typescript/compare/sdk-v0.1.0...sdk-v0.1.1) (2026-03-25)
 
 
