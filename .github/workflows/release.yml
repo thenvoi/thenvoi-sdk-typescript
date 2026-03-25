@@ -61,8 +61,6 @@ jobs:
       - name: Publish to npm
         if: steps.release.outputs.release_created == 'true'
         run: pnpm publish --no-git-checks --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish release summary
         if: steps.release.outputs.release_created == 'true'
