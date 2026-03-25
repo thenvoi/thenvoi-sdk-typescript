@@ -17,7 +17,8 @@ export {
 } from "./types";
 
 export { ContactEventHandler, HUB_ROOM_SYSTEM_PROMPT } from "./ContactEventHandler";
-export type { ExecutionState } from "./ExecutionContext";
+export type { ExecutionState, ExecutionContextOptions } from "./ExecutionContext";
+export type { ExecutionHandler } from "./Execution";
 
 export { AgentRuntime } from "./rooms/AgentRuntime";
 export { Execution } from "./Execution";
@@ -26,6 +27,7 @@ export { PlatformRuntime } from "./PlatformRuntime";
 export { RoomPresence } from "./rooms/RoomPresence";
 
 export { AgentTools } from "./tools/AgentTools";
+export { ContactToolsImpl } from "./tools/ContactToolsImpl";
 export {
   TOOL_MODELS,
   MCP_TOOL_PREFIX,

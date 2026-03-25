@@ -4,6 +4,7 @@ import { GenericAdapter } from "../src/adapters/GenericAdapter";
 import { FernRestAdapter, RestFacade } from "../src/client/rest/RestFacade";
 import { ValidationError } from "../src/core/errors";
 import { PlatformRuntime } from "../src/runtime/PlatformRuntime";
+import { ExecutionContext } from "../src/runtime/ExecutionContext";
 import { HUB_ROOM_SYSTEM_PROMPT } from "../src/runtime/ContactEventHandler";
 import type { StreamingTransport, TopicHandlers } from "../src/platform/streaming/transport";
 import { ThenvoiLink } from "../src/platform/ThenvoiLink";
@@ -213,6 +214,81 @@ describe("PlatformRuntime", () => {
     await runtime.stop();
   });
 
+  it("skips rooms rejected by roomFilter", async () => {
+    const transport = new FakeTransport();
+    const adapter = new GenericAdapter(async () => {});
+
+    const runtime = new PlatformRuntime({
+      agentId: "a1",
+      apiKey: "k",
+      link: new ThenvoiLink({
+        agentId: "a1",
+        apiKey: "k",
+        transport,
+        restApi: new FakeRestApi(),
+      }),
+      roomFilter: (room) => room.type !== "group",
+    });
+
+    await runtime.start(adapter);
+
+    await transport.emit("agent_rooms:a1", "room_added", {
+      id: "direct-1",
+      status: "active",
+      type: "direct",
+      title: "Direct",
+      removed_at: "",
+    });
+    await transport.emit("agent_rooms:a1", "room_added", {
+      id: "group-1",
+      status: "active",
+      type: "group",
+      title: "Group",
+      removed_at: "",
+    });
+
+    expect(transport.hasTopic("chat_room:direct-1")).toBe(true);
+    expect(transport.hasTopic("chat_room:group-1")).toBe(false);
+
+    await runtime.stop();
+  });
+
+  it("uses contextFactory when provided", async () => {
+    const transport = new FakeTransport();
+    const factoryCalls: string[] = [];
+    const adapter = new GenericAdapter(async () => {});
+
+    const runtime = new PlatformRuntime({
+      agentId: "a1",
+      apiKey: "k",
+      link: new ThenvoiLink({
+        agentId: "a1",
+        apiKey: "k",
+        transport,
+        restApi: new FakeRestApi(),
+      }),
+      contextFactory: (roomId, defaults) => {
+        factoryCalls.push(roomId);
+        return new ExecutionContext(defaults);
+      },
+    });
+
+    await runtime.start(adapter);
+
+    await transport.emit("agent_rooms:a1", "room_added", {
+      id: "room-1",
+      status: "active",
+      type: "direct",
+      title: "Room",
+      removed_at: "",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(factoryCalls).toEqual(["room-1"]);
+
+    await runtime.stop();
+  });
+
   it("propagates fatal adapter failures through runForever", async () => {
     const transport = new FakeTransport();
     const adapter = new GenericAdapter(async () => {
@@ -399,7 +475,7 @@ describe("PlatformRuntime", () => {
     expect(seenInputs).toEqual([
       {
         contactsMessage: HUB_ROOM_SYSTEM_PROMPT,
-        content: "New contact request from Alice (@alice). Message: \"Hello!\"",
+        content: "[Contact Request] Alice (@alice) wants to connect.\nMessage: \"Hello!\"\nRequest ID: req-1",
       },
     ]);
 

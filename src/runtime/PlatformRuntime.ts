@@ -4,10 +4,12 @@ import { ThenvoiLink, type ThenvoiLinkOptions } from "../platform/ThenvoiLink";
 import { AgentRuntime } from "./rooms/AgentRuntime";
 import type { AgentConfig, ContactEventConfig, SessionConfig } from "./types";
 import type { PlatformMessage } from "./types";
+import { SYNTHETIC_SENDER_TYPE, SYNTHETIC_CONTACT_EVENTS_SENDER_ID } from "./types";
+import type { ParticipantRecord, MetadataMap } from "../contracts/dtos";
 import { RuntimeStateError, ValidationError } from "../core/errors";
 import { DefaultPreprocessor } from "./preprocessing/DefaultPreprocessor";
 import { ContactEventHandler } from "./ContactEventHandler";
-import type { ExecutionContext } from "./ExecutionContext";
+import type { ExecutionContext, ExecutionContextOptions } from "./ExecutionContext";
 import type { Logger } from "../core/logger";
 import { NoopLogger } from "../core/logger";
 
@@ -23,6 +25,10 @@ export interface PlatformRuntimeOptions {
   contactConfig?: ContactEventConfig;
   agentConfig?: AgentConfig;
   logger?: Logger;
+  onParticipantAdded?: (roomId: string, participant: ParticipantRecord) => Promise<void> | void;
+  onParticipantRemoved?: (roomId: string, participantId: string) => Promise<void> | void;
+  roomFilter?: (room: MetadataMap) => boolean;
+  contextFactory?: (roomId: string, defaults: ExecutionContextOptions) => ExecutionContext;
   identity?: {
     name: string;
     description?: string | null;
@@ -44,6 +50,10 @@ export class PlatformRuntime {
     description?: string | null;
   };
   private readonly logger: Logger;
+  private readonly _onParticipantAdded?: (roomId: string, participant: ParticipantRecord) => Promise<void> | void;
+  private readonly _onParticipantRemoved?: (roomId: string, participantId: string) => Promise<void> | void;
+  private readonly _roomFilter?: (room: MetadataMap) => boolean;
+  private readonly _contextFactory?: (roomId: string, defaults: ExecutionContextOptions) => ExecutionContext;
 
   private linkInstance?: ThenvoiLink;
   private initPromise: Promise<void> | null = null;
@@ -80,6 +90,10 @@ export class PlatformRuntime {
     this.agentConfig = options.agentConfig;
     this.logger = options.logger ?? new NoopLogger();
     this.configuredIdentity = options.identity;
+    this._onParticipantAdded = options.onParticipantAdded;
+    this._onParticipantRemoved = options.onParticipantRemoved;
+    this._roomFilter = options.roomFilter;
+    this._contextFactory = options.contextFactory;
   }
 
   public get link(): ThenvoiLink {
@@ -152,30 +166,27 @@ export class PlatformRuntime {
     this.activeAdapter = adapter;
 
     try {
-      const strategy = this.contactConfig?.strategy ?? "disabled";
-      if (strategy !== "disabled") {
-        this.contactHandler = new ContactEventHandler({
-          config: this.contactConfig ?? { strategy: "disabled" },
-          rest: this.link.rest,
-          onBroadcast: (message) => {
-            const runtime = this.runtime;
-            if (!runtime) return;
-            for (const context of runtime.getContexts()) {
-              context.injectSystemMessage(message);
-            }
-          },
-          onHubEvent: async (roomId, event) => {
-            const runtime = this.runtime;
-            if (!runtime) return;
-            await runtime.enqueueEvent(roomId, event);
-          },
-          onHubInit: async (roomId, systemPrompt) => {
-            const runtime = this.runtime;
-            if (!runtime) return;
-            runtime.getOrCreateContext(roomId).injectSystemMessage(systemPrompt);
-          },
-        });
-      }
+      this.contactHandler = new ContactEventHandler({
+        config: this.contactConfig ?? { strategy: "disabled" },
+        rest: this.link.rest,
+        onBroadcast: (message) => {
+          const runtime = this.runtime;
+          if (!runtime) return;
+          for (const context of runtime.getContexts()) {
+            context.injectSystemMessage(message);
+          }
+        },
+        onHubEvent: async (roomId, event) => {
+          const runtime = this.runtime;
+          if (!runtime) return;
+          await runtime.enqueueEvent(roomId, event);
+        },
+        onHubInit: async (roomId, systemPrompt) => {
+          const runtime = this.runtime;
+          if (!runtime) return;
+          runtime.getOrCreateContext(roomId).injectSystemMessage(systemPrompt);
+        },
+      });
 
       this.runtime = new AgentRuntime({
         link: this.link,
@@ -186,6 +197,10 @@ export class PlatformRuntime {
         onExecute: (context, event) => this.executeAdapter(context, event, adapter),
         onSessionCleanup: (roomId) => adapter.onCleanup(roomId),
         onContactEvent: (event) => this.handleContactEvent(event),
+        onParticipantAdded: this._onParticipantAdded,
+        onParticipantRemoved: this._onParticipantRemoved,
+        roomFilter: this._roomFilter,
+        contextFactory: this._contextFactory,
       });
 
       await this.runtime.start();
@@ -287,20 +302,22 @@ export class PlatformRuntime {
 
     const messageId = String(input.message.id ?? "");
     const roomId = input.roomId;
+    const isSynthetic = input.message.senderType === SYNTHETIC_SENDER_TYPE
+      && input.message.senderId === SYNTHETIC_CONTACT_EVENTS_SENDER_ID;
     const messageMarkOptions = { bestEffort: true } as const;
 
-    if (messageId) {
+    if (messageId && !isSynthetic) {
       await this.link.markProcessing(roomId, messageId, messageMarkOptions);
     }
 
     try {
       await adapter.onEvent(input);
-      if (messageId) {
+      if (messageId && !isSynthetic) {
         await this.link.markProcessed(roomId, messageId, messageMarkOptions);
       }
     } catch (error) {
       const label = error instanceof Error ? error.message : String(error);
-      if (messageId) {
+      if (messageId && !isSynthetic) {
         await this.link.markFailed(roomId, messageId, label, messageMarkOptions);
       }
       throw error;
@@ -310,38 +327,7 @@ export class PlatformRuntime {
   private async handleContactEvent(event: ContactEvent): Promise<void> {
     if (this.contactHandler) {
       await this.contactHandler.handle(event);
-      return;
     }
-
-    // Legacy fallback: broadcast only
-    if (!this.contactConfig?.broadcastChanges) {
-      return;
-    }
-
-    const runtime = this.runtime;
-    if (!runtime) {
-      return;
-    }
-
-    const message = this.formatContactBroadcast(event);
-    for (const context of runtime.getContexts()) {
-      context.injectSystemMessage(message);
-    }
-  }
-
-  private formatContactBroadcast(event: ContactEvent): string {
-    switch (event.type) {
-      case "contact_request_received":
-        return `[System]: New contact request from ${event.payload.from_name} (${event.payload.from_handle}).`;
-      case "contact_request_updated":
-        return `[System]: Contact request ${event.payload.id} updated to ${event.payload.status}.`;
-      case "contact_added":
-        return `[System]: Contact added: ${event.payload.name} (${event.payload.handle}).`;
-      case "contact_removed":
-        return `[System]: Contact removed: ${event.payload.id}.`;
-    }
-
-    return assertNever(event);
   }
 }
 

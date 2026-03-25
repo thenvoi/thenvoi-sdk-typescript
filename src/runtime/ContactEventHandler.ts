@@ -2,8 +2,9 @@ import type { Logger } from "../core/logger";
 import { NoopLogger } from "../core/logger";
 import type { ContactEvent, MessageEvent } from "../platform/events";
 import type { AdapterToolsProtocol } from "../contracts/protocols";
-import type { ChatMessagingRestApi, ChatRoomRestApi } from "../client/rest/types";
+import type { AgentToolsRestApi, ChatMessagingRestApi, ChatRoomRestApi, ContactRestApi } from "../client/rest/types";
 import type { ContactEventConfig } from "./types";
+import { ContactCallbackTools } from "./tools/ContactCallbackTools";
 import {
   SYNTHETIC_SENDER_TYPE,
   SYNTHETIC_CONTACT_EVENTS_SENDER_ID,
@@ -12,23 +13,52 @@ import {
 
 const LRU_MAX_SIZE = 1000;
 
-export const HUB_ROOM_SYSTEM_PROMPT = [
-  "You are monitoring contact events for an agent.",
-  "When you receive contact event notifications, use your contact tools to take appropriate action.",
-  "For contact requests, evaluate them and respond using the respond_contact_request tool.",
-  "For new contacts, acknowledge them. For removed contacts, note the change.",
-  "Always use the tools available to you — do not just reply with text.",
-].join(" ");
+export const HUB_ROOM_SYSTEM_PROMPT = `## OVERRIDE: Contact Management Mode
+
+This is your CONTACTS HUB - a dedicated room for managing contact requests.
+
+**IMPORTANT: Do NOT delegate or add participants here.** You handle contact events DIRECTLY using the contact tools below. Do NOT call thenvoi_lookup_peers() or thenvoi_add_participant() in this room.
+
+## Your Role
+
+1. **Review incoming contact requests** - When you see a [Contact Request] message, evaluate it
+2. **Take action** - Use the contact tools to respond:
+   - \`thenvoi_respond_contact_request(action="approve", request_id="...")\` to accept
+   - \`thenvoi_respond_contact_request(action="reject", request_id="...")\` to decline
+3. **Report your decision** - Send a thought event explaining what you did
+
+## Example
+
+[Contact Events]: [Contact Request] Alice (@alice) wants to connect.
+Request ID: abc-123
+
+Your response:
+1. thenvoi_send_event("Received contact request from Alice. Approving.", message_type="thought")
+2. thenvoi_respond_contact_request(action="approve", request_id="abc-123")
+3. thenvoi_send_event("Approved contact request from Alice (@alice)", message_type="thought")
+
+## Contact Tools (use these, NOT participant tools)
+- \`thenvoi_respond_contact_request(action, request_id)\` - Approve/reject requests
+- \`thenvoi_list_contact_requests()\` - List pending requests
+- \`thenvoi_list_contacts()\` - List current contacts`;
 
 interface RequestInfo {
-  fromHandle: string;
-  fromName: string;
+  fromHandle?: string | null;
+  fromName?: string | null;
+  toHandle?: string | null;
+  toName?: string | null;
   message: string | null;
 }
 
+type ContactHandlerRestApi =
+  & Partial<AgentToolsRestApi>
+  & Pick<ChatMessagingRestApi, "createChatEvent">
+  & Pick<ChatRoomRestApi, "createChat">
+  & Partial<Pick<ContactRestApi, "listContactRequests">>;
+
 interface ContactEventHandlerOptions {
   config: ContactEventConfig;
-  rest: Pick<ChatMessagingRestApi, "createChatEvent"> & Pick<ChatRoomRestApi, "createChat">;
+  rest: ContactHandlerRestApi;
   logger?: Logger;
   onBroadcast?: (message: string) => void;
   onHubEvent?: (roomId: string, event: MessageEvent) => Promise<void>;
@@ -58,7 +88,7 @@ export class ContactEventHandlerError extends Error {
 
 export class ContactEventHandler {
   private readonly config: ContactEventConfig;
-  private readonly rest: Pick<ChatMessagingRestApi, "createChatEvent"> & Pick<ChatRoomRestApi, "createChat">;
+  private readonly rest: ContactHandlerRestApi;
   private readonly logger: Logger;
   private readonly onBroadcast?: (message: string) => void;
   private readonly onHubEvent?: (roomId: string, event: MessageEvent) => Promise<void>;
@@ -82,9 +112,9 @@ export class ContactEventHandler {
 
   public async handle(event: ContactEvent, tools?: AdapterToolsProtocol): Promise<void> {
     const strategy = this.config.strategy ?? "disabled";
+    const hasBroadcast = this.config.broadcastChanges && this.onBroadcast;
 
-    if (strategy === "disabled") {
-      this.logger.debug("Contact event ignored (strategy=disabled)", { type: event.type });
+    if (strategy === "disabled" && !hasBroadcast) {
       return;
     }
 
@@ -105,12 +135,16 @@ export class ContactEventHandler {
         });
       }
 
-      // Broadcast for contact_added and contact_removed
-      if (this.config.broadcastChanges && this.onBroadcast) {
-        if (event.type === "contact_added" || event.type === "contact_removed") {
-          const broadcastMsg = this.formatBroadcast(event);
+      // Broadcast runs regardless of strategy (only for added/removed)
+      if (hasBroadcast) {
+        const broadcastMsg = this.formatBroadcast(event);
+        if (broadcastMsg) {
           this.onBroadcast(broadcastMsg);
         }
+      }
+
+      if (strategy === "disabled") {
+        return;
       }
 
       if (strategy === "callback") {
@@ -131,13 +165,10 @@ export class ContactEventHandler {
       return;
     }
 
-    if (!tools) {
-      this.logger.warn("Contact event callback requires tools but none provided");
-      return;
-    }
+    const callbackTools = tools ?? new ContactCallbackTools(this.rest, event.roomId);
 
     try {
-      await callback(event, tools);
+      await callback(event, callbackTools);
     } catch (error) {
       const failure = this.buildHandlerError(event, "callback", error, false);
       this.logFailure(event, failure.stage, failure.retryable, error);
@@ -167,7 +198,7 @@ export class ContactEventHandler {
       }
     }
 
-    const formattedMessage = this.formatEventMessage(event);
+    const formattedMessage = await this.formatEventMessage(event);
     let persistFailure: ContactEventHandlerError | null = null;
 
     // Persist as a task event
@@ -229,37 +260,100 @@ export class ContactEventHandler {
     return result.id;
   }
 
-  public formatEventMessage(event: ContactEvent): string {
+  public async formatEventMessage(event: ContactEvent): Promise<string> {
     switch (event.type) {
       case "contact_request_received": {
-        const msg = event.payload.message ? ` Message: "${event.payload.message}"` : "";
-        return `New contact request from ${event.payload.from_name} (@${event.payload.from_handle}).${msg}`;
+        const msg = event.payload.message ? `\nMessage: "${event.payload.message}"` : "";
+        const handle = normalizeHandle(event.payload.from_handle);
+        return `[Contact Request] ${event.payload.from_name} (${handle}) wants to connect.${msg}\nRequest ID: ${event.payload.id}`;
       }
       case "contact_request_updated": {
-        const cached = this.requestCache.get(event.payload.id);
-        if (cached) {
-          return `Contact request from ${cached.fromName} (@${cached.fromHandle}) updated to ${event.payload.status}.`;
+        const info = await this.enrichUpdateEvent(event.payload.id);
+        if (info) {
+          const name = info.fromName ?? info.toName;
+          const rawHandle = info.fromHandle ?? info.toHandle ?? "";
+          const handle = normalizeHandle(rawHandle);
+          if (name) {
+            const direction = info.fromName ? "from" : "to";
+            return `[Contact Request Update] Request ${direction} ${name} (${handle}) status changed to: ${event.payload.status}\nRequest ID: ${event.payload.id}`;
+          }
         }
-        return `Contact request ${event.payload.id} updated to ${event.payload.status}.`;
+        return `[Contact Request Update] Request ${event.payload.id} status changed to: ${event.payload.status}`;
       }
-      case "contact_added":
-        return `Contact added: ${event.payload.name} (@${event.payload.handle}), type: ${event.payload.type}.`;
+      case "contact_added": {
+        const handle = normalizeHandle(event.payload.handle);
+        return `[Contact Added] ${event.payload.name} (${handle}) is now a contact.\nType: ${event.payload.type}, ID: ${event.payload.id}`;
+      }
       case "contact_removed":
-        return `Contact removed: ${event.payload.id}.`;
+        return `[Contact Removed] Contact ${event.payload.id} was removed.`;
     }
 
     return assertNever(event);
   }
 
-  private formatBroadcast(event: ContactEvent): string {
+  private formatBroadcast(event: ContactEvent): string | null {
     switch (event.type) {
-      case "contact_added":
-        return `[System]: Contact added: ${event.payload.name} (@${event.payload.handle}).`;
+      case "contact_added": {
+        const handle = normalizeHandle(event.payload.handle);
+        return `[Contacts]: ${handle} (${event.payload.name}) is now a contact`;
+      }
       case "contact_removed":
-        return `[System]: Contact removed: ${event.payload.id}.`;
+        return `[Contacts]: Contact ${event.payload.id} was removed`;
+      default:
+        return null;
+    }
+  }
+
+  private async enrichUpdateEvent(requestId: string): Promise<RequestInfo | null> {
+    const cached = this.requestCache.get(requestId);
+    if (cached) {
+      return cached;
     }
 
-    return `[System]: Contact event: ${event.type}.`;
+    this.logger.debug("Cache miss for request, fetching from API", { requestId });
+    return await this.fetchRequestDetails(requestId);
+  }
+
+  private async fetchRequestDetails(requestId: string): Promise<RequestInfo | null> {
+    if (!this.rest.listContactRequests) {
+      return null;
+    }
+
+    try {
+      const response = await this.rest.listContactRequests({ page: 1, pageSize: 100 });
+
+      for (const req of response.received ?? []) {
+        if (req.id === requestId) {
+          const info: RequestInfo = {
+            fromHandle: req.from_handle,
+            fromName: req.from_name,
+            message: req.message ?? null,
+          };
+          this.cacheRequestInfo(requestId, info);
+          this.logger.debug("Fetched request details from API (received)", { requestId });
+          return info;
+        }
+      }
+
+      for (const req of response.sent ?? []) {
+        if (req.id === requestId) {
+          const info: RequestInfo = {
+            toHandle: req.to_handle,
+            toName: req.to_name,
+            message: req.message ?? null,
+          };
+          this.cacheRequestInfo(requestId, info);
+          this.logger.debug("Fetched request details from API (sent)", { requestId });
+          return info;
+        }
+      }
+
+      this.logger.debug("Request not found in API", { requestId });
+      return null;
+    } catch (error) {
+      this.logger.warn("Failed to fetch request details from API", { requestId, error });
+      return null;
+    }
   }
 
   private cacheRequestInfo(id: string, info: RequestInfo): void {
@@ -359,4 +453,9 @@ export class ContactEventHandler {
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled contact event: ${JSON.stringify(value)}`);
+}
+
+function normalizeHandle(handle: string | null | undefined): string {
+  if (!handle) return "@unknown";
+  return handle.startsWith("@") ? handle : `@${handle}`;
 }

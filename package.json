@@ -32,6 +32,11 @@
       "import": "./dist/core.js",
       "require": "./dist/core.cjs"
     },
+    "./converters": {
+      "types": "./dist/converters.d.ts",
+      "import": "./dist/converters.js",
+      "require": "./dist/converters.cjs"
+    },
     "./linear": {
       "types": "./dist/linear.d.ts",
       "import": "./dist/linear.js",
@@ -51,6 +56,11 @@
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js",
       "require": "./dist/testing.cjs"
+    },
+    "./mcp": {
+      "types": "./dist/mcp.d.ts",
+      "import": "./dist/mcp.js",
+      "require": "./dist/mcp.cjs"
     }
   },
   "scripts": {
@@ -77,14 +87,19 @@
   },
   "peerDependencies": {
     "@a2a-js/sdk": "^0.3.10",
+    "@agentclientprotocol/sdk": "^0.16.1",
     "@anthropic-ai/claude-agent-sdk": "^0.2.63",
     "@anthropic-ai/sdk": "^0.78.0",
+    "@google/adk": "^0.5.0",
     "@google/genai": "^1.44.0",
     "@langchain/core": "^1.1.31",
     "@langchain/langgraph": "^1.2.0",
     "@linear/sdk": "^76.0.0",
     "@letta-ai/letta-client": "^1.7.0",
+    "@modelcontextprotocol/sdk": "^1.10.0",
     "@openai/codex-sdk": "^0.107.0",
+    "@opencode-ai/sdk": "^1.3.0",
+    "ai": "^6.0.137",
     "express": "^5.2.1",
     "openai": "^6.27.0",
     "parlant-client": "^3.2.0"
@@ -93,10 +108,16 @@
     "@a2a-js/sdk": {
       "optional": true
     },
+    "@agentclientprotocol/sdk": {
+      "optional": true
+    },
     "@anthropic-ai/claude-agent-sdk": {
       "optional": true
     },
     "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "@google/adk": {
       "optional": true
     },
     "@google/genai": {
@@ -114,7 +135,16 @@
     "@linear/sdk": {
       "optional": true
     },
+    "@modelcontextprotocol/sdk": {
+      "optional": true
+    },
     "@openai/codex-sdk": {
+      "optional": true
+    },
+    "@opencode-ai/sdk": {
+      "optional": true
+    },
+    "ai": {
       "optional": true
     },
     "express": {
@@ -128,15 +158,19 @@
     }
   },
   "devDependencies": {
+    "@agentclientprotocol/sdk": "^0.16.1",
     "@anthropic-ai/claude-agent-sdk": "^0.2.63",
     "@linear/sdk": "^76.0.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@openai/codex-sdk": "^0.107.0",
+    "@opencode-ai/sdk": "^1.3.0",
     "@types/express": "^5.0.6",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.13.14",
     "@typescript-eslint/eslint-plugin": "^8.26.0",
     "@typescript-eslint/parser": "^8.26.0",
     "@vitest/coverage-v8": "3.2.4",
+    "ai": "^6.0.137",
     "eslint": "^9.22.0",
     "tsup": "^8.4.0",
     "tsx": "^4.21.0",

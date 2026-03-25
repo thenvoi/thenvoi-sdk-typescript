@@ -174,7 +174,7 @@ describe("ClaudeSDKAdapter", () => {
         {
           message_type: "task",
           metadata: {
-            claude_session_id: "session-from-history",
+            claude_sdk_session_id: "session-from-history",
           },
         },
       ]),
@@ -185,6 +185,43 @@ describe("ClaudeSDKAdapter", () => {
 
     expect(calls[0]?.options?.resume).toBe("session-from-history");
     expect(tools.events.some((event) => event.messageType === "task")).toBe(true);
+  });
+
+  it("rehydrates legacy Claude session markers from bootstrap task metadata", async () => {
+    const calls: Array<{ options?: Record<string, unknown> }> = [];
+    const queryFn: ClaudeSDKQuery = ({ options }) => {
+      calls.push({ options: options as Record<string, unknown> });
+      return streamFrom([
+        {
+          type: "assistant",
+          session_id: "session-from-history",
+          message: {
+            content: [{ type: "text", text: "ok" }],
+          },
+        } as never,
+      ]) as never;
+    };
+
+    const adapter = new ClaudeSDKAdapter({ queryFn });
+    await adapter.onStarted("Parity Agent", "Parity test agent");
+
+    await adapter.onMessage(
+      makeMessage("hello"),
+      new FakeTools(),
+      new HistoryProvider([
+        {
+          message_type: "task",
+          metadata: {
+            claude_session_id: "legacy-session-from-history",
+          },
+        },
+      ]),
+      null,
+      null,
+      { isSessionBootstrap: true, roomId: "room-legacy" },
+    );
+
+    expect(calls[0]?.options?.resume).toBe("legacy-session-from-history");
   });
 
   it("logs session marker failures and continues responding", async () => {

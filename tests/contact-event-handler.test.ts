@@ -7,12 +7,16 @@ import {
 } from "../src/runtime/ContactEventHandler";
 import type { ContactEvent, MessageEvent } from "../src/platform/events";
 import type { ContactEventConfig } from "../src/runtime/types";
-import { FakeTools } from "./testUtils";
 
 function makeRest() {
   return {
     createChat: vi.fn().mockResolvedValue({ id: "hub-room-1" }),
     createChatEvent: vi.fn().mockResolvedValue({}),
+    listContacts: vi.fn().mockResolvedValue({ data: [] }),
+    addContact: vi.fn().mockResolvedValue({ ok: true }),
+    removeContact: vi.fn().mockResolvedValue({ ok: true }),
+    listContactRequests: vi.fn().mockResolvedValue({ received: [], sent: [] }),
+    respondContactRequest: vi.fn().mockResolvedValue({ ok: true }),
   };
 }
 
@@ -86,26 +90,65 @@ describe("ContactEventHandler", () => {
   });
 
   describe("callback strategy", () => {
-    it("calls onEvent callback with event and tools", async () => {
+    it("calls onEvent callback with event and contact tools", async () => {
       const onEvent = vi.fn().mockResolvedValue(undefined);
-      const tools = new FakeTools();
       const config: ContactEventConfig = { strategy: "callback", onEvent };
       const handler = new ContactEventHandler({ config, rest: makeRest() });
 
       const event = makeContactAdded();
-      await handler.handle(event, tools);
+      await handler.handle(event);
 
-      expect(onEvent).toHaveBeenCalledWith(event, tools);
+      expect(onEvent).toHaveBeenCalledWith(event, expect.objectContaining({
+        capabilities: expect.objectContaining({
+          contacts: true,
+        }),
+        sendMessage: expect.any(Function),
+        sendEvent: expect.any(Function),
+        executeToolCall: expect.any(Function),
+        listContacts: expect.any(Function),
+        addContact: expect.any(Function),
+        removeContact: expect.any(Function),
+        listContactRequests: expect.any(Function),
+        respondContactRequest: expect.any(Function),
+      }));
+    });
+
+    it("routes callback tool calls through the adapter-tools surface", async () => {
+      const rest = {
+        ...makeRest(),
+        createChatMessage: vi.fn().mockResolvedValue({ ok: true }),
+        listContacts: vi.fn().mockResolvedValue({ data: [] }),
+      };
+      const onEvent = vi.fn(async (_event, tools) => {
+        await tools.sendMessage("hello");
+        await tools.executeToolCall("thenvoi_list_contacts", {});
+      });
+      const config: ContactEventConfig = { strategy: "callback", onEvent };
+      const handler = new ContactEventHandler({ config, rest });
+
+      await handler.handle({
+        ...makeContactAdded(),
+        roomId: "room-1",
+      });
+
+      expect(rest.createChatMessage).toHaveBeenCalledWith(
+        "room-1",
+        { content: "hello" },
+        expect.any(Object),
+      );
+      expect(rest.listContacts).toHaveBeenCalledWith(
+        { page: 1, pageSize: 50 },
+        expect.any(Object),
+      );
     });
 
     it("rethrows callback errors with retry signal and deterministic logging", async () => {
       const onEvent = vi.fn().mockRejectedValue(new Error("callback failed"));
-      const tools = new FakeTools();
       const logger = makeLogger();
       const config: ContactEventConfig = { strategy: "callback", onEvent };
       const handler = new ContactEventHandler({ config, rest: makeRest(), logger });
 
-      await expect(handler.handle(makeContactAdded(), tools)).rejects.toMatchObject({
+      await expect(handler.handle(makeContactAdded())).rejects.toMatchObject({
         name: "ContactEventHandlerError",
         stage: "callback",
         retryable: false,
@@ -297,21 +340,103 @@ describe("ContactEventHandler", () => {
       // First, receive the request to populate cache
       await handler.handle(makeContactRequestReceived("req-1"));
 
-      const formatted = handler.formatEventMessage(makeContactRequestUpdated("req-1", "accepted"));
+      const formatted = await handler.formatEventMessage(makeContactRequestUpdated("req-1", "accepted"));
       expect(formatted).toContain("Alice");
       expect(formatted).toContain("@alice");
       expect(formatted).toContain("accepted");
+      expect(formatted).toContain("Request ID: req-1");
     });
 
-    it("falls back to ID when cache miss", () => {
+    it("falls back to ID when cache miss", async () => {
       const handler = new ContactEventHandler({
         config: { strategy: "hub_room", hubTaskId: "task-1" },
         rest: makeRest(),
       });
 
-      const formatted = handler.formatEventMessage(makeContactRequestUpdated("req-99", "rejected"));
+      const formatted = await handler.formatEventMessage(makeContactRequestUpdated("req-99", "rejected"));
       expect(formatted).toContain("req-99");
       expect(formatted).toContain("rejected");
+    });
+
+    it("fetches from API on cache miss (received request)", async () => {
+      const rest = {
+        ...makeRest(),
+        listContactRequests: vi.fn().mockResolvedValue({
+          received: [
+            { id: "req-api", from_handle: "bob", from_name: "Bob", message: null },
+          ],
+          sent: [],
+        }),
+      };
+      const handler = new ContactEventHandler({
+        config: { strategy: "hub_room", hubTaskId: "task-1" },
+        rest,
+      });
+
+      const formatted = await handler.formatEventMessage(makeContactRequestUpdated("req-api", "approved"));
+      expect(formatted).toContain("Bob");
+      expect(formatted).toContain("@bob");
+      expect(formatted).toContain("approved");
+      expect(formatted).toContain("from");
+      expect(rest.listContactRequests).toHaveBeenCalledOnce();
+    });
+
+    it("fetches from API on cache miss (sent request)", async () => {
+      const rest = {
+        ...makeRest(),
+        listContactRequests: vi.fn().mockResolvedValue({
+          received: [],
+          sent: [
+            { id: "req-sent", to_handle: "carol", to_name: "Carol", message: null },
+          ],
+        }),
+      };
+      const handler = new ContactEventHandler({
+        config: { strategy: "hub_room", hubTaskId: "task-1" },
+        rest,
+      });
+
+      const formatted = await handler.formatEventMessage(makeContactRequestUpdated("req-sent", "rejected"));
+      expect(formatted).toContain("Carol");
+      expect(formatted).toContain("@carol");
+      expect(formatted).toContain("to");
+      expect(rest.listContactRequests).toHaveBeenCalledOnce();
+    });
+
+    it("caches API-fetched results for subsequent lookups", async () => {
+      const rest = {
+        ...makeRest(),
+        listContactRequests: vi.fn().mockResolvedValue({
+          received: [
+            { id: "req-cached", from_handle: "dave", from_name: "Dave", message: null },
+          ],
+          sent: [],
+        }),
+      };
+      const handler = new ContactEventHandler({
+        config: { strategy: "hub_room", hubTaskId: "task-1" },
+        rest,
+      });
+
+      await handler.formatEventMessage(makeContactRequestUpdated("req-cached", "approved"));
+      await handler.formatEventMessage(makeContactRequestUpdated("req-cached", "confirmed"));
+      expect(rest.listContactRequests).toHaveBeenCalledOnce();
+    });
+
+    it("degrades gracefully on API failure", async () => {
+      const rest = {
+        ...makeRest(),
+        listContactRequests: vi.fn().mockRejectedValue(new Error("network error")),
+      };
+      const handler = new ContactEventHandler({
+        config: { strategy: "hub_room", hubTaskId: "task-1" },
+        rest,
+      });
+
+      const formatted = await handler.formatEventMessage(makeContactRequestUpdated("req-fail", "approved"));
+      expect(formatted).toContain("req-fail");
+      expect(formatted).toContain("approved");
+      expect(formatted).not.toContain("undefined");
     });
   });
 
@@ -324,12 +449,12 @@ describe("ContactEventHandler", () => {
         onBroadcast,
       });
 
-      await handler.handle(makeContactAdded(), new FakeTools());
-      await handler.handle(makeContactRemoved(), new FakeTools());
+      await handler.handle(makeContactAdded());
+      await handler.handle(makeContactRemoved());
 
       expect(onBroadcast).toHaveBeenCalledTimes(2);
-      expect(onBroadcast.mock.calls[0][0]).toContain("Contact added");
-      expect(onBroadcast.mock.calls[1][0]).toContain("Contact removed");
+      expect(onBroadcast.mock.calls[0][0]).toContain("is now a contact");
+      expect(onBroadcast.mock.calls[1][0]).toContain("was removed");
     });
 
     it("does not broadcast contact_request events", async () => {
@@ -340,43 +465,44 @@ describe("ContactEventHandler", () => {
         onBroadcast,
       });
 
-      await handler.handle(makeContactRequestReceived(), new FakeTools());
+      await handler.handle(makeContactRequestReceived());
       expect(onBroadcast).not.toHaveBeenCalled();
     });
   });
 
   describe("event formatting", () => {
-    it("formats contact_request_received", () => {
+    it("formats contact_request_received", async () => {
       const handler = new ContactEventHandler({
         config: { strategy: "disabled" },
         rest: makeRest(),
       });
 
-      const msg = handler.formatEventMessage(makeContactRequestReceived());
+      const msg = await handler.formatEventMessage(makeContactRequestReceived());
+      expect(msg).toContain("[Contact Request]");
       expect(msg).toContain("Alice");
       expect(msg).toContain("@alice");
       expect(msg).toContain('Message: "Hello!"');
     });
 
-    it("formats contact_added", () => {
+    it("formats contact_added", async () => {
       const handler = new ContactEventHandler({
         config: { strategy: "disabled" },
         rest: makeRest(),
       });
 
-      const msg = handler.formatEventMessage(makeContactAdded());
-      expect(msg).toContain("Contact added");
+      const msg = await handler.formatEventMessage(makeContactAdded());
+      expect(msg).toContain("[Contact Added]");
       expect(msg).toContain("Alice");
     });
 
-    it("formats contact_removed", () => {
+    it("formats contact_removed", async () => {
       const handler = new ContactEventHandler({
         config: { strategy: "disabled" },
         rest: makeRest(),
       });
 
-      const msg = handler.formatEventMessage(makeContactRemoved());
-      expect(msg).toContain("Contact removed");
+      const msg = await handler.formatEventMessage(makeContactRemoved());
+      expect(msg).toContain("[Contact Removed]");
       expect(msg).toContain("contact-1");
     });
   });
