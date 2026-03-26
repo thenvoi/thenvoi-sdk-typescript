@@ -134,6 +134,7 @@ function normalizeAgentIdentityRecord(
     name: requireNonEmptyStringField(record.name, "name", source),
     description: normalizeOptionalStringField(record.description, "description", source),
     handle: normalizeOptionalStringField(record.handle, "handle", source),
+    ownerUuid: normalizeOptionalStringField(record.owner_uuid, "ownerUuid", source),
   };
 }
 
@@ -165,6 +166,7 @@ function normalizeLegacyProfileIdentity(
     name,
     description: profile.description ?? null,
     handle: null,
+    ownerUuid: null,
   };
 }
 
