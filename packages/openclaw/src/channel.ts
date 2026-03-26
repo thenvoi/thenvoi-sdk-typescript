@@ -359,28 +359,22 @@ async function resolveMentions(
 
 /**
  * Send a reply back to Thenvoi using the SDK's REST API.
- * Returns true if the message was sent, false on failure.
+ * Throws on failure so callers (e.g. the dispatcher) can track and surface delivery errors.
  */
-async function sendReplyToThenvoi(rest: ThenvoiLink["rest"], agentId: string, accountId: string, roomId: string, payload: unknown): Promise<boolean> {
+async function sendReplyToThenvoi(rest: ThenvoiLink["rest"], agentId: string, accountId: string, roomId: string, payload: unknown): Promise<void> {
   const text = typeof payload === "string" ? payload : (payload as { text?: string })?.text;
   if (!text) {
-    console.warn("[thenvoi] No text in reply payload, skipping");
-    return false;
+    throw new Error(`[thenvoi] No text in reply payload (room=${roomId})`);
   }
 
-  try {
-    const resolved = await resolveMentions(rest, agentId, accountId, roomId, text);
-    if (!resolved) {
-      console.error("[thenvoi] Reply dropped: no other participants in room to mention (room=%s)", roomId);
-      return false;
-    }
-    await rest.createChatMessage(roomId, { content: text, mentions: resolved.mentions });
-    console.log(`[thenvoi] Reply sent: ${text.substring(0, 50)}...`);
-    return true;
-  } catch (error) {
-    console.error("[thenvoi] Failed to send reply:", error);
-    return false;
+  const resolved = await resolveMentions(rest, agentId, accountId, roomId, text);
+  if (!resolved) {
+    throw new Error(
+      `[thenvoi] Reply dropped: no other participants in room to mention (room=${roomId}, text=${text.substring(0, 80)})`,
+    );
   }
+  await rest.createChatMessage(roomId, { content: text, mentions: resolved.mentions });
+  console.log(`[thenvoi] Reply sent: ${text.substring(0, 50)}...`);
 }
 
 // =============================================================================
@@ -650,15 +644,16 @@ export const thenvoiChannel: OpenClawChannel = {
             // Contact events use a virtual thread — don't try to send to Thenvoi
             const isContactThread = message.threadId === CONTACTS_THREAD_ID;
             // Track pending reply promises so waitForIdle can await them
-            const pendingReplies: Promise<boolean>[] = [];
-            let failedSendCount = 0;
+            const pendingReplies: Promise<void>[] = [];
+            const deliveryErrors: Error[] = [];
 
             const threadId = message.threadId;
             function enqueueReply(payload: unknown): void {
               pendingReplies.push(
-                sendReplyToThenvoi(link.rest, config.agentId, accountId, threadId, payload).then((ok) => {
-                  if (!ok) failedSendCount++;
-                  return ok;
+                sendReplyToThenvoi(link.rest, config.agentId, accountId, threadId, payload).catch((err: unknown) => {
+                  const error = err instanceof Error ? err : new Error(String(err));
+                  deliveryErrors.push(error);
+                  console.error(`[thenvoi:${accountId}] Reply delivery failed (room=${threadId}):`, error.message);
                 }),
               );
             }
@@ -681,11 +676,11 @@ export const thenvoiChannel: OpenClawChannel = {
               },
               waitForIdle: async (): Promise<void> => {
                 // Await all pending reply deliveries before signalling idle
-                // Use allSettled so a single failed send doesn't reject the batch
                 await Promise.allSettled(pendingReplies);
-                if (failedSendCount > 0) {
-                  console.warn(
-                    `[thenvoi:${accountId}] ${failedSendCount}/${pendingReplies.length} replies failed to deliver (room=${message.threadId})`,
+                if (deliveryErrors.length > 0) {
+                  const summary = deliveryErrors.map((e) => e.message).join("; ");
+                  console.error(
+                    `[thenvoi:${accountId}] ${deliveryErrors.length}/${pendingReplies.length} replies failed to deliver (room=${message.threadId}): ${summary}`,
                   );
                 }
               },

@@ -34,6 +34,7 @@ jobs:
 
   lint:
     needs: changes
+    if: needs.changes.outputs.sdk == 'true' || needs.changes.outputs.openclaw == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -67,6 +68,7 @@ jobs:
 
   test:
     needs: changes
+    if: needs.changes.outputs.sdk == 'true' || needs.changes.outputs.openclaw == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
