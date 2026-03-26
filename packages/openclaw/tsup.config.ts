@@ -80,6 +80,14 @@ function discoverNamedImports(peers: string[]): Map<string, Set<string>> {
 
 const namedImportsPerPeer = discoverNamedImports(sdkOptionalPeers);
 
+if (sdkOptionalPeers.length > 0 && namedImportsPerPeer.size === 0) {
+  console.warn(
+    "[tsup] WARNING: Found %d optional peers but discovered zero named imports. " +
+    "Ensure the SDK is built before building OpenClaw.",
+    sdkOptionalPeers.length,
+  );
+}
+
 /**
  * esbuild plugin that replaces SDK optional peer dep imports with empty modules.
  *

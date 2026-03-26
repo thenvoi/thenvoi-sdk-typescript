@@ -629,7 +629,8 @@ export const thenvoiChannel: OpenClawChannel = {
               },
               waitForIdle: async (): Promise<void> => {
                 // Await all pending reply deliveries before signalling idle
-                await Promise.all(pendingReplies);
+                // Use allSettled so a single failed send doesn't reject the batch
+                await Promise.allSettled(pendingReplies);
               },
               getQueuedCounts: () => ({ tool: 0, block: 0, final: 0 }),
             };

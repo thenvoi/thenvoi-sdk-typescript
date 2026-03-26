@@ -187,7 +187,6 @@ Execute these tools:
  */
 export const BASE_INSTRUCTIONS = CORE_INSTRUCTIONS + "\n" + CONTACT_INSTRUCTIONS;
 
-
 /**
  * Creates a complete system prompt for an agent.
  *
