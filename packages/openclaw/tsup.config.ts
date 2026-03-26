@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import type { Plugin } from "esbuild";
 import { defineConfig } from "tsup";
 

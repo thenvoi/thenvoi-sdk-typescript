@@ -2,11 +2,11 @@
   "$schema": "https://openclaw.ai/schemas/plugin.json",
   "id": "openclaw-channel-thenvoi",
   "name": "Thenvoi",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Connect OpenClaw to the Thenvoi AI agent collaboration platform",
   "author": "Thenvoi",
   "license": "MIT",
-  "repository": "https://github.com/thenvoi/openclaw-channel-thenvoi",
+  "repository": "https://github.com/thenvoi/thenvoi-sdk-typescript",
   "entry": "dist/index.js",
   "type": "channel",
 
@@ -21,7 +21,7 @@
   },
 
   "openclaw.install": {
-    "githubRepo": "thenvoi/openclaw-channel-thenvoi",
+    "githubRepo": "thenvoi/thenvoi-sdk-typescript",
     "defaultChoice": false
   },
 
