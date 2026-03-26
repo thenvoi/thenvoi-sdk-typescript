@@ -175,8 +175,9 @@ const addParticipantTool: McpTool = {
     let foundPeerType: string | undefined;
     let page = 1;
     const pageSize = 100;
+    const maxPages = 10; // Cap at 10 pages (1000 peers) to prevent runaway API calls
 
-    while (!foundPeerId) {
+    while (!foundPeerId && page <= maxPages) {
       const peersResponse = await listPeers({ page, pageSize, notInChat: "" });
       const match = (peersResponse.data ?? []).find(
         (p) =>
@@ -300,6 +301,7 @@ const getParticipantsTool: McpTool = {
 
     return {
       participants: participants.map((p) => ({
+        id: p.id,
         name: p.name,
         type: p.type,
       })),

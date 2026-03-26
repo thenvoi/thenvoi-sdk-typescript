@@ -132,6 +132,6 @@ export default defineConfig({
   // Keep openclaw external (host provides it)
   external: ["openclaw"],
   // Bundle the SDK and its dependencies into the plugin
-  noExternal: ["phoenix", "@thenvoi/sdk", "@thenvoi/rest-client", "zod", "zod-to-json-schema"],
+  noExternal: ["phoenix", "@thenvoi/sdk", "@thenvoi/rest-client", "zod", "zod-to-json-schema", "ws", "js-yaml"],
   esbuildPlugins: [stubOptionalPeers(sdkOptionalPeers)],
 });

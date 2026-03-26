@@ -236,6 +236,25 @@ describe("MCP Tools", () => {
       expect(result).toHaveProperty("success", true);
     });
 
+    it("should stop paginating after max pages (10) to prevent runaway calls", async () => {
+      // Return pages with no match, claiming 20 total pages
+      const noMatchPage = {
+        data: [{ id: "agent-other", name: "Other Agent", type: "Agent", handle: "@other" }],
+        metadata: { page: 1, pageSize: 100, totalCount: 2000, totalPages: 20 },
+      };
+      mockRest.listPeers.mockResolvedValue(noMatchPage);
+
+      await expect(
+        executeMcpTool("thenvoi_add_participant", {
+          room_id: "room-001",
+          handle: "Nonexistent User",
+        }),
+      ).rejects.toThrow('Peer not found: "Nonexistent User"');
+
+      // Should have stopped at 10 pages, not 20
+      expect(mockRest.listPeers).toHaveBeenCalledTimes(10);
+    });
+
     it("should throw when peer not found", async () => {
       mockRest.listPeers.mockResolvedValue(mockLookupPeersResponse);
 
@@ -315,16 +334,21 @@ describe("MCP Tools", () => {
   });
 
   describe("thenvoi_get_participants", () => {
-    it("should return participants list", async () => {
+    it("should return participants list with IDs", async () => {
       mockRest.listChatParticipants.mockResolvedValue(mockParticipants);
 
       const result = (await executeMcpTool("thenvoi_get_participants", {
         room_id: "room-001",
-      })) as { participants: unknown[]; count: number };
+      })) as { participants: Array<{ id: string; name: string; type: string }>; count: number };
 
       expect(mockRest.listChatParticipants).toHaveBeenCalledWith("room-001");
       expect(result).toHaveProperty("participants");
       expect(result).toHaveProperty("count", mockParticipants.length);
+      expect(result.participants[0]).toEqual({
+        id: "user-789",
+        name: "John Doe",
+        type: "User",
+      });
     });
   });
 
