@@ -20,6 +20,7 @@ const strictTypeCheckedRules = {
   "@typescript-eslint/no-unnecessary-type-assertion": "error",
   "@typescript-eslint/no-base-to-string": "off",
   "@typescript-eslint/require-await": "off",
+  "@typescript-eslint/unbound-method": "off",
   "no-console": ["warn", { allow: ["warn", "error", "log"] }],
 };
 
