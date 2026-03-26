@@ -9,7 +9,9 @@ const originalFetch = globalThis.fetch;
 
 // Reset the gateway registry directly via globalThis to avoid importing
 // channel.ts before test-level vi.mock() calls have been hoisted.
-const GATEWAY_REGISTRY_KEY = "__thenvoi_gateway_registry__";
+// Must match the versioned key in channel.ts.
+const PKG_VERSION = "0.1.4";
+const GATEWAY_REGISTRY_KEY = `__thenvoi_gateway_registry_v${PKG_VERSION}__`;
 
 beforeEach(() => {
   // Reset all mocks before each test

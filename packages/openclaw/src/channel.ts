@@ -187,7 +187,10 @@ const CONTACTS_THREAD_ID = "__thenvoi_contacts__";
 
 // Global registry to track gateway state across module reloads.
 // All mutable state lives here so it survives Jiti reloading the module.
-const GATEWAY_REGISTRY_KEY = "__thenvoi_gateway_registry__";
+// The key is versioned so that two different package versions loaded in
+// the same process do not silently share (and corrupt) each other's state.
+const PKG_VERSION = "0.1.4";
+const GATEWAY_REGISTRY_KEY = `__thenvoi_gateway_registry_v${PKG_VERSION}__`;
 interface GatewayRegistry {
   links: Map<string, ThenvoiLink>;
   presences: Map<string, RoomPresence>;
@@ -251,19 +254,23 @@ function trackSender(accountId: string, threadId: string, senderId: string, send
 function isOpenClawRuntimeRef(value: unknown): value is OpenClawRuntimeRef {
   if (value == null || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  // Must have config.loadConfig as a function at minimum
-  if (
+
+  const hasLoadConfig =
     obj.config != null &&
     typeof obj.config === "object" &&
-    typeof (obj.config as Record<string, unknown>).loadConfig === "function"
-  ) {
-    return true;
-  }
-  // Also accept if it has channel.reply.dispatchReplyFromConfig
-  if (
+    typeof (obj.config as Record<string, unknown>).loadConfig === "function";
+
+  const hasDispatch =
     obj.channel != null &&
-    typeof obj.channel === "object"
-  ) {
+    typeof obj.channel === "object" &&
+    (obj.channel as Record<string, unknown>).reply != null &&
+    typeof (obj.channel as Record<string, unknown>).reply === "object" &&
+    typeof ((obj.channel as Record<string, unknown>).reply as Record<string, unknown>).dispatchReplyFromConfig === "function";
+
+  if (hasLoadConfig || hasDispatch) {
+    if (hasLoadConfig && !hasDispatch) {
+      console.warn("[thenvoi] Runtime has config.loadConfig but missing channel.reply.dispatchReplyFromConfig — message dispatch will fall back to deliverMessage");
+    }
     return true;
   }
   return false;
