@@ -125,7 +125,7 @@ export default function plugin(api: OpenClawPluginApi): void {
 
 // Channel exports
 export { thenvoiChannel, registerChannel, setInboundCallback, deliverMessage } from "./channel.js";
-export { getLink, getAgentId } from "./channel.js";
+export { getLink, getAgentId, resetGatewayRegistry } from "./channel.js";
 
 // OpenClaw-specific type exports
 export type { ThenvoiAccountConfig, OpenClawInboundMessage } from "./channel.js";

@@ -192,6 +192,15 @@ function getGatewayRegistry(): GatewayRegistry {
   return g[GATEWAY_REGISTRY_KEY];
 }
 
+/**
+ * Reset the gateway registry to its initial state.
+ * Intended for test isolation — call in beforeEach/afterEach to prevent state leaking between tests.
+ */
+export function resetGatewayRegistry(): void {
+  const g = globalThis as unknown as Record<string, GatewayRegistry>;
+  delete g[GATEWAY_REGISTRY_KEY];
+}
+
 // Convenience accessors into the global registry
 const registry = getGatewayRegistry();
 const links = registry.links;
@@ -290,10 +299,11 @@ async function resolveMentions(
 ): Promise<{ mentions: Mention[]; participants: Array<{ id: string; name: string }> } | null> {
   const participants = await rest.listChatParticipants(roomId);
 
-  // 1. Explicit @Name mentions in text
+  // 1. Explicit @Name mentions in text (case-insensitive)
   const mentioned: Mention[] = [];
+  const textLower = text.toLowerCase();
   for (const p of participants) {
-    if (p.id !== agentId && text.includes(`@${p.name}`)) {
+    if (p.id !== agentId && textLower.includes(`@${p.name.toLowerCase()}`)) {
       mentioned.push({ id: p.id, name: p.name });
     }
   }
@@ -605,32 +615,43 @@ export const thenvoiChannel: OpenClawChannel = {
             const isContactThread = message.threadId === CONTACTS_THREAD_ID;
             // Track pending reply promises so waitForIdle can await them
             const pendingReplies: Promise<boolean>[] = [];
+            let failedSendCount = 0;
+
+            const threadId = message.threadId;
+            function enqueueReply(payload: unknown): void {
+              pendingReplies.push(
+                sendReplyToThenvoi(link.rest, config.agentId, threadId, payload).then((ok) => {
+                  if (!ok) failedSendCount++;
+                  return ok;
+                }),
+              );
+            }
+
             const dispatcher = {
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               sendToolResult: (payload: any): boolean => {
-                if (!isContactThread) {
-                  pendingReplies.push(sendReplyToThenvoi(link.rest, config.agentId, message.threadId, payload));
-                }
+                if (!isContactThread) enqueueReply(payload);
                 return true;
               },
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               sendBlockReply: (payload: any): boolean => {
-                if (!isContactThread) {
-                  pendingReplies.push(sendReplyToThenvoi(link.rest, config.agentId, message.threadId, payload));
-                }
+                if (!isContactThread) enqueueReply(payload);
                 return true;
               },
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               sendFinalReply: (payload: any): boolean => {
-                if (!isContactThread) {
-                  pendingReplies.push(sendReplyToThenvoi(link.rest, config.agentId, message.threadId, payload));
-                }
+                if (!isContactThread) enqueueReply(payload);
                 return true;
               },
               waitForIdle: async (): Promise<void> => {
                 // Await all pending reply deliveries before signalling idle
                 // Use allSettled so a single failed send doesn't reject the batch
                 await Promise.allSettled(pendingReplies);
+                if (failedSendCount > 0) {
+                  console.warn(
+                    `[thenvoi:${accountId}] ${failedSendCount}/${pendingReplies.length} replies failed to deliver (room=${message.threadId})`,
+                  );
+                }
               },
               getQueuedCounts: () => ({ tool: 0, block: 0, final: 0 }),
             };
