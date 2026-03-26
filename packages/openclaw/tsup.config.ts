@@ -119,6 +119,7 @@ export default defineConfig({
   dts: true,
   sourcemap: true,
   clean: true,
+  shims: true,
   target: "node22",
   outDir: "dist",
   // Keep openclaw external (host provides it)

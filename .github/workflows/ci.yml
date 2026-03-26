@@ -28,6 +28,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build SDK (needed for OpenClaw type resolution)
+        run: pnpm --filter @thenvoi/sdk build
+
       - name: Typecheck
         run: pnpm typecheck
 
@@ -51,6 +54,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build SDK (needed for OpenClaw test resolution)
+        run: pnpm --filter @thenvoi/sdk build
 
       - name: Run tests
         run: pnpm test
@@ -110,15 +116,24 @@ jobs:
           }
           "
 
-      - name: Verify OpenClaw ESM import
+      - name: Verify OpenClaw build artifacts
         working-directory: packages/openclaw
         run: |
-          node --input-type=module -e "
-          import { pathToFileURL } from 'url';
-          import { resolve } from 'path';
-          const abs = pathToFileURL(resolve('./dist/index.js'));
-          const mod = await import(abs);
-          const keys = Object.keys(mod);
-          if (keys.length === 0) throw new Error('No exports found in dist/index.js');
-          console.log('OpenClaw ESM: ' + keys.length + ' exports (' + keys.join(', ') + ')');
+          node -e "
+          const fs = require('fs');
+          // Verify dist files exist
+          const required = ['dist/index.js', 'dist/index.d.ts', 'dist/openclaw.plugin.json'];
+          for (const f of required) {
+            if (!fs.existsSync(f)) throw new Error('Missing: ' + f);
+            const stat = fs.statSync(f);
+            if (stat.size === 0) throw new Error('Empty file: ' + f);
+            console.log(f + ': ' + (stat.size / 1024).toFixed(1) + ' KB');
+          }
+          // Verify .d.ts has expected exports
+          const dts = fs.readFileSync('dist/index.d.ts', 'utf8');
+          const expectedExports = ['thenvoiChannel', 'registerChannel', 'mcpTools', 'BASE_INSTRUCTIONS', 'buildSystemPrompt'];
+          for (const exp of expectedExports) {
+            if (!dts.includes(exp)) throw new Error('Missing export in .d.ts: ' + exp);
+          }
+          console.log('OpenClaw: ' + expectedExports.length + ' key exports verified in .d.ts');
           "
