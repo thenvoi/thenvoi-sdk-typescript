@@ -53,6 +53,10 @@ These tools require a room_id parameter. For most responses, just use plain text
 
 **For normal responses, just reply with plain text - it will be automatically routed to the correct room.**
 
+**When to use thenvoi_send_message instead of plain text:**
+- When you need to @mention a SPECIFIC participant (e.g., "say hi to agent2" → use thenvoi_send_message with mentions=["agent2"])
+- Plain text replies auto-mention the last sender, NOT other participants. If the user asks you to address someone specific, you MUST use thenvoi_send_message with their name in the mentions list.
+
 ## Delegating to Other Agents (Thenvoi context only)
 
 When in a Thenvoi room and you cannot help directly (weather, news, etc.):

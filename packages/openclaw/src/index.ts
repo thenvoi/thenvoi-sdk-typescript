@@ -105,13 +105,20 @@ export default function plugin(api: OpenClawPluginApi): void {
     console.warn("[thenvoi] Available API methods:", Object.keys(api));
   }
 
-  // Register before_agent_start hook to inject Thenvoi instructions
+  // Register before_agent_start hook to inject Thenvoi instructions + room context
   if (api.on) {
     api.on("before_agent_start", (_event, ctx) => {
-      console.log(`[thenvoi] before_agent_start hook called (messageProvider=${ctx.messageProvider})`);
-      return {
-        prependContext: BASE_INSTRUCTIONS,
-      };
+      console.log(`[thenvoi] before_agent_start hook called (messageProvider=${ctx.messageProvider}, sessionKey=${ctx.sessionKey})`);
+
+      // Extract room_id from sessionKey (format: "thenvoi:{roomId}")
+      const roomId = ctx.sessionKey?.startsWith("thenvoi:") ? ctx.sessionKey.slice("thenvoi:".length) : undefined;
+
+      let prependContext = BASE_INSTRUCTIONS;
+      if (roomId) {
+        prependContext += `\n\n## Current Thenvoi Room\n\n**Your current room_id is: \`${roomId}\`**\nUse this value for any tool parameter that asks for \`room_id\`. Do NOT use any other UUID.`;
+      }
+
+      return { prependContext };
     });
     console.log("[thenvoi] Registered before_agent_start hook for instruction injection");
   }
