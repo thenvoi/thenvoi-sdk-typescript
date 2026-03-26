@@ -668,7 +668,7 @@ export class FernRestAdapter implements RestApi {
       {
         page: request.page,
         page_size: request.pageSize,
-        not_in_chat: request.notInChat,
+        ...(request.notInChat ? { not_in_chat: request.notInChat } : {}),
       },
       mergeOptions(options),
     );
