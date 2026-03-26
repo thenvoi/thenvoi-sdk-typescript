@@ -73,10 +73,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build package
+      - name: Build all packages
         run: pnpm build
 
-      - name: Verify ESM imports
+      - name: Verify SDK ESM imports
+        working-directory: packages/sdk
         run: |
           node --input-type=module -e "
           import { readFileSync } from 'fs';
@@ -93,7 +94,8 @@ jobs:
           }
           "
 
-      - name: Verify CJS imports
+      - name: Verify SDK CJS imports
+        working-directory: packages/sdk
         run: |
           node -e "
           const { readFileSync } = require('fs');
@@ -106,4 +108,17 @@ jobs:
             if (keys.length === 0) throw new Error('No exports found in ' + cjsPath);
             console.log('CJS ' + entry + ': ' + keys.length + ' exports (' + keys.join(', ') + ')');
           }
+          "
+
+      - name: Verify OpenClaw ESM import
+        working-directory: packages/openclaw
+        run: |
+          node --input-type=module -e "
+          import { pathToFileURL } from 'url';
+          import { resolve } from 'path';
+          const abs = pathToFileURL(resolve('./dist/index.js'));
+          const mod = await import(abs);
+          const keys = Object.keys(mod);
+          if (keys.length === 0) throw new Error('No exports found in dist/index.js');
+          console.log('OpenClaw ESM: ' + keys.length + ' exports (' + keys.join(', ') + ')');
           "
