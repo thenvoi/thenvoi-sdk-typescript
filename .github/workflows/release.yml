@@ -38,12 +38,15 @@ jobs:
           manifest-file: .release-please-manifest.json
           target-branch: main
 
+      # Note: releases_created (plural) is broken in release-please v4 —
+      # it returns true even when no release occurred.  Gate on individual
+      # package outputs instead.
       - name: Install pnpm
-        if: steps.release.outputs.releases_created == 'true'
+        if: steps.release.outputs['packages/sdk--release_created'] == 'true' || steps.release.outputs['packages/openclaw--release_created'] == 'true'
         uses: pnpm/action-setup@v4
 
       - name: Setup Node
-        if: steps.release.outputs.releases_created == 'true'
+        if: steps.release.outputs['packages/sdk--release_created'] == 'true' || steps.release.outputs['packages/openclaw--release_created'] == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -51,11 +54,11 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
-        if: steps.release.outputs.releases_created == 'true'
+        if: steps.release.outputs['packages/sdk--release_created'] == 'true' || steps.release.outputs['packages/openclaw--release_created'] == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Build all packages
-        if: steps.release.outputs.releases_created == 'true'
+        if: steps.release.outputs['packages/sdk--release_created'] == 'true' || steps.release.outputs['packages/openclaw--release_created'] == 'true'
         run: pnpm build
 
       - name: Publish SDK to npm
@@ -71,7 +74,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish release summary
-        if: steps.release.outputs.releases_created == 'true'
+        if: steps.release.outputs['packages/sdk--release_created'] == 'true' || steps.release.outputs['packages/openclaw--release_created'] == 'true'
         run: |
           echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

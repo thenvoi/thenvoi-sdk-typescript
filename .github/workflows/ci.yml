@@ -10,7 +10,30 @@ concurrency:
 
 jobs:
 
+  # Detect which packages changed to skip unnecessary builds
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      sdk: ${{ steps.filter.outputs.sdk }}
+      openclaw: ${{ steps.filter.outputs.openclaw }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            sdk:
+              - 'packages/sdk/**'
+              - 'pnpm-lock.yaml'
+            openclaw:
+              - 'packages/openclaw/**'
+              - 'packages/sdk/**'
+              - 'pnpm-lock.yaml'
+
   lint:
+    needs: changes
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -28,8 +51,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build workspace dependencies
-        run: pnpm -r --filter @thenvoi/openclaw-channel-thenvoi... build
+      - name: Build SDK
+        if: needs.changes.outputs.sdk == 'true' || needs.changes.outputs.openclaw == 'true'
+        run: pnpm --filter @thenvoi/sdk build
+
+      - name: Build OpenClaw
+        if: needs.changes.outputs.openclaw == 'true'
+        run: pnpm --filter @thenvoi/openclaw-channel-thenvoi build
 
       - name: Typecheck
         run: pnpm typecheck
@@ -38,6 +66,7 @@ jobs:
         run: pnpm lint
 
   test:
+    needs: changes
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -55,8 +84,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build workspace dependencies
-        run: pnpm -r --filter @thenvoi/openclaw-channel-thenvoi... build
+      - name: Build SDK
+        if: needs.changes.outputs.sdk == 'true' || needs.changes.outputs.openclaw == 'true'
+        run: pnpm --filter @thenvoi/sdk build
+
+      - name: Build OpenClaw
+        if: needs.changes.outputs.openclaw == 'true'
+        run: pnpm --filter @thenvoi/openclaw-channel-thenvoi build
 
       - name: Run tests
         run: pnpm test
