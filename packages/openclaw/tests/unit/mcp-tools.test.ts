@@ -142,6 +142,22 @@ describe("MCP Tools", () => {
       expect(mockRest.listPeers).toHaveBeenCalledWith({ page: 2, pageSize: 25, notInChat: "" });
     });
 
+    it("should clamp invalid pagination to valid ranges", async () => {
+      mockRest.listPeers.mockResolvedValue(mockLookupPeersResponse);
+
+      await executeMcpTool("thenvoi_lookup_peers", { page: -1, page_size: 200 });
+
+      expect(mockRest.listPeers).toHaveBeenCalledWith({ page: 1, pageSize: 100, notInChat: "" });
+    });
+
+    it("should clamp page zero to 1", async () => {
+      mockRest.listPeers.mockResolvedValue(mockLookupPeersResponse);
+
+      await executeMcpTool("thenvoi_lookup_peers", { page: 0, page_size: 50 });
+
+      expect(mockRest.listPeers).toHaveBeenCalledWith({ page: 1, pageSize: 50, notInChat: "" });
+    });
+
     it("should throw when link not connected", async () => {
       vi.mocked(channel.getLink).mockReturnValue(undefined);
 
@@ -461,6 +477,14 @@ describe("MCP Tools", () => {
       expect(mockRest.listContacts).toHaveBeenCalledWith({ page: 3, pageSize: 25 });
     });
 
+    it("should clamp invalid pagination to valid ranges", async () => {
+      mockRest.listContacts.mockResolvedValue(mockListContactsResponse);
+
+      await executeMcpTool("thenvoi_list_contacts", { page: 0, page_size: 999 });
+
+      expect(mockRest.listContacts).toHaveBeenCalledWith({ page: 1, pageSize: 100 });
+    });
+
     it("should throw when link not connected", async () => {
       vi.mocked(channel.getLink).mockReturnValue(undefined);
 
@@ -598,6 +622,21 @@ describe("MCP Tools", () => {
         page: 2,
         pageSize: 10,
         sentStatus: "approved",
+      });
+    });
+
+    it("should clamp invalid pagination to valid ranges", async () => {
+      mockRest.listContactRequests.mockResolvedValue(mockListContactRequestsResponse);
+
+      await executeMcpTool("thenvoi_list_contact_requests", {
+        page: -5,
+        page_size: 150,
+      });
+
+      expect(mockRest.listContactRequests).toHaveBeenCalledWith({
+        page: 1,
+        pageSize: 100,
+        sentStatus: "pending",
       });
     });
 

@@ -76,6 +76,16 @@ function requireMethod<T extends (...args: any[]) => any>(
   return method.bind(rest) as T;
 }
 
+/**
+ * Clamp pagination parameters to valid ranges.
+ */
+function clampPagination(page: number, pageSize: number): { page: number; pageSize: number } {
+  return {
+    page: Math.max(1, Math.floor(page)),
+    pageSize: Math.max(1, Math.min(100, Math.floor(pageSize))),
+  };
+}
+
 // =============================================================================
 // Tool: thenvoi_lookup_peers
 // =============================================================================
@@ -101,10 +111,11 @@ const lookupPeersTool: McpTool = {
     },
   },
   handler: async (params: unknown) => {
-    const { page = 1, page_size = 50 } = params as LookupPeersParams;
+    const { page: rawPage = 1, page_size: rawPageSize = 50 } = params as LookupPeersParams;
+    const { page, pageSize } = clampPagination(rawPage, rawPageSize);
     const rest = getRest();
 
-    const response = await requireMethod(rest, rest.listPeers, "listPeers")({ page, pageSize: page_size, notInChat: "" });
+    const response = await requireMethod(rest, rest.listPeers, "listPeers")({ page, pageSize, notInChat: "" });
 
     return {
       peers: (response.data ?? []).map((peer) => ({
@@ -479,10 +490,11 @@ const listContactsTool: McpTool = {
     },
   },
   handler: async (params: unknown) => {
-    const { page = 1, page_size = 50 } = params as ListContactsParams;
+    const { page: rawPage = 1, page_size: rawPageSize = 50 } = params as ListContactsParams;
+    const { page, pageSize } = clampPagination(rawPage, rawPageSize);
     const rest = getRest();
 
-    const response = await requireMethod(rest, rest.listContacts, "listContacts")({ page, pageSize: page_size });
+    const response = await requireMethod(rest, rest.listContacts, "listContacts")({ page, pageSize });
 
     return {
       contacts: (response.data ?? []).map((c) => ({
@@ -606,10 +618,11 @@ const listContactRequestsTool: McpTool = {
     },
   },
   handler: async (params: unknown) => {
-    const { page = 1, page_size = 50, sent_status = "pending" } = params as ListContactRequestsParams;
+    const { page: rawPage = 1, page_size: rawPageSize = 50, sent_status = "pending" } = params as ListContactRequestsParams;
+    const { page, pageSize } = clampPagination(rawPage, rawPageSize);
     const rest = getRest();
 
-    const response = await requireMethod(rest, rest.listContactRequests, "listContactRequests")({ page, pageSize: page_size, sentStatus: sent_status });
+    const response = await requireMethod(rest, rest.listContactRequests, "listContactRequests")({ page, pageSize, sentStatus: sent_status });
 
     return {
       received: (response.received ?? []).map((r) => ({

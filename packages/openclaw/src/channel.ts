@@ -157,6 +157,25 @@ interface PluginConfig {
 }
 
 // =============================================================================
+// Minimal type for the OpenClaw runtime methods we access
+// =============================================================================
+
+interface OpenClawRuntimeRef {
+  channel?: {
+    reply?: {
+      dispatchReplyFromConfig?: (args: {
+        ctx: Record<string, unknown>;
+        cfg: unknown;
+        dispatcher: Record<string, unknown>;
+      }) => Promise<void>;
+    };
+  };
+  config?: {
+    loadConfig: () => unknown;
+  };
+}
+
+// =============================================================================
 // Virtual thread ID for contact events (dispatched to LLM for evaluation)
 // =============================================================================
 
@@ -172,10 +191,10 @@ const GATEWAY_REGISTRY_KEY = "__thenvoi_gateway_registry__";
 interface GatewayRegistry {
   links: Map<string, ThenvoiLink>;
   presences: Map<string, RoomPresence>;
+  startingAccounts: Set<string>;
   lastSenderByThread: Map<string, { senderId: string; senderName: string }>;
   deliverInbound: ((message: OpenClawInboundMessage) => void) | null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  openclawRuntime: any;
+  openclawRuntime: OpenClawRuntimeRef | null;
 }
 
 function getGatewayRegistry(): GatewayRegistry {
@@ -184,6 +203,7 @@ function getGatewayRegistry(): GatewayRegistry {
     g[GATEWAY_REGISTRY_KEY] = {
       links: new Map(),
       presences: new Map(),
+      startingAccounts: new Set(),
       lastSenderByThread: new Map(),
       deliverInbound: null,
       openclawRuntime: null,
@@ -212,26 +232,26 @@ function presences() { return getGatewayRegistry().presences; }
 // Key: threadId, Value: { senderId, senderName }
 const MAX_SENDER_CACHE = 500;
 
-function trackSender(threadId: string, senderId: string, senderName: string): void {
+function trackSender(accountId: string, threadId: string, senderId: string, senderName: string): void {
   const lastSenderByThread = registry().lastSenderByThread;
+  const cacheKey = `${accountId}:${threadId}`;
   // Delete-and-reinsert to move the entry to the end (LRU eviction order)
-  lastSenderByThread.delete(threadId);
+  lastSenderByThread.delete(cacheKey);
   if (lastSenderByThread.size >= MAX_SENDER_CACHE) {
     // Evict least-recently-used entry (first key in Map insertion order)
     const oldest = lastSenderByThread.keys().next().value;
     if (oldest) lastSenderByThread.delete(oldest);
   }
-  lastSenderByThread.set(threadId, { senderId, senderName });
+  lastSenderByThread.set(cacheKey, { senderId, senderName });
 }
 
 /**
  * Set the OpenClaw runtime reference for message dispatch.
  * Called by the plugin entry point.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function setOpenClawRuntime(runtime: any): void {
-  registry().openclawRuntime = runtime;
-  if (runtime?.channel?.reply) {
+export function setOpenClawRuntime(runtime: unknown): void {
+  registry().openclawRuntime = runtime as OpenClawRuntimeRef;
+  if ((runtime as OpenClawRuntimeRef)?.channel?.reply) {
     console.log("[thenvoi] OpenClaw dispatch methods available");
   }
 }
@@ -253,7 +273,7 @@ export function setInboundCallback(
 export function deliverMessage(message: OpenClawInboundMessage): void {
   // Track the sender for auto-mention fallback when responding
   if (message.threadId && message.senderId && message.senderName) {
-    trackSender(message.threadId, message.senderId, message.senderName);
+    trackSender("default", message.threadId, message.senderId, message.senderName);
   }
 
   const deliver = registry().deliverInbound;
@@ -297,6 +317,7 @@ type Mention = { id: string; name?: string };
 async function resolveMentions(
   rest: ThenvoiLink["rest"],
   agentId: string,
+  accountId: string,
   roomId: string,
   text: string,
 ): Promise<{ mentions: Mention[]; participants: Array<{ id: string; name: string }> } | null> {
@@ -313,7 +334,7 @@ async function resolveMentions(
   if (mentioned.length > 0) return { mentions: mentioned, participants };
 
   // 2. Fallback: last sender in this thread
-  const lastSender = registry().lastSenderByThread.get(roomId);
+  const lastSender = registry().lastSenderByThread.get(`${accountId}:${roomId}`);
   if (lastSender) {
     const senderParticipant = participants.find(
       (p) => p.id === lastSender.senderId && p.id !== agentId
@@ -340,7 +361,7 @@ async function resolveMentions(
  * Send a reply back to Thenvoi using the SDK's REST API.
  * Returns true if the message was sent, false on failure.
  */
-async function sendReplyToThenvoi(rest: ThenvoiLink["rest"], agentId: string, roomId: string, payload: unknown): Promise<boolean> {
+async function sendReplyToThenvoi(rest: ThenvoiLink["rest"], agentId: string, accountId: string, roomId: string, payload: unknown): Promise<boolean> {
   const text = typeof payload === "string" ? payload : (payload as { text?: string })?.text;
   if (!text) {
     console.warn("[thenvoi] No text in reply payload, skipping");
@@ -348,7 +369,7 @@ async function sendReplyToThenvoi(rest: ThenvoiLink["rest"], agentId: string, ro
   }
 
   try {
-    const resolved = await resolveMentions(rest, agentId, roomId, text);
+    const resolved = await resolveMentions(rest, agentId, accountId, roomId, text);
     if (!resolved) {
       console.error("[thenvoi] Reply dropped: no other participants in room to mention (room=%s)", roomId);
       return false;
@@ -376,7 +397,10 @@ function platformEventToInboundMessage(event: PlatformEvent): OpenClawInboundMes
   if (!roomId) return null;
 
   // Only process text messages, not events
-  if (payload.message_type !== "text") return null;
+  if (payload.message_type !== "text") {
+    console.log(`[thenvoi] Skipping non-text message (type=${payload.message_type}, room=${roomId})`);
+    return null;
+  }
 
   return {
     channelId: "thenvoi",
@@ -414,7 +438,7 @@ async function sendOutbound(ctx: OutboundContext): Promise<OutboundDeliveryResul
     throw new Error("Thenvoi link not initialized");
   }
 
-  const resolved = await resolveMentions(link.rest, link.agentId, roomId, text);
+  const resolved = await resolveMentions(link.rest, link.agentId, accountId ?? "default", roomId, text);
   if (!resolved) {
     throw new Error("Cannot send message: no other participants to mention");
   }
@@ -527,6 +551,13 @@ export const thenvoiChannel: OpenClawChannel = {
     startAccount: async (ctx: GatewayContext): Promise<void> => {
       const { accountId, account: accountConfig } = ctx;
 
+      // Prevent concurrent startAccount calls for the same account
+      if (registry().startingAccounts.has(accountId)) {
+        console.warn(`[thenvoi:${accountId}] startAccount already in progress, skipping`);
+        return;
+      }
+      registry().startingAccounts.add(accountId);
+
       console.log(`[thenvoi:${accountId}] Starting gateway...`);
 
       // Disconnect any existing connection to prevent orphaned connections on reload
@@ -588,12 +619,14 @@ export const thenvoiChannel: OpenClawChannel = {
         if (!message) return;
 
         // Try OpenClaw dispatch first
-        if (registry().openclawRuntime?.channel?.reply?.dispatchReplyFromConfig) {
+        const rt = registry().openclawRuntime;
+        const dispatchFn = rt?.channel?.reply?.dispatchReplyFromConfig;
+        if (rt?.config && dispatchFn) {
           try {
             // Track sender before dispatch — needed for auto-mention fallback
             // in sendReplyToThenvoi (deliverMessage owns tracking for the other path)
             if (message.threadId && message.senderId && message.senderName) {
-              trackSender(message.threadId, message.senderId, message.senderName);
+              trackSender(accountId, message.threadId, message.senderId, message.senderName);
             }
 
             const inboundCtx = {
@@ -623,7 +656,7 @@ export const thenvoiChannel: OpenClawChannel = {
             const threadId = message.threadId;
             function enqueueReply(payload: unknown): void {
               pendingReplies.push(
-                sendReplyToThenvoi(link.rest, config.agentId, threadId, payload).then((ok) => {
+                sendReplyToThenvoi(link.rest, config.agentId, accountId, threadId, payload).then((ok) => {
                   if (!ok) failedSendCount++;
                   return ok;
                 }),
@@ -660,8 +693,8 @@ export const thenvoiChannel: OpenClawChannel = {
             };
 
             console.log(`[thenvoi:${accountId}] Dispatching message to OpenClaw agent...`);
-            const cfg = registry().openclawRuntime.config.loadConfig();
-            await registry().openclawRuntime.channel.reply.dispatchReplyFromConfig({
+            const cfg = rt.config.loadConfig();
+            await dispatchFn({
               ctx: inboundCtx,
               cfg,
               dispatcher,
@@ -699,14 +732,19 @@ export const thenvoiChannel: OpenClawChannel = {
 
       // Handle contact events
       presence.onContactEvent = async (event: ContactEvent) => {
-        console.log(`[thenvoi:${accountId}] Contact event: ${event.type}`);
-        await contactHandler.handle(event);
+        try {
+          console.log(`[thenvoi:${accountId}] Contact event: ${event.type}`);
+          await contactHandler.handle(event);
+        } catch (error) {
+          console.error(`[thenvoi:${accountId}] Failed to handle contact event:`, error);
+        }
       };
 
       presences().set(accountId, presence);
 
       // Start the event loop
       await presence.start();
+      registry().startingAccounts.delete(accountId);
 
       console.log(`[thenvoi:${accountId}] Connected to Thenvoi platform`);
 
@@ -724,6 +762,7 @@ export const thenvoiChannel: OpenClawChannel = {
 
     stopAccount: async (ctx: GatewayContext): Promise<void> => {
       const { accountId } = ctx;
+      registry().startingAccounts.delete(accountId);
 
       const presence = presences().get(accountId);
       if (presence) {
