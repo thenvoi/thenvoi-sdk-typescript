@@ -203,8 +203,10 @@ const MAX_SENDER_CACHE = 500;
 
 function trackSender(threadId: string, senderId: string, senderName: string): void {
   const lastSenderByThread = registry.lastSenderByThread;
+  // Delete-and-reinsert to move the entry to the end (LRU eviction order)
+  lastSenderByThread.delete(threadId);
   if (lastSenderByThread.size >= MAX_SENDER_CACHE) {
-    // Evict oldest entry (first key in Map insertion order)
+    // Evict least-recently-used entry (first key in Map insertion order)
     const oldest = lastSenderByThread.keys().next().value;
     if (oldest) lastSenderByThread.delete(oldest);
   }
@@ -380,6 +382,40 @@ function platformEventToInboundMessage(event: PlatformEvent): OpenClawInboundMes
 }
 
 // =============================================================================
+// Outbound Send Helper
+// =============================================================================
+
+/**
+ * Shared logic for sending an outbound message (text or media) to Thenvoi.
+ */
+async function sendOutbound(ctx: OutboundContext): Promise<OutboundDeliveryResult> {
+  const { text, to, accountId } = ctx;
+  const roomId = to;
+
+  if (!roomId) {
+    throw new Error("room_id is required");
+  }
+
+  const link = links.get(accountId ?? "default");
+  if (!link) {
+    throw new Error("Thenvoi link not initialized");
+  }
+
+  const resolved = await resolveMentions(link.rest, link.agentId, roomId, text);
+  if (!resolved) {
+    throw new Error("Cannot send message: no other participants to mention");
+  }
+
+  const result = await link.rest.createChatMessage(roomId, { content: text, mentions: resolved.mentions });
+
+  return {
+    channel: "thenvoi",
+    messageId: String(result.id ?? `thenvoi-${Date.now()}`),
+    roomId,
+  };
+}
+
+// =============================================================================
 // Channel Definition
 // =============================================================================
 
@@ -435,60 +471,13 @@ export const thenvoiChannel: OpenClawChannel = {
       return { ok: true, to: target };
     },
 
-    sendText: async (ctx: OutboundContext): Promise<OutboundDeliveryResult> => {
-      const { text, to, accountId } = ctx;
-      const roomId = to;
-
-      if (!roomId) {
-        throw new Error("room_id is required");
-      }
-
-      const link = links.get(accountId ?? "default");
-      if (!link) {
-        throw new Error("Thenvoi link not initialized");
-      }
-
-      const resolved = await resolveMentions(link.rest, link.agentId, roomId, text);
-      if (!resolved) {
-        throw new Error("Cannot send message: no other participants to mention");
-      }
-
-      const result = await link.rest.createChatMessage(roomId, { content: text, mentions: resolved.mentions });
-
-      return {
-        channel: "thenvoi",
-        messageId: String(result.id ?? `thenvoi-${Date.now()}`),
-        roomId,
-      };
+    sendText: (ctx: OutboundContext): Promise<OutboundDeliveryResult> => {
+      return sendOutbound(ctx);
     },
 
-    sendMedia: async (ctx: OutboundContext): Promise<OutboundDeliveryResult> => {
-      const { text, to, mediaUrl, accountId } = ctx;
-      const roomId = to;
-
-      if (!roomId) {
-        throw new Error("room_id is required");
-      }
-
-      const link = links.get(accountId ?? "default");
-      if (!link) {
-        throw new Error("Thenvoi link not initialized");
-      }
-
-      const messageText = mediaUrl ? `${text}\n\n${mediaUrl}` : text;
-
-      const resolved = await resolveMentions(link.rest, link.agentId, roomId, messageText);
-      if (!resolved) {
-        throw new Error("Cannot send message: no other participants to mention");
-      }
-
-      const result = await link.rest.createChatMessage(roomId, { content: messageText, mentions: resolved.mentions });
-
-      return {
-        channel: "thenvoi",
-        messageId: String(result.id ?? `thenvoi-${Date.now()}`),
-        roomId,
-      };
+    sendMedia: (ctx: OutboundContext): Promise<OutboundDeliveryResult> => {
+      const messageText = ctx.mediaUrl ? `${ctx.text}\n\n${ctx.mediaUrl}` : ctx.text;
+      return sendOutbound({ ...ctx, text: messageText });
     },
   },
 
