@@ -189,7 +189,27 @@ const CONTACTS_THREAD_ID = "__thenvoi_contacts__";
 // All mutable state lives here so it survives Jiti reloading the module.
 // The key is versioned so that two different package versions loaded in
 // the same process do not silently share (and corrupt) each other's state.
-const PKG_VERSION = "0.1.4";
+//
+// __OPENCLAW_PKG_VERSION__ is replaced at build time by tsup (see tsup.config.ts `define`).
+// At dev/test time it falls back to reading package.json so the version is
+// never hardcoded in source.
+declare const __OPENCLAW_PKG_VERSION__: string;
+function resolvePackageVersion(): string {
+  if (typeof __OPENCLAW_PKG_VERSION__ !== "undefined") return __OPENCLAW_PKG_VERSION__;
+  try {
+    // Dev / test fallback: read from package.json via Node's fs
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { readFileSync } = require("node:fs") as typeof import("node:fs");
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { fileURLToPath } = require("node:url") as typeof import("node:url");
+    const pkgPath = new URL("../package.json", import.meta.url);
+    const pkg = JSON.parse(readFileSync(fileURLToPath(pkgPath), "utf-8")) as { version: string };
+    return pkg.version;
+  } catch {
+    return "0.0.0-dev";
+  }
+}
+const PKG_VERSION: string = resolvePackageVersion();
 const GATEWAY_REGISTRY_KEY = `__thenvoi_gateway_registry_v${PKG_VERSION}__`;
 interface GatewayRegistry {
   links: Map<string, ThenvoiLink>;

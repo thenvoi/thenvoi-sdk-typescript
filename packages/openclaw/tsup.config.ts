@@ -120,6 +120,9 @@ function stubOptionalPeers(peers: string[]): Plugin {
   };
 }
 
+// Read the package version to inject at build time (replaces __OPENCLAW_PKG_VERSION__ in channel.ts)
+const openclawPkg = JSON.parse(readFileSync("package.json", "utf-8")) as { version: string };
+
 export default defineConfig({
   entry: ["src/index.ts"],
   format: ["esm"],
@@ -134,4 +137,7 @@ export default defineConfig({
   // Bundle the SDK and its dependencies into the plugin
   noExternal: ["phoenix", "@thenvoi/sdk", "@thenvoi/rest-client", "zod", "zod-to-json-schema", "ws", "js-yaml"],
   esbuildPlugins: [stubOptionalPeers(sdkOptionalPeers)],
+  define: {
+    __OPENCLAW_PKG_VERSION__: JSON.stringify(openclawPkg.version),
+  },
 });
