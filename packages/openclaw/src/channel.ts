@@ -201,17 +201,19 @@ export function resetGatewayRegistry(): void {
   delete g[GATEWAY_REGISTRY_KEY];
 }
 
-// Convenience accessors into the global registry
-const registry = getGatewayRegistry();
-const links = registry.links;
-const presences = registry.presences;
+// Convenience accessors that always read from the current registry.
+// These MUST be functions (not module-level consts) so that
+// resetGatewayRegistry() properly invalidates cached state.
+function registry() { return getGatewayRegistry(); }
+function links() { return getGatewayRegistry().links; }
+function presences() { return getGatewayRegistry().presences; }
 
 // Track last sender per thread for auto-mention fallback
 // Key: threadId, Value: { senderId, senderName }
 const MAX_SENDER_CACHE = 500;
 
 function trackSender(threadId: string, senderId: string, senderName: string): void {
-  const lastSenderByThread = registry.lastSenderByThread;
+  const lastSenderByThread = registry().lastSenderByThread;
   // Delete-and-reinsert to move the entry to the end (LRU eviction order)
   lastSenderByThread.delete(threadId);
   if (lastSenderByThread.size >= MAX_SENDER_CACHE) {
@@ -228,7 +230,7 @@ function trackSender(threadId: string, senderId: string, senderName: string): vo
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function setOpenClawRuntime(runtime: any): void {
-  registry.openclawRuntime = runtime;
+  registry().openclawRuntime = runtime;
   if (runtime?.channel?.reply) {
     console.log("[thenvoi] OpenClaw dispatch methods available");
   }
@@ -241,7 +243,7 @@ export function setOpenClawRuntime(runtime: any): void {
 export function setInboundCallback(
   callback: (message: OpenClawInboundMessage) => void,
 ): void {
-  registry.deliverInbound = callback;
+  registry().deliverInbound = callback;
 }
 
 /**
@@ -254,8 +256,9 @@ export function deliverMessage(message: OpenClawInboundMessage): void {
     trackSender(message.threadId, message.senderId, message.senderName);
   }
 
-  if (registry.deliverInbound) {
-    registry.deliverInbound(message);
+  const deliver = registry().deliverInbound;
+  if (deliver) {
+    deliver(message);
   } else {
     console.warn("[thenvoi] Cannot deliver message: no inbound callback set");
   }
@@ -310,7 +313,7 @@ async function resolveMentions(
   if (mentioned.length > 0) return { mentions: mentioned, participants };
 
   // 2. Fallback: last sender in this thread
-  const lastSender = registry.lastSenderByThread.get(roomId);
+  const lastSender = registry().lastSenderByThread.get(roomId);
   if (lastSender) {
     const senderParticipant = participants.find(
       (p) => p.id === lastSender.senderId && p.id !== agentId
@@ -406,7 +409,7 @@ async function sendOutbound(ctx: OutboundContext): Promise<OutboundDeliveryResul
     throw new Error("room_id is required");
   }
 
-  const link = links.get(accountId ?? "default");
+  const link = links().get(accountId ?? "default");
   if (!link) {
     throw new Error("Thenvoi link not initialized");
   }
@@ -527,18 +530,18 @@ export const thenvoiChannel: OpenClawChannel = {
       console.log(`[thenvoi:${accountId}] Starting gateway...`);
 
       // Disconnect any existing connection to prevent orphaned connections on reload
-      if (links.has(accountId)) {
+      if (links().has(accountId)) {
         console.log(`[thenvoi:${accountId}] Disconnecting previous connection before restart...`);
-        const existingPresence = presences.get(accountId);
+        const existingPresence = presences().get(accountId);
         if (existingPresence) {
           await existingPresence.stop();
-          presences.delete(accountId);
+          presences().delete(accountId);
         }
-        const existingLink = links.get(accountId);
+        const existingLink = links().get(accountId);
         if (existingLink) {
           await existingLink.disconnect();
         }
-        links.delete(accountId);
+        links().delete(accountId);
       }
 
       const config = resolveConfig(accountConfig);
@@ -550,7 +553,7 @@ export const thenvoiChannel: OpenClawChannel = {
         wsUrl: config.wsUrl,
         restUrl: config.restUrl,
       });
-      links.set(accountId, link);
+      links().set(accountId, link);
       console.log(`[thenvoi:${accountId}] Link created`);
 
       // Connect WebSocket
@@ -585,7 +588,7 @@ export const thenvoiChannel: OpenClawChannel = {
         if (!message) return;
 
         // Try OpenClaw dispatch first
-        if (registry.openclawRuntime?.channel?.reply?.dispatchReplyFromConfig) {
+        if (registry().openclawRuntime?.channel?.reply?.dispatchReplyFromConfig) {
           try {
             // Track sender before dispatch — needed for auto-mention fallback
             // in sendReplyToThenvoi (deliverMessage owns tracking for the other path)
@@ -657,8 +660,8 @@ export const thenvoiChannel: OpenClawChannel = {
             };
 
             console.log(`[thenvoi:${accountId}] Dispatching message to OpenClaw agent...`);
-            const cfg = registry.openclawRuntime.config.loadConfig();
-            await registry.openclawRuntime.channel.reply.dispatchReplyFromConfig({
+            const cfg = registry().openclawRuntime.config.loadConfig();
+            await registry().openclawRuntime.channel.reply.dispatchReplyFromConfig({
               ctx: inboundCtx,
               cfg,
               dispatcher,
@@ -700,7 +703,7 @@ export const thenvoiChannel: OpenClawChannel = {
         await contactHandler.handle(event);
       };
 
-      presences.set(accountId, presence);
+      presences().set(accountId, presence);
 
       // Start the event loop
       await presence.start();
@@ -722,16 +725,16 @@ export const thenvoiChannel: OpenClawChannel = {
     stopAccount: async (ctx: GatewayContext): Promise<void> => {
       const { accountId } = ctx;
 
-      const presence = presences.get(accountId);
+      const presence = presences().get(accountId);
       if (presence) {
         await presence.stop();
-        presences.delete(accountId);
+        presences().delete(accountId);
       }
 
-      const link = links.get(accountId);
+      const link = links().get(accountId);
       if (link) {
         await link.disconnect();
-        links.delete(accountId);
+        links().delete(accountId);
       }
 
       console.log(`[thenvoi:${accountId}] Disconnected from Thenvoi platform`);
@@ -780,12 +783,12 @@ export function registerChannel(api: OpenClawChannelApi): void {
  * Get the ThenvoiLink for an account.
  */
 export function getLink(accountId: string = "default"): ThenvoiLink | undefined {
-  return links.get(accountId);
+  return links().get(accountId);
 }
 
 /**
  * Get the current agent's ID (UUID).
  */
 export function getAgentId(accountId: string = "default"): string | undefined {
-  return links.get(accountId)?.agentId;
+  return links().get(accountId)?.agentId;
 }
