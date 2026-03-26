@@ -60,11 +60,21 @@ jobs:
         if: needs.changes.outputs.openclaw == 'true'
         run: pnpm --filter @thenvoi/openclaw-channel-thenvoi build
 
-      - name: Typecheck
-        run: pnpm typecheck
+      - name: Typecheck SDK
+        if: needs.changes.outputs.sdk == 'true'
+        run: pnpm --filter @thenvoi/sdk typecheck
 
-      - name: Lint
-        run: pnpm lint
+      - name: Typecheck OpenClaw
+        if: needs.changes.outputs.openclaw == 'true'
+        run: pnpm --filter @thenvoi/openclaw-channel-thenvoi typecheck
+
+      - name: Lint SDK
+        if: needs.changes.outputs.sdk == 'true'
+        run: pnpm --filter @thenvoi/sdk lint
+
+      - name: Lint OpenClaw
+        if: needs.changes.outputs.openclaw == 'true'
+        run: pnpm --filter @thenvoi/openclaw-channel-thenvoi lint
 
   test:
     needs: changes
@@ -94,8 +104,13 @@ jobs:
         if: needs.changes.outputs.openclaw == 'true'
         run: pnpm --filter @thenvoi/openclaw-channel-thenvoi build
 
-      - name: Run tests
-        run: pnpm test
+      - name: Test SDK
+        if: needs.changes.outputs.sdk == 'true'
+        run: pnpm --filter @thenvoi/sdk test
+
+      - name: Test OpenClaw
+        if: needs.changes.outputs.openclaw == 'true'
+        run: pnpm --filter @thenvoi/openclaw-channel-thenvoi test
 
   packaging:
     runs-on: ubuntu-latest

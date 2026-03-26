@@ -246,12 +246,40 @@ function trackSender(accountId: string, threadId: string, senderId: string, send
 }
 
 /**
+ * Check if a value has the shape of an OpenClawRuntimeRef.
+ */
+function isOpenClawRuntimeRef(value: unknown): value is OpenClawRuntimeRef {
+  if (value == null || typeof value !== "object") return false;
+  const obj = value as Record<string, unknown>;
+  // Must have config.loadConfig as a function at minimum
+  if (
+    obj.config != null &&
+    typeof obj.config === "object" &&
+    typeof (obj.config as Record<string, unknown>).loadConfig === "function"
+  ) {
+    return true;
+  }
+  // Also accept if it has channel.reply.dispatchReplyFromConfig
+  if (
+    obj.channel != null &&
+    typeof obj.channel === "object"
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Set the OpenClaw runtime reference for message dispatch.
  * Called by the plugin entry point.
  */
 export function setOpenClawRuntime(runtime: unknown): void {
-  registry().openclawRuntime = runtime as OpenClawRuntimeRef;
-  if ((runtime as OpenClawRuntimeRef)?.channel?.reply) {
+  if (!isOpenClawRuntimeRef(runtime)) {
+    console.warn("[thenvoi] setOpenClawRuntime called with invalid runtime object, ignoring");
+    return;
+  }
+  registry().openclawRuntime = runtime;
+  if (runtime.channel?.reply) {
     console.log("[thenvoi] OpenClaw dispatch methods available");
   }
 }
@@ -374,7 +402,7 @@ async function sendReplyToThenvoi(rest: ThenvoiLink["rest"], agentId: string, ac
     );
   }
   await rest.createChatMessage(roomId, { content: text, mentions: resolved.mentions });
-  console.log(`[thenvoi] Reply sent: ${text.substring(0, 50)}...`);
+  console.log(`[thenvoi] Reply sent: ${text.length > 50 ? text.substring(0, 50) + "..." : text}`);
 }
 
 // =============================================================================
@@ -644,49 +672,53 @@ export const thenvoiChannel: OpenClawChannel = {
 
               // Contact events use a virtual thread — don't try to send to Thenvoi
               const isContactThread = message.threadId === CONTACTS_THREAD_ID;
-              // Track pending reply promises so waitForIdle can await them
-              const pendingReplies: Promise<void>[] = [];
-              const deliveryErrors: Error[] = [];
 
               const threadId = message.threadId;
-              function enqueueReply(payload: unknown): void {
-                pendingReplies.push(
-                  sendReplyToThenvoi(link.rest, config.agentId, accountId, threadId, payload).catch((err: unknown) => {
-                    const error = err instanceof Error ? err : new Error(String(err));
-                    deliveryErrors.push(error);
-                    console.error(`[thenvoi:${accountId}] Reply delivery failed (room=${threadId}):`, error.message);
-                  }),
-                );
-              }
 
-              const dispatcher = {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                sendToolResult: (payload: any): boolean => {
-                  if (!isContactThread) enqueueReply(payload);
-                  return true;
-                },
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                sendBlockReply: (payload: any): boolean => {
-                  if (!isContactThread) enqueueReply(payload);
-                  return true;
-                },
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                sendFinalReply: (payload: any): boolean => {
-                  if (!isContactThread) enqueueReply(payload);
-                  return true;
-                },
-                waitForIdle: async (): Promise<void> => {
-                  // Await all pending reply deliveries before signalling idle
-                  await Promise.allSettled(pendingReplies);
-                  if (deliveryErrors.length > 0) {
-                    const summary = deliveryErrors.map((e) => e.message).join("; ");
-                    console.error(
-                      `[thenvoi:${accountId}] ${deliveryErrors.length}/${pendingReplies.length} replies failed to deliver (room=${message.threadId}): ${summary}`,
-                    );
+              // For contact threads, use a no-op dispatcher — no replies to send
+              const noopSend = (): boolean => true;
+              const dispatcher = isContactThread
+                ? {
+                    sendToolResult: noopSend,
+                    sendBlockReply: noopSend,
+                    sendFinalReply: noopSend,
+                    waitForIdle: async (): Promise<void> => {},
+                    getQueuedCounts: () => ({ tool: 0, block: 0, final: 0 }),
                   }
-                },
-                getQueuedCounts: () => ({ tool: 0, block: 0, final: 0 }),
-              };
+                : (() => {
+                    // Track pending reply promises so waitForIdle can await them
+                    const pendingReplies: Promise<void>[] = [];
+                    const deliveryErrors: Error[] = [];
+
+                    function enqueueReply(payload: unknown): void {
+                      pendingReplies.push(
+                        sendReplyToThenvoi(link.rest, config.agentId, accountId, threadId, payload).catch((err: unknown) => {
+                          const error = err instanceof Error ? err : new Error(String(err));
+                          deliveryErrors.push(error);
+                          console.error(`[thenvoi:${accountId}] Reply delivery failed (room=${threadId}):`, error.message);
+                        }),
+                      );
+                    }
+
+                    return {
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      sendToolResult: (payload: any): boolean => { enqueueReply(payload); return true; },
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      sendBlockReply: (payload: any): boolean => { enqueueReply(payload); return true; },
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      sendFinalReply: (payload: any): boolean => { enqueueReply(payload); return true; },
+                      waitForIdle: async (): Promise<void> => {
+                        await Promise.allSettled(pendingReplies);
+                        if (deliveryErrors.length > 0) {
+                          const summary = deliveryErrors.map((e) => e.message).join("; ");
+                          console.error(
+                            `[thenvoi:${accountId}] ${deliveryErrors.length}/${pendingReplies.length} replies failed to deliver (room=${message.threadId}): ${summary}`,
+                          );
+                        }
+                      },
+                      getQueuedCounts: () => ({ tool: 0, block: 0, final: 0 }),
+                    };
+                  })();
 
               console.log(`[thenvoi:${accountId}] Dispatching message to OpenClaw agent...`);
               const cfg = rt.config.loadConfig();

@@ -37,8 +37,7 @@ interface OpenClawPluginApi {
   registerChannel: (options: { plugin: typeof thenvoiChannel }) => void;
   registerMcpTools?: (tools: ReturnType<typeof getMcpToolSchemas>) => void;
   // OpenClaw provides a callback setter for inbound message delivery
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  onInboundMessage?: (setter: any) => void;
+  onInboundMessage?: (setter: (cb: (message: unknown) => void) => void) => void;
   // Hook registration for lifecycle events
   on?: (
     hookName: "before_agent_start",
@@ -47,6 +46,15 @@ interface OpenClawPluginApi {
       ctx: PluginHookAgentContext
     ) => PluginHookBeforeAgentStartResult | void
   ) => void;
+  // OpenClaw runtime reference for dispatch (not in public API, provided dynamically)
+  runtime?: unknown;
+  // Tool registration (singular, provided dynamically by OpenClaw)
+  registerTool?: (tool: {
+    name: string;
+    description: string;
+    parameters: unknown;
+    execute: (toolCallId: unknown, input: unknown) => Promise<unknown>;
+  }) => void;
 }
 
 /**
@@ -56,19 +64,16 @@ export default function plugin(api: OpenClawPluginApi): void {
   console.log("[thenvoi] OpenClaw Plugin API keys:", Object.keys(api));
 
   // Store OpenClaw runtime for message dispatch
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const runtime = (api as any).runtime;
-  if (runtime) {
-    setOpenClawRuntime(runtime);
+  if (api.runtime) {
+    setOpenClawRuntime(api.runtime);
   }
 
   // Register the channel (handles connection via gateway.startAccount/stopAccount)
   registerChannel(api);
 
   // Register MCP tools - OpenClaw uses registerTool (singular) for each tool
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const registerTool = (api as any).registerTool;
-  if (registerTool) {
+  if (api.registerTool) {
+    const registerTool = api.registerTool;
     const toolSchemas = getMcpToolSchemas();
     console.log(`[thenvoi] Registering ${toolSchemas.length} tools:`, toolSchemas.map(t => t.name));
     for (const tool of toolSchemas) {

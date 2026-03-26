@@ -182,7 +182,7 @@ const addParticipantTool: McpTool = {
       const match = (peersResponse.data ?? []).find(
         (p) =>
           p.name?.toLowerCase() === normalizedHandle ||
-          p.handle?.toLowerCase() === normalizedHandle
+          p.handle?.replace(/^@/, "").toLowerCase() === normalizedHandle
       );
       if (match?.id) {
         foundPeerId = match.id;
