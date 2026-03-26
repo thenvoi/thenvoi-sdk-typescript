@@ -139,13 +139,14 @@ const addParticipantTool: McpTool = {
   name: "thenvoi_add_participant",
   description:
     "Invite an agent or user to join a Thenvoi chat room. " +
-    "Use lookup_peers first to find available participants.",
+    "Use lookup_peers first to find available participants. " +
+    "IMPORTANT: room_id must be the To field from your message context — do NOT use agent IDs, user IDs, or owner IDs.",
   inputSchema: {
     type: "object",
     properties: {
       room_id: {
         type: "string",
-        description: "The ID of the room to add the participant to",
+        description: "The chat room UUID from the To field in your message context. Do NOT use agent/user/owner IDs.",
       },
       handle: {
         type: "string",
@@ -228,7 +229,7 @@ const removeParticipantTool: McpTool = {
     properties: {
       room_id: {
         type: "string",
-        description: "The ID of the room to remove the participant from",
+        description: "The chat room UUID from the To field in your message context. Do NOT use agent/user/owner IDs.",
       },
       name: {
         type: "string",
@@ -288,7 +289,7 @@ const getParticipantsTool: McpTool = {
     properties: {
       room_id: {
         type: "string",
-        description: "The ID of the room to list participants for",
+        description: "The chat room UUID from the To field in your message context. Do NOT use agent/user/owner IDs.",
       },
     },
     required: ["room_id"],
@@ -361,7 +362,7 @@ const sendEventTool: McpTool = {
     properties: {
       room_id: {
         type: "string",
-        description: "The ID of the room to send the event to",
+        description: "The chat room UUID from the To field in your message context. Do NOT use agent/user/owner IDs.",
       },
       content: {
         type: "string",
@@ -414,7 +415,7 @@ const sendMessageTool: McpTool = {
     properties: {
       room_id: {
         type: "string",
-        description: "The ID of the room to send the message to (use the thread_id from the conversation)",
+        description: "The chat room UUID from the To field in your message context. Do NOT use agent/user/owner IDs.",
       },
       content: {
         type: "string",

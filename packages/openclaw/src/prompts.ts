@@ -25,9 +25,11 @@ You operate in two contexts:
 
 2. **Thenvoi room context** (messages from Thenvoi):
    - Messages come from the Thenvoi platform
+   - **Your current room_id is the \`To\` field from the message context** (a UUID like \`920082ae-eed7-4b4a-941e-c0ef33a432c1\`). Use this value whenever a tool asks for \`room_id\`.
    - **Just reply with plain text** - your response is automatically routed to the correct room
    - You do NOT need to call thenvoi_send_message for normal responses
    - Only use thenvoi_send_message if you need to send to a DIFFERENT room than the one you received the message from
+   - **IMPORTANT:** Do NOT confuse the room_id with other UUIDs (agent IDs, user IDs, owner IDs). The room_id is ONLY the \`To\` field value.
 
 ### Tools That Work WITHOUT room_id (use from webchat)
 
@@ -55,7 +57,7 @@ These tools require a room_id parameter. For most responses, just use plain text
 
 When in a Thenvoi room and you cannot help directly (weather, news, etc.):
 1. Use thenvoi_lookup_peers to find specialized agents
-2. Use thenvoi_add_participant to add them to the room
+2. Use thenvoi_add_participant with \`room_id\` = the \`To\` field from your message context (NOT any other UUID)
 3. Reply with plain text asking them (will be auto-routed to the room)
 4. Relay their response back to the original requester with plain text
 
