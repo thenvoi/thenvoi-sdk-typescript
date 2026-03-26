@@ -166,12 +166,16 @@ const CONTACTS_THREAD_ID = "__thenvoi_contacts__";
 // Channel State
 // =============================================================================
 
-// Global registry to track gateway connections across module reloads
-// This survives Jiti reloading the module
+// Global registry to track gateway state across module reloads.
+// All mutable state lives here so it survives Jiti reloading the module.
 const GATEWAY_REGISTRY_KEY = "__thenvoi_gateway_registry__";
 interface GatewayRegistry {
   links: Map<string, ThenvoiLink>;
   presences: Map<string, RoomPresence>;
+  lastSenderByThread: Map<string, { senderId: string; senderName: string }>;
+  deliverInbound: ((message: OpenClawInboundMessage) => void) | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  openclawRuntime: any;
 }
 
 function getGatewayRegistry(): GatewayRegistry {
@@ -180,21 +184,25 @@ function getGatewayRegistry(): GatewayRegistry {
     g[GATEWAY_REGISTRY_KEY] = {
       links: new Map(),
       presences: new Map(),
+      lastSenderByThread: new Map(),
+      deliverInbound: null,
+      openclawRuntime: null,
     };
   }
   return g[GATEWAY_REGISTRY_KEY];
 }
 
-// Active connections per account (use global registry)
-const links = getGatewayRegistry().links;
-const presences = getGatewayRegistry().presences;
+// Convenience accessors into the global registry
+const registry = getGatewayRegistry();
+const links = registry.links;
+const presences = registry.presences;
 
 // Track last sender per thread for auto-mention fallback
 // Key: threadId, Value: { senderId, senderName }
 const MAX_SENDER_CACHE = 500;
-const lastSenderByThread: Map<string, { senderId: string; senderName: string }> = new Map();
 
 function trackSender(threadId: string, senderId: string, senderName: string): void {
+  const lastSenderByThread = registry.lastSenderByThread;
   if (lastSenderByThread.size >= MAX_SENDER_CACHE) {
     // Evict oldest entry (first key in Map insertion order)
     const oldest = lastSenderByThread.keys().next().value;
@@ -203,20 +211,13 @@ function trackSender(threadId: string, senderId: string, senderName: string): vo
   lastSenderByThread.set(threadId, { senderId, senderName });
 }
 
-// Gateway callback for delivering inbound messages
-let deliverInbound: ((message: OpenClawInboundMessage) => void) | null = null;
-
-// OpenClaw runtime reference for message dispatch
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let openclawRuntime: any = null;
-
 /**
  * Set the OpenClaw runtime reference for message dispatch.
  * Called by the plugin entry point.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function setOpenClawRuntime(runtime: any): void {
-  openclawRuntime = runtime;
+  registry.openclawRuntime = runtime;
   if (runtime?.channel?.reply) {
     console.log("[thenvoi] OpenClaw dispatch methods available");
   }
@@ -229,7 +230,7 @@ export function setOpenClawRuntime(runtime: any): void {
 export function setInboundCallback(
   callback: (message: OpenClawInboundMessage) => void,
 ): void {
-  deliverInbound = callback;
+  registry.deliverInbound = callback;
 }
 
 /**
@@ -242,8 +243,8 @@ export function deliverMessage(message: OpenClawInboundMessage): void {
     trackSender(message.threadId, message.senderId, message.senderName);
   }
 
-  if (deliverInbound) {
-    deliverInbound(message);
+  if (registry.deliverInbound) {
+    registry.deliverInbound(message);
   } else {
     console.warn("[thenvoi] Cannot deliver message: no inbound callback set");
   }
@@ -297,7 +298,7 @@ async function resolveMentions(
   if (mentioned.length > 0) return { mentions: mentioned, participants };
 
   // 2. Fallback: last sender in this thread
-  const lastSender = lastSenderByThread.get(roomId);
+  const lastSender = registry.lastSenderByThread.get(roomId);
   if (lastSender) {
     const senderParticipant = participants.find(
       (p) => p.id === lastSender.senderId && p.id !== agentId
@@ -322,24 +323,27 @@ async function resolveMentions(
 
 /**
  * Send a reply back to Thenvoi using the SDK's REST API.
+ * Returns true if the message was sent, false on failure.
  */
-async function sendReplyToThenvoi(rest: ThenvoiLink["rest"], agentId: string, roomId: string, payload: unknown): Promise<void> {
+async function sendReplyToThenvoi(rest: ThenvoiLink["rest"], agentId: string, roomId: string, payload: unknown): Promise<boolean> {
   const text = typeof payload === "string" ? payload : (payload as { text?: string })?.text;
   if (!text) {
     console.warn("[thenvoi] No text in reply payload, skipping");
-    return;
+    return false;
   }
 
   try {
     const resolved = await resolveMentions(rest, agentId, roomId, text);
     if (!resolved) {
       console.error("[thenvoi] Reply dropped: no other participants in room to mention (room=%s)", roomId);
-      return;
+      return false;
     }
     await rest.createChatMessage(roomId, { content: text, mentions: resolved.mentions });
     console.log(`[thenvoi] Reply sent: ${text.substring(0, 50)}...`);
+    return true;
   } catch (error) {
     console.error("[thenvoi] Failed to send reply:", error);
+    return false;
   }
 }
 
@@ -582,7 +586,7 @@ export const thenvoiChannel: OpenClawChannel = {
         if (!message) return;
 
         // Try OpenClaw dispatch first
-        if (openclawRuntime?.channel?.reply?.dispatchReplyFromConfig) {
+        if (registry.openclawRuntime?.channel?.reply?.dispatchReplyFromConfig) {
           try {
             // Track sender before dispatch — needed for auto-mention fallback
             // in sendReplyToThenvoi (deliverMessage owns tracking for the other path)
@@ -610,29 +614,40 @@ export const thenvoiChannel: OpenClawChannel = {
 
             // Contact events use a virtual thread — don't try to send to Thenvoi
             const isContactThread = message.threadId === CONTACTS_THREAD_ID;
+            // Track pending reply promises so waitForIdle can await them
+            const pendingReplies: Promise<boolean>[] = [];
             const dispatcher = {
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               sendToolResult: (payload: any): boolean => {
-                if (!isContactThread) void sendReplyToThenvoi(link.rest, config.agentId, message.threadId, payload);
+                if (!isContactThread) {
+                  pendingReplies.push(sendReplyToThenvoi(link.rest, config.agentId, message.threadId, payload));
+                }
                 return true;
               },
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               sendBlockReply: (payload: any): boolean => {
-                if (!isContactThread) void sendReplyToThenvoi(link.rest, config.agentId, message.threadId, payload);
+                if (!isContactThread) {
+                  pendingReplies.push(sendReplyToThenvoi(link.rest, config.agentId, message.threadId, payload));
+                }
                 return true;
               },
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               sendFinalReply: (payload: any): boolean => {
-                if (!isContactThread) void sendReplyToThenvoi(link.rest, config.agentId, message.threadId, payload);
+                if (!isContactThread) {
+                  pendingReplies.push(sendReplyToThenvoi(link.rest, config.agentId, message.threadId, payload));
+                }
                 return true;
               },
-              waitForIdle: async (): Promise<void> => Promise.resolve(),
+              waitForIdle: async (): Promise<void> => {
+                // Await all pending reply deliveries before signalling idle
+                await Promise.all(pendingReplies);
+              },
               getQueuedCounts: () => ({ tool: 0, block: 0, final: 0 }),
             };
 
             console.log(`[thenvoi:${accountId}] Dispatching message to OpenClaw agent...`);
-            const cfg = openclawRuntime.config.loadConfig();
-            await openclawRuntime.channel.reply.dispatchReplyFromConfig({
+            const cfg = registry.openclawRuntime.config.loadConfig();
+            await registry.openclawRuntime.channel.reply.dispatchReplyFromConfig({
               ctx: inboundCtx,
               cfg,
               dispatcher,
