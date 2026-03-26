@@ -13,7 +13,7 @@ import { getLink, getAgentId } from "./channel.js";
 
 interface LookupPeersParams { page?: number; page_size?: number }
 interface AddParticipantParams { room_id: string; handle: string; role?: string }
-interface RemoveParticipantParams { room_id: string; name: string }
+interface RemoveParticipantParams { room_id: string; name: string; participant_id?: string }
 interface GetParticipantsParams { room_id: string }
 interface CreateChatroomParams { task_id?: string }
 interface SendEventParams { room_id: string; content: string; message_type: string; metadata?: Record<string, unknown> }
@@ -155,29 +155,48 @@ const addParticipantTool: McpTool = {
     const { room_id, handle, role = "member" } = params as AddParticipantParams;
     const rest = getRest();
 
-    // Lookup the peer to validate it exists and get canonical handle
-    const peersResponse = await requireMethod(rest, rest.listPeers, "listPeers")({ page: 1, pageSize: 100, notInChat: "" });
+    // Lookup the peer to validate it exists and get canonical handle.
+    // Paginate through all results to avoid silently missing peers beyond the first page.
+    const listPeers = requireMethod(rest, rest.listPeers, "listPeers");
     const normalizedHandle = handle.replace(/^@/, "").toLowerCase();
-    const peer = (peersResponse.data ?? []).find(
-      (p) =>
-        p.name?.toLowerCase() === normalizedHandle ||
-        p.handle?.toLowerCase() === normalizedHandle
-    );
+    let foundPeerId: string | undefined;
+    let foundPeerName: string | undefined;
+    let foundPeerType: string | undefined;
+    let page = 1;
+    const pageSize = 100;
 
-    if (!peer || !peer.id) {
+    while (!foundPeerId) {
+      const peersResponse = await listPeers({ page, pageSize, notInChat: "" });
+      const match = (peersResponse.data ?? []).find(
+        (p) =>
+          p.name?.toLowerCase() === normalizedHandle ||
+          p.handle?.toLowerCase() === normalizedHandle
+      );
+      if (match?.id) {
+        foundPeerId = match.id;
+        foundPeerName = match.name;
+        foundPeerType = match.type;
+        break;
+      }
+      const totalPages = peersResponse.metadata?.totalPages ?? 1;
+      if (page >= totalPages) break;
+      page++;
+    }
+
+    if (!foundPeerId) {
       throw new Error(
         `Peer not found: "${handle}". Use thenvoi_lookup_peers to see available peers.`
       );
     }
 
-    const response = await rest.addChatParticipant(room_id, { participantId: peer.id, role });
+    const response = await rest.addChatParticipant(room_id, { participantId: foundPeerId, role });
 
     return {
       success: true,
       participant: {
-        id: peer.id,
-        name: peer.name,
-        type: peer.type,
+        id: foundPeerId,
+        name: foundPeerName,
+        type: foundPeerType,
         role,
       },
       response,
@@ -201,20 +220,46 @@ const removeParticipantTool: McpTool = {
       },
       name: {
         type: "string",
-        description: "Name of the agent or user to remove",
+        description: "Name of the agent or user to remove (resolved to ID via participants list)",
+      },
+      participant_id: {
+        type: "string",
+        description: "Or provide the participant UUID directly (skips name resolution)",
       },
     },
-    required: ["room_id", "name"],
+    required: ["room_id"],
   },
   handler: async (params: unknown) => {
-    const { room_id, name } = params as RemoveParticipantParams;
+    const { room_id, name, participant_id } = params as RemoveParticipantParams;
     const rest = getRest();
 
-    await rest.removeChatParticipant(room_id, name);
+    let resolvedId = participant_id;
+    let resolvedName = name ?? participant_id;
+
+    if (!resolvedId) {
+      if (!name) {
+        throw new Error("Either name or participant_id is required");
+      }
+      // Resolve name to ID via the room's participant list
+      const selfAgentId = getAgentId();
+      const participants = await rest.listChatParticipants(room_id);
+      const match = participants.find(
+        (p) => p.name.toLowerCase() === name.toLowerCase() && p.id !== selfAgentId
+      );
+      if (!match) {
+        throw new Error(
+          `Participant "${name}" not found in room. Use thenvoi_get_participants to see current participants.`
+        );
+      }
+      resolvedId = match.id;
+      resolvedName = match.name;
+    }
+
+    await rest.removeChatParticipant(room_id, resolvedId);
 
     return {
       success: true,
-      message: `Removed ${name} from room`,
+      message: `Removed ${resolvedName} from room`,
     };
   },
 };

@@ -193,6 +193,33 @@ describe("MCP Tools", () => {
       );
     });
 
+    it("should paginate through peers to find a match on page 2", async () => {
+      const page1Response = {
+        data: [{ id: "agent-a", name: "Agent A", type: "Agent", handle: "@agent-a" }],
+        metadata: { page: 1, pageSize: 100, totalCount: 2, totalPages: 2 },
+      };
+      const page2Response = {
+        data: [{ id: "agent-b", name: "Agent B", type: "Agent", handle: "@agent-b" }],
+        metadata: { page: 2, pageSize: 100, totalCount: 2, totalPages: 2 },
+      };
+      mockRest.listPeers
+        .mockResolvedValueOnce(page1Response)
+        .mockResolvedValueOnce(page2Response);
+      mockRest.addChatParticipant.mockResolvedValue(mockAddParticipantResponse);
+
+      const result = await executeMcpTool("thenvoi_add_participant", {
+        room_id: "room-001",
+        handle: "Agent B",
+      });
+
+      expect(mockRest.listPeers).toHaveBeenCalledTimes(2);
+      expect(mockRest.addChatParticipant).toHaveBeenCalledWith(
+        "room-001",
+        { participantId: "agent-b", role: "member" },
+      );
+      expect(result).toHaveProperty("success", true);
+    });
+
     it("should throw when peer not found", async () => {
       mockRest.listPeers.mockResolvedValue(mockLookupPeersResponse);
 
@@ -217,20 +244,57 @@ describe("MCP Tools", () => {
   });
 
   describe("thenvoi_remove_participant", () => {
-    it("should call removeChatParticipant", async () => {
+    it("should resolve name to ID and call removeChatParticipant", async () => {
+      mockRest.listChatParticipants.mockResolvedValue(mockParticipants);
       mockRest.removeChatParticipant.mockResolvedValue({ ok: true });
 
       const result = await executeMcpTool("thenvoi_remove_participant", {
         room_id: "room-001",
-        name: "Weather Agent",
+        name: "John Doe",
       });
 
+      expect(mockRest.listChatParticipants).toHaveBeenCalledWith("room-001");
       expect(mockRest.removeChatParticipant).toHaveBeenCalledWith(
         "room-001",
-        "Weather Agent",
+        "user-789",
       );
       expect(result).toHaveProperty("success", true);
       expect(result).toHaveProperty("message");
+    });
+
+    it("should use participant_id directly when provided", async () => {
+      mockRest.removeChatParticipant.mockResolvedValue({ ok: true });
+
+      const result = await executeMcpTool("thenvoi_remove_participant", {
+        room_id: "room-001",
+        participant_id: "user-789",
+      });
+
+      expect(mockRest.listChatParticipants).not.toHaveBeenCalled();
+      expect(mockRest.removeChatParticipant).toHaveBeenCalledWith(
+        "room-001",
+        "user-789",
+      );
+      expect(result).toHaveProperty("success", true);
+    });
+
+    it("should throw when participant name not found in room", async () => {
+      mockRest.listChatParticipants.mockResolvedValue(mockParticipants);
+
+      await expect(
+        executeMcpTool("thenvoi_remove_participant", {
+          room_id: "room-001",
+          name: "Unknown Person",
+        }),
+      ).rejects.toThrow('Participant "Unknown Person" not found in room');
+    });
+
+    it("should throw when neither name nor participant_id provided", async () => {
+      await expect(
+        executeMcpTool("thenvoi_remove_participant", {
+          room_id: "room-001",
+        }),
+      ).rejects.toThrow("Either name or participant_id is required");
     });
   });
 

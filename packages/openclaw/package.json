@@ -17,7 +17,7 @@
     "openclaw.plugin.json"
   ],
   "scripts": {
-    "build": "tsup && cp openclaw.plugin.json dist/",
+    "build": "tsup && node -e \"const p=require('./package.json');const f=require('fs');const j=JSON.parse(f.readFileSync('openclaw.plugin.json','utf8'));j.version=p.version;f.writeFileSync('dist/openclaw.plugin.json',JSON.stringify(j,null,2)+'\\n')\"",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
