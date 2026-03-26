@@ -81,10 +81,9 @@ function discoverNamedImports(peers: string[]): Map<string, Set<string>> {
 const namedImportsPerPeer = discoverNamedImports(sdkOptionalPeers);
 
 if (sdkOptionalPeers.length > 0 && namedImportsPerPeer.size === 0) {
-  console.warn(
-    "[tsup] WARNING: Found %d optional peers but discovered zero named imports. " +
-    "Ensure the SDK is built before building OpenClaw.",
-    sdkOptionalPeers.length,
+  throw new Error(
+    `[tsup] Found ${sdkOptionalPeers.length} optional peers but discovered zero named imports. ` +
+    "The SDK must be built before building OpenClaw. Run: pnpm --filter @thenvoi/sdk build",
   );
 }
 

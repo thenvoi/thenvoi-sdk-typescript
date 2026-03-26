@@ -28,8 +28,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build SDK (needed for OpenClaw type resolution)
-        run: pnpm --filter @thenvoi/sdk build
+      - name: Build workspace dependencies
+        run: pnpm -r --filter @thenvoi/openclaw-channel-thenvoi... build
 
       - name: Typecheck
         run: pnpm typecheck
@@ -55,8 +55,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build SDK (needed for OpenClaw test resolution)
-        run: pnpm --filter @thenvoi/sdk build
+      - name: Build workspace dependencies
+        run: pnpm -r --filter @thenvoi/openclaw-channel-thenvoi... build
 
       - name: Run tests
         run: pnpm test
