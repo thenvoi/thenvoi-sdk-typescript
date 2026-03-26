@@ -270,10 +270,10 @@ export function setInboundCallback(
  * Deliver an inbound message to OpenClaw.
  * Used by the service and runtime to send received messages to OpenClaw.
  */
-export function deliverMessage(message: OpenClawInboundMessage): void {
+export function deliverMessage(message: OpenClawInboundMessage, accountId: string = "default"): void {
   // Track the sender for auto-mention fallback when responding
   if (message.threadId && message.senderId && message.senderName) {
-    trackSender("default", message.threadId, message.senderId, message.senderName);
+    trackSender(accountId, message.threadId, message.senderId, message.senderName);
   }
 
   const deliver = registry().deliverInbound;
@@ -705,7 +705,7 @@ export const thenvoiChannel: OpenClawChannel = {
           }
         } else {
           // deliverMessage handles sender tracking and warns if no callback is set
-          deliverMessage(message);
+          deliverMessage(message, accountId);
         }
 
         // Mark message as processed
