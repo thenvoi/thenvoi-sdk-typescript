@@ -213,6 +213,9 @@ export interface LettaAdapterOptions {
   systemPrompt?: string;
   customSection?: string;
   includeBaseInstructions?: boolean;
+  includeTools?: string[];
+  excludeTools?: string[];
+  includeCategories?: string[];
   maxHistoryMessages?: number;
   emitReasoningEvents?: boolean;
   historyConverter?: LettaHistoryConverter;
@@ -250,6 +253,9 @@ export class LettaAdapter extends SimpleAdapter<
   private readonly systemPromptOverride?: string;
   private readonly customSection?: string;
   private readonly includeBaseInstructions: boolean;
+  private readonly includeTools?: string[];
+  private readonly excludeTools?: string[];
+  private readonly includeCategories?: string[];
   private readonly maxHistoryMessages: number;
   private readonly emitReasoningEvents: boolean;
   private readonly clientFactory?: LettaClientFactory;
@@ -295,6 +301,9 @@ export class LettaAdapter extends SimpleAdapter<
     this.systemPromptOverride = options.systemPrompt;
     this.customSection = options.customSection;
     this.includeBaseInstructions = options.includeBaseInstructions ?? true;
+    this.includeTools = options.includeTools;
+    this.excludeTools = options.excludeTools;
+    this.includeCategories = options.includeCategories;
     this.maxHistoryMessages =
       options.maxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES;
     this.emitReasoningEvents = options.emitReasoningEvents ?? false;
@@ -374,7 +383,13 @@ export class LettaAdapter extends SimpleAdapter<
 
       // Refresh tool schemas on every message so dynamic tool additions/removals
       // are picked up mid-session.
-      const clientTools = toClientTools(tools.getOpenAIToolSchemas());
+      const clientTools = toClientTools(
+        tools.getOpenAIToolSchemas({
+          includeTools: this.includeTools,
+          excludeTools: this.excludeTools,
+          includeCategories: this.includeCategories,
+        }),
+      );
       const assistantText = await this.executeWithToolLoop(
         client,
         agentId,

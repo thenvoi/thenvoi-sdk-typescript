@@ -426,7 +426,7 @@ export function validateToolFilter(options: ToolFilterOptions): void {
   if (options.includeCategories) {
     const validCategories = Object.keys(TOOL_CATEGORIES);
     const unknown = options.includeCategories.filter(
-      (c) => !TOOL_CATEGORIES[c],
+      (c) => !Object.prototype.hasOwnProperty.call(TOOL_CATEGORIES, c),
     );
     if (unknown.length > 0) {
       throw new Error(

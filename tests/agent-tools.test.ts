@@ -745,6 +745,13 @@ describe("tool filtering", () => {
     }).toThrow("Unknown categories in includeCategories");
   });
 
+  it("rejects inherited category names", () => {
+    const tools = makeTools();
+    expect(() => {
+      tools.getToolSchemas("openai", { includeCategories: ["toString"] });
+    }).toThrow("Unknown categories in includeCategories");
+  });
+
   it("filtering works with anthropic format", () => {
     const tools = makeTools();
     const schemas = tools.getAnthropicToolSchemas({

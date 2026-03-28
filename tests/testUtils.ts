@@ -11,6 +11,7 @@ import type {
   PaginatedList,
   ParticipantRecord,
   PeerRecord,
+  ToolFilterOptions,
 } from "../src/contracts/dtos";
 
 interface CapturedToolEvent {
@@ -86,18 +87,18 @@ export class FakeTools implements AgentToolsProtocol {
 
   public getToolSchemas(
     _format: "openai" | "anthropic",
-    _options?: { includeMemory?: boolean },
+    _options?: ToolFilterOptions,
   ): Array<Record<string, unknown>> {
     this.maybeFail("getToolSchemas");
     return [];
   }
 
-  public getAnthropicToolSchemas(_options?: { includeMemory?: boolean }): Array<Record<string, unknown>> {
+  public getAnthropicToolSchemas(_options?: ToolFilterOptions): Array<Record<string, unknown>> {
     this.maybeFail("getAnthropicToolSchemas");
     return [];
   }
 
-  public getOpenAIToolSchemas(_options?: { includeMemory?: boolean }): Array<Record<string, unknown>> {
+  public getOpenAIToolSchemas(_options?: ToolFilterOptions): Array<Record<string, unknown>> {
     this.maybeFail("getOpenAIToolSchemas");
     return [];
   }

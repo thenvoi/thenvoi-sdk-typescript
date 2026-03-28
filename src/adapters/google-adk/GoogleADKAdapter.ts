@@ -83,6 +83,9 @@ export interface GoogleADKAdapterOptions {
   customSection?: string;
   enableExecutionReporting?: boolean;
   enableMemoryTools?: boolean;
+  includeTools?: string[];
+  excludeTools?: string[];
+  includeCategories?: string[];
   historyConverter?: GoogleADKHistoryConverter;
   additionalTools?: CustomToolDef[];
   maxHistoryMessages?: number;
@@ -174,6 +177,9 @@ export class GoogleADKAdapter extends SimpleAdapter<GoogleADKMessages, AdapterTo
   private readonly customSection: string;
   private readonly enableExecutionReporting: boolean;
   private readonly enableMemoryTools: boolean;
+  private readonly includeTools?: string[];
+  private readonly excludeTools?: string[];
+  private readonly includeCategories?: string[];
   private readonly customTools: CustomToolDef[];
   private readonly maxHistoryMessages: number;
   private readonly maxTranscriptChars: number;
@@ -193,6 +199,9 @@ export class GoogleADKAdapter extends SimpleAdapter<GoogleADKMessages, AdapterTo
     this.customSection = options.customSection ?? "";
     this.enableExecutionReporting = options.enableExecutionReporting ?? false;
     this.enableMemoryTools = options.enableMemoryTools ?? false;
+    this.includeTools = options.includeTools;
+    this.excludeTools = options.excludeTools;
+    this.includeCategories = options.includeCategories;
     this.customTools = [...(options.additionalTools ?? [])];
     this.maxHistoryMessages = options.maxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES;
     this.maxTranscriptChars = options.maxTranscriptChars ?? DEFAULT_MAX_TRANSCRIPT_CHARS;
@@ -317,6 +326,9 @@ export class GoogleADKAdapter extends SimpleAdapter<GoogleADKMessages, AdapterTo
   ): unknown[] {
     const toolSchemas = tools.getOpenAIToolSchemas({
       includeMemory: this.enableMemoryTools,
+      includeTools: this.includeTools,
+      excludeTools: this.excludeTools,
+      includeCategories: this.includeCategories,
     });
     const adkTools = toolSchemas
       .map((schema) => this.buildPlatformTool(sdk, tools, schema))
