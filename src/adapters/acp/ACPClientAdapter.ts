@@ -20,7 +20,7 @@ import { ACPClientHistoryConverter, type ACPClientSessionState } from "../../con
 import { SimpleAdapter } from "../../core/simpleAdapter";
 import type { AdapterToolsProtocol } from "../../contracts/protocols";
 import { renderSystemPrompt } from "../../runtime/prompts";
-import type { HistoryProvider, PlatformMessage } from "../../runtime/types";
+import type { PlatformMessage } from "../../runtime/types";
 import {
   createThenvoiMcpBackend,
   type ThenvoiMcpBackend,

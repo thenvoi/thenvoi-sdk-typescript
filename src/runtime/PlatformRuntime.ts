@@ -330,7 +330,3 @@ export class PlatformRuntime {
     }
   }
 }
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled contact event: ${JSON.stringify(value)}`);
-}

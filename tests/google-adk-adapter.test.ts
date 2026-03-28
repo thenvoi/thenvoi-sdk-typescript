@@ -4,7 +4,7 @@ import { z } from "zod";
 import { GoogleADKAdapter } from "../src/adapters";
 import type { ToolFilterOptions } from "../src/contracts/dtos";
 import { GoogleADKHistoryConverter } from "../src/converters";
-import type { AgentToolsProtocol } from "../src/core";
+import type { GoogleADKAdapterOptions } from "../src/adapters";
 import { FakeTools, makeMessage } from "./testUtils";
 
 class GoogleAdkTestTools extends FakeTools {
@@ -41,15 +41,15 @@ class GoogleAdkTestTools extends FakeTools {
 
 function createFakeGoogleAdkSdk(
   run: (agent: Record<string, unknown>, request: { userId: string; sessionId: string; newMessage: { role: "user"; parts: Array<{ text: string }> } }) => AsyncIterable<unknown>,
-): () => Promise<any> {
+): NonNullable<GoogleADKAdapterOptions["sdkFactory"]> {
   return async () => ({
     createAgent: (params: Record<string, unknown>) => params,
     createFunctionTool: (params: Record<string, unknown>) => params,
-    createRunner: ({ agent }: { agent: Record<string, unknown> }) => ({
+    createRunner: ({ agent }: { agent: unknown; appName: string }) => ({
       sessionService: {
         createSession: async () => ({ ok: true }),
       },
-      runAsync: (request: { userId: string; sessionId: string; newMessage: { role: "user"; parts: Array<{ text: string }> } }) => run(agent, request),
+      runAsync: (request: { userId: string; sessionId: string; newMessage: { role: "user"; parts: Array<{ text: string }> } }) => run(agent as Record<string, unknown>, request),
     }),
     isFinalResponse: (event: Record<string, unknown>) => event.final === true,
     getFunctionCalls: (event: Record<string, unknown>) => Array.isArray(event.functionCalls) ? event.functionCalls : [],
