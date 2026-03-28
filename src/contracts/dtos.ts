@@ -171,6 +171,14 @@ export interface ToolSchemaRecord {
   [key: string]: unknown;
 }
 
+/** Options for filtering which platform tools are exposed to the LLM. */
+export interface ToolFilterOptions {
+  includeMemory?: boolean;
+  includeTools?: string[];
+  excludeTools?: string[];
+  includeCategories?: string[];
+}
+
 export type ToolMessageRole = "system" | "user" | "assistant";
 
 export interface ToolModelMessage {

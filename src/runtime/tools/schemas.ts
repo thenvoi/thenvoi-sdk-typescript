@@ -1,4 +1,7 @@
 import { CHAT_EVENT_TYPES } from "../../contracts/chatEvents";
+import type { ToolFilterOptions } from "../../contracts/dtos";
+
+export type { ToolFilterOptions };
 
 export const TOOL_MODELS = {
   thenvoi_send_message: {
@@ -386,6 +389,53 @@ export const CHAT_TOOL_NAMES = new Set<string>(
 );
 
 export const MCP_TOOL_PREFIX = "mcp__thenvoi__";
+
+/**
+ * Category-based tool groupings for filtering.
+ * Keys are human-readable category names; values are the Sets above.
+ */
+export const TOOL_CATEGORIES: Record<string, Set<string>> = {
+  chat: CHAT_TOOL_NAMES,
+  contact: CONTACT_TOOL_NAMES,
+  memory: MEMORY_TOOL_NAMES,
+};
+
+
+/**
+ * Validate tool filter options. Throws if unknown tool names or categories are passed.
+ */
+export function validateToolFilter(options: ToolFilterOptions): void {
+  if (options.includeTools) {
+    const unknown = options.includeTools.filter((n) => !ALL_TOOL_NAMES.has(n));
+    if (unknown.length > 0) {
+      throw new Error(
+        `Unknown tool names in includeTools: [${unknown.sort().join(", ")}]. ` +
+          `Valid tools: [${[...ALL_TOOL_NAMES].sort().join(", ")}]`,
+      );
+    }
+  }
+  if (options.excludeTools) {
+    const unknown = options.excludeTools.filter((n) => !ALL_TOOL_NAMES.has(n));
+    if (unknown.length > 0) {
+      throw new Error(
+        `Unknown tool names in excludeTools: [${unknown.sort().join(", ")}]. ` +
+          `Valid tools: [${[...ALL_TOOL_NAMES].sort().join(", ")}]`,
+      );
+    }
+  }
+  if (options.includeCategories) {
+    const validCategories = Object.keys(TOOL_CATEGORIES);
+    const unknown = options.includeCategories.filter(
+      (c) => !TOOL_CATEGORIES[c],
+    );
+    if (unknown.length > 0) {
+      throw new Error(
+        `Unknown categories in includeCategories: [${unknown.sort().join(", ")}]. ` +
+          `Valid categories: [${validCategories.sort().join(", ")}]`,
+      );
+    }
+  }
+}
 
 export function mcpToolNames(names: Set<string>): string[] {
   return [...names].sort((a, b) => a.localeCompare(b)).map((name) => `${MCP_TOOL_PREFIX}${name}`);

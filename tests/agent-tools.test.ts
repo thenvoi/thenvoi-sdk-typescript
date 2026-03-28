@@ -15,6 +15,12 @@ import {
 } from "../src/contracts/protocols";
 import { UnsupportedFeatureError, ValidationError } from "../src/core/errors";
 import { AgentTools } from "../src/runtime/tools/AgentTools";
+import {
+  ALL_TOOL_NAMES,
+  CHAT_TOOL_NAMES,
+  CONTACT_TOOL_NAMES,
+  MEMORY_TOOL_NAMES,
+} from "../src/runtime/tools/schemas";
 
 class FakeRestApi implements RestApi {
   public readonly chatMessages: Array<{ chatId: string; content: string; mentions?: unknown[] }> = [];
@@ -624,5 +630,132 @@ describe("AgentTools", () => {
       errorType: "ToolArgumentsValidationError",
       toolName: "thenvoi_store_memory",
     });
+  });
+});
+
+describe("tool filtering", () => {
+  function makeTools(caps?: { peers?: boolean; contacts?: boolean; memory?: boolean }) {
+    return new AgentTools({
+      roomId: "room-1",
+      rest: new RestFacade({ api: new FakeRestApi() }),
+      capabilities: { peers: true, contacts: true, memory: true, ...caps },
+    });
+  }
+
+  function getNames(schemas: Array<{ [k: string]: unknown }>): string[] {
+    return schemas.map((s) => {
+      const fn = s.function as { name?: string } | undefined;
+      return fn?.name ?? (s.name as string);
+    });
+  }
+
+  it("includeTools returns only the requested tools", () => {
+    const tools = makeTools();
+    const schemas = tools.getToolSchemas("openai", {
+      includeTools: ["thenvoi_send_message", "thenvoi_lookup_peers"],
+    });
+    expect(getNames(schemas).sort()).toEqual(["thenvoi_lookup_peers", "thenvoi_send_message"]);
+  });
+
+  it("excludeTools removes specific tools", () => {
+    const tools = makeTools();
+    const schemas = tools.getToolSchemas("openai", {
+      excludeTools: ["thenvoi_add_participant", "thenvoi_create_chatroom"],
+    });
+    const names = getNames(schemas);
+    expect(names).not.toContain("thenvoi_add_participant");
+    expect(names).not.toContain("thenvoi_create_chatroom");
+    expect(names).toContain("thenvoi_send_message");
+  });
+
+  it("includeCategories=['chat'] returns only chat tools", () => {
+    const tools = makeTools();
+    const schemas = tools.getToolSchemas("openai", {
+      includeCategories: ["chat"],
+    });
+    const names = new Set(getNames(schemas));
+    expect(names).toEqual(CHAT_TOOL_NAMES);
+  });
+
+  it("includeCategories=['contact'] returns only contact tools", () => {
+    const tools = makeTools();
+    const schemas = tools.getToolSchemas("openai", {
+      includeCategories: ["contact"],
+    });
+    const names = new Set(getNames(schemas));
+    expect(names).toEqual(CONTACT_TOOL_NAMES);
+  });
+
+  it("includeCategories=['memory'] with includeMemory returns memory tools", () => {
+    const tools = makeTools();
+    const schemas = tools.getToolSchemas("openai", {
+      includeCategories: ["memory"],
+      includeMemory: true,
+    });
+    const names = new Set(getNames(schemas));
+    expect(names).toEqual(MEMORY_TOOL_NAMES);
+  });
+
+  it("includeCategories=['memory'] without includeMemory returns empty", () => {
+    const tools = makeTools();
+    const schemas = tools.getToolSchemas("openai", {
+      includeCategories: ["memory"],
+    });
+    expect(schemas).toHaveLength(0);
+  });
+
+  it("includeCategories=['chat', 'contact'] returns union", () => {
+    const tools = makeTools();
+    const schemas = tools.getToolSchemas("openai", {
+      includeCategories: ["chat", "contact"],
+    });
+    const expected = new Set([...CHAT_TOOL_NAMES, ...CONTACT_TOOL_NAMES]);
+    expect(new Set(getNames(schemas))).toEqual(expected);
+  });
+
+  it("exclude composes with categories", () => {
+    const tools = makeTools();
+    const schemas = tools.getToolSchemas("openai", {
+      includeCategories: ["chat"],
+      excludeTools: ["thenvoi_send_event"],
+    });
+    const names = getNames(schemas);
+    expect(names).not.toContain("thenvoi_send_event");
+    expect(names).toContain("thenvoi_send_message");
+  });
+
+  it("unknown tool name in includeTools throws", () => {
+    const tools = makeTools();
+    expect(() => {
+      tools.getToolSchemas("openai", { includeTools: ["nonexistent"] });
+    }).toThrow("Unknown tool names in includeTools");
+  });
+
+  it("unknown tool name in excludeTools throws", () => {
+    const tools = makeTools();
+    expect(() => {
+      tools.getToolSchemas("openai", { excludeTools: ["nonexistent"] });
+    }).toThrow("Unknown tool names in excludeTools");
+  });
+
+  it("unknown category throws", () => {
+    const tools = makeTools();
+    expect(() => {
+      tools.getToolSchemas("openai", { includeCategories: ["nonexistent"] });
+    }).toThrow("Unknown categories in includeCategories");
+  });
+
+  it("filtering works with anthropic format", () => {
+    const tools = makeTools();
+    const schemas = tools.getAnthropicToolSchemas({
+      includeTools: ["thenvoi_send_message"],
+    });
+    expect(schemas).toHaveLength(1);
+    expect((schemas[0] as { name?: string }).name).toBe("thenvoi_send_message");
+  });
+
+  it("TOOL_CATEGORIES covers all tools", () => {
+    const covered = new Set([...CHAT_TOOL_NAMES, ...CONTACT_TOOL_NAMES, ...MEMORY_TOOL_NAMES]);
+    expect(covered).toEqual(ALL_TOOL_NAMES);
   });
 });

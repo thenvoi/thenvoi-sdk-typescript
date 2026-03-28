@@ -40,8 +40,11 @@ import {
 import {
   CHAT_TOOL_NAMES,
   MEMORY_TOOL_NAMES,
+  TOOL_CATEGORIES,
+  type ToolFilterOptions,
   getToolDescription,
-  TOOL_MODELS
+  TOOL_MODELS,
+  validateToolFilter,
 } from "./schemas";
 
 interface AgentToolsOptions {
@@ -363,20 +366,60 @@ export class AgentTools implements AgentToolsProtocol {
     }
   }
 
-  public getToolSchemas(format: "openai" | "anthropic", options?: { includeMemory?: boolean }): ToolSchemaRecord[] {
+  public getToolSchemas(format: "openai" | "anthropic", options?: ToolFilterOptions): ToolSchemaRecord[] {
     const includeMemory = options?.includeMemory ?? false;
+
+    // Validate filter options fail-fast
+    if (options?.includeTools || options?.excludeTools || options?.includeCategories) {
+      validateToolFilter(options);
+    }
+
+    // Pre-compute category allowlist if specified
+    let categoryAllowed: Set<string> | null = null;
+    if (options?.includeCategories) {
+      categoryAllowed = new Set<string>();
+      for (const cat of options.includeCategories) {
+        for (const name of TOOL_CATEGORIES[cat]) {
+          categoryAllowed.add(name);
+        }
+      }
+    }
+
+    const includeToolsSet = options?.includeTools
+      ? new Set(options.includeTools)
+      : null;
+    const excludeToolsSet = options?.excludeTools
+      ? new Set(options.excludeTools)
+      : null;
 
     const tools = Object.entries(TOOL_MODELS)
       .filter(([name]) => {
+        // Legacy memory filter
         if (MEMORY_TOOL_NAMES.has(name)) {
-          return includeMemory && this.capabilities.memory;
+          if (!includeMemory || !this.capabilities.memory) return false;
         }
 
-        if (!CHAT_TOOL_NAMES.has(name) && !this.capabilities.contacts) {
+        // Capability filters
+        if (!CHAT_TOOL_NAMES.has(name) && !MEMORY_TOOL_NAMES.has(name) && !this.capabilities.contacts) {
           return false;
         }
 
         if (name === "thenvoi_lookup_peers" && !this.capabilities.peers) {
+          return false;
+        }
+
+        // Category filter
+        if (categoryAllowed && !categoryAllowed.has(name)) {
+          return false;
+        }
+
+        // Allowlist filter
+        if (includeToolsSet && !includeToolsSet.has(name)) {
+          return false;
+        }
+
+        // Denylist filter
+        if (excludeToolsSet && excludeToolsSet.has(name)) {
           return false;
         }
 
@@ -412,11 +455,11 @@ export class AgentTools implements AgentToolsProtocol {
     return tools;
   }
 
-  public getAnthropicToolSchemas(options?: { includeMemory?: boolean }): ToolSchemaRecord[] {
+  public getAnthropicToolSchemas(options?: ToolFilterOptions): ToolSchemaRecord[] {
     return this.getToolSchemas("anthropic", options);
   }
 
-  public getOpenAIToolSchemas(options?: { includeMemory?: boolean }): ToolSchemaRecord[] {
+  public getOpenAIToolSchemas(options?: ToolFilterOptions): ToolSchemaRecord[] {
     return this.getToolSchemas("openai", options);
   }
 
