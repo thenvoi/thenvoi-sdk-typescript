@@ -38,12 +38,15 @@ jobs:
           manifest-file: .release-please-manifest.json
           target-branch: main
 
+      # Note: releases_created (plural) is broken in release-please v4 —
+      # it returns true even when no release occurred.  Gate on individual
+      # package outputs instead.
       - name: Install pnpm
-        if: steps.release.outputs.release_created == 'true'
+        if: steps.release.outputs['packages/sdk--release_created'] == 'true' || steps.release.outputs['packages/openclaw--release_created'] == 'true'
         uses: pnpm/action-setup@v4
 
       - name: Setup Node
-        if: steps.release.outputs.release_created == 'true'
+        if: steps.release.outputs['packages/sdk--release_created'] == 'true' || steps.release.outputs['packages/openclaw--release_created'] == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -51,23 +54,34 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
-        if: steps.release.outputs.release_created == 'true'
+        if: steps.release.outputs['packages/sdk--release_created'] == 'true' || steps.release.outputs['packages/openclaw--release_created'] == 'true'
         run: pnpm install --frozen-lockfile
 
-      - name: Build package
-        if: steps.release.outputs.release_created == 'true'
+      - name: Build all packages
+        if: steps.release.outputs['packages/sdk--release_created'] == 'true' || steps.release.outputs['packages/openclaw--release_created'] == 'true'
         run: pnpm build
 
-      - name: Publish to npm
-        if: steps.release.outputs.release_created == 'true'
-        run: pnpm publish --no-git-checks --access public --provenance
+      - name: Publish SDK to npm
+        if: steps.release.outputs['packages/sdk--release_created'] == 'true'
+        run: pnpm --filter @thenvoi/sdk publish --no-git-checks --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish OpenClaw to npm
+        if: steps.release.outputs['packages/openclaw--release_created'] == 'true'
+        run: pnpm --filter @thenvoi/openclaw-channel-thenvoi publish --no-git-checks --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish release summary
-        if: steps.release.outputs.release_created == 'true'
+        if: steps.release.outputs['packages/sdk--release_created'] == 'true' || steps.release.outputs['packages/openclaw--release_created'] == 'true'
         run: |
           echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** ${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }}.${{ steps.release.outputs.patch }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Tag:** ${{ steps.release.outputs.tag_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "Packages released:" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.release.outputs['packages/sdk--release_created'] }}" == "true" ]; then
+            echo "- **@thenvoi/sdk** v${{ steps.release.outputs['packages/sdk--version'] }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ steps.release.outputs['packages/openclaw--release_created'] }}" == "true" ]; then
+            echo "- **@thenvoi/openclaw-channel-thenvoi** v${{ steps.release.outputs['packages/openclaw--version'] }}" >> $GITHUB_STEP_SUMMARY
+          fi
