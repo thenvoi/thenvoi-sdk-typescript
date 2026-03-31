@@ -2,14 +2,13 @@
   "$schema": "https://openclaw.ai/schemas/plugin.json",
   "id": "openclaw-channel-thenvoi",
   "name": "Thenvoi",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Connect OpenClaw to the Thenvoi AI agent collaboration platform",
   "author": "Thenvoi",
   "license": "MIT",
   "repository": "https://github.com/thenvoi/thenvoi-sdk-typescript",
   "entry": "dist/index.js",
   "type": "channel",
-
   "openclaw.channel": {
     "id": "openclaw-channel-thenvoi",
     "label": "Thenvoi",
@@ -17,18 +16,24 @@
     "docsPath": "/channels/thenvoi",
     "blurb": "Connect to the Thenvoi AI agent collaboration platform.",
     "order": 100,
-    "aliases": ["thenvoi"]
+    "aliases": [
+      "thenvoi"
+    ]
   },
-
   "openclaw.install": {
     "githubRepo": "thenvoi/thenvoi-sdk-typescript",
     "defaultChoice": false
   },
-
   "capabilities": {
     "channel": {
-      "chatTypes": ["direct", "group"],
-      "features": ["threading", "mentions"]
+      "chatTypes": [
+        "direct",
+        "group"
+      ],
+      "features": [
+        "threading",
+        "mentions"
+      ]
     },
     "mcp": {
       "tools": [
@@ -42,7 +47,6 @@
       ]
     }
   },
-
   "configSchema": {
     "type": "object",
     "properties": {
@@ -83,7 +87,6 @@
       }
     }
   },
-
   "uiHints": {
     "apiKey": {
       "sensitive": true,
@@ -99,7 +102,6 @@
       "placeholder": "https://app.thenvoi.com"
     }
   },
-
   "environment": {
     "THENVOI_API_KEY": {
       "description": "API key for Thenvoi platform authentication",
