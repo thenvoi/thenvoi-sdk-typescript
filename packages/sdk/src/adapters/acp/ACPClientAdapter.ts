@@ -10,11 +10,8 @@ import type {
   RequestPermissionRequest,
   RequestPermissionResponse,
 } from "@agentclientprotocol/sdk";
-import {
-  ClientSideConnection as ACPClientSideConnection,
-  PROTOCOL_VERSION,
-  ndJsonStream,
-} from "@agentclientprotocol/sdk";
+
+import { acpModule } from "./loader";
 
 import { ACPClientHistoryConverter, type ACPClientSessionState } from "../../converters/acp-client";
 import { SimpleAdapter } from "../../core/simpleAdapter";
@@ -243,6 +240,7 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
   }
 
   private async spawnConnection(): Promise<ClientSideConnection> {
+    const acp = await acpModule.get()
     const client = new ThenvoiACPClient()
     const handle = await this.connectionFactory(client as Client, {
       command: this.command,
@@ -251,7 +249,7 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
     })
     const connection = handle.connection
     const initializeResult = await connection.initialize({
-      protocolVersion: PROTOCOL_VERSION,
+      protocolVersion: acp.PROTOCOL_VERSION,
       clientCapabilities: this.clientCapabilities ?? {},
     })
 
@@ -492,6 +490,7 @@ export async function createSubprocessConnection(
     env?: Record<string, string>;
   },
 ): Promise<ACPClientConnectionHandle> {
+  const acp = await acpModule.get()
   const child = spawn(options.command[0], options.command.slice(1), {
     cwd: options.cwd,
     env: {
@@ -505,12 +504,12 @@ export async function createSubprocessConnection(
     throw new Error("ACP subprocess did not expose stdio pipes")
   }
 
-  const stream = ndJsonStream(
+  const stream = acp.ndJsonStream(
     Writable.toWeb(child.stdin) as unknown as WritableStream<Uint8Array>,
     Readable.toWeb(child.stdout) as unknown as ReadableStream<Uint8Array>,
   )
 
-  const connection = new ACPClientSideConnection(() => client, stream)
+  const connection = new acp.ClientSideConnection(() => client, stream)
 
   return {
     connection,
