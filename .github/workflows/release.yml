@@ -73,6 +73,25 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      # ── Dual-publish under @band-ai scope ──
+      - name: Publish SDK to npm (@band-ai)
+        if: steps.release.outputs['packages/sdk--release_created'] == 'true'
+        run: |
+          cd packages/sdk
+          jq '.name = "@band-ai/sdk"' package.json > package.json.tmp && mv package.json.tmp package.json
+          pnpm publish --no-git-checks --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.BAND_AI_NPM_TOKEN }}
+
+      - name: Publish OpenClaw to npm (@band-ai)
+        if: steps.release.outputs['packages/openclaw--release_created'] == 'true'
+        run: |
+          cd packages/openclaw
+          jq '.name = "@band-ai/openclaw-channel-thenvoi" | .dependencies["@band-ai/sdk"] = .dependencies["@thenvoi/sdk"] | del(.dependencies["@thenvoi/sdk"])' package.json > package.json.tmp && mv package.json.tmp package.json
+          pnpm publish --no-git-checks --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.BAND_AI_NPM_TOKEN }}
+
       - name: Publish release summary
         if: steps.release.outputs['packages/sdk--release_created'] == 'true' || steps.release.outputs['packages/openclaw--release_created'] == 'true'
         run: |
@@ -81,7 +100,9 @@ jobs:
           echo "Packages released:" >> $GITHUB_STEP_SUMMARY
           if [ "${{ steps.release.outputs['packages/sdk--release_created'] }}" == "true" ]; then
             echo "- **@thenvoi/sdk** v${{ steps.release.outputs['packages/sdk--version'] }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **@band-ai/sdk** v${{ steps.release.outputs['packages/sdk--version'] }}" >> $GITHUB_STEP_SUMMARY
           fi
           if [ "${{ steps.release.outputs['packages/openclaw--release_created'] }}" == "true" ]; then
             echo "- **@thenvoi/openclaw-channel-thenvoi** v${{ steps.release.outputs['packages/openclaw--version'] }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **@band-ai/openclaw-channel-thenvoi** v${{ steps.release.outputs['packages/openclaw--version'] }}" >> $GITHUB_STEP_SUMMARY
           fi
