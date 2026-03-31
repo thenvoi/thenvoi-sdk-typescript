@@ -1,3 +1,4 @@
 {
-  ".": "0.1.2"
+  "packages/sdk": "0.1.0",
+  "packages/openclaw": "0.1.4"
 }
