@@ -134,6 +134,7 @@ function normalizeAgentIdentityRecord(
     name: requireNonEmptyStringField(record.name, "name", source),
     description: normalizeOptionalStringField(record.description, "description", source),
     handle: normalizeOptionalStringField(record.handle, "handle", source),
+    ownerUuid: normalizeOptionalStringField(record.owner_uuid, "ownerUuid", source),
   };
 }
 
@@ -165,6 +166,7 @@ function normalizeLegacyProfileIdentity(
     name,
     description: profile.description ?? null,
     handle: null,
+    ownerUuid: null,
   };
 }
 
@@ -666,7 +668,7 @@ export class FernRestAdapter implements RestApi {
       {
         page: request.page,
         page_size: request.pageSize,
-        not_in_chat: request.notInChat,
+        ...(request.notInChat ? { not_in_chat: request.notInChat } : {}),
       },
       mergeOptions(options),
     );

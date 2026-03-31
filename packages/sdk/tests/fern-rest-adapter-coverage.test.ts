@@ -22,7 +22,15 @@ describe("FernRestAdapter coverage", () => {
   it("retries getAgentMe on 429s and then returns the normalized identity", async () => {
     const getAgentMe = vi.fn()
       .mockRejectedValueOnce(rateLimitError())
-      .mockResolvedValueOnce({ data: { id: "a1", name: "Agent", description: null, handle: "@agent" } });
+      .mockResolvedValueOnce({
+        data: {
+          id: "a1",
+          name: "Agent",
+          description: null,
+          handle: "@agent",
+          owner_uuid: "owner-1",
+        },
+      });
     const adapter = new FernRestAdapter({
       agentApiIdentity: { getAgentMe },
     });
@@ -32,6 +40,7 @@ describe("FernRestAdapter coverage", () => {
       name: "Agent",
       description: null,
       handle: "@agent",
+      ownerUuid: "owner-1",
     });
     expect(getAgentMe).toHaveBeenCalledTimes(2);
   });
@@ -70,6 +79,7 @@ describe("FernRestAdapter coverage", () => {
       name: "Legacy Agent",
       description: "legacy",
       handle: null,
+      ownerUuid: null,
     });
   });
 

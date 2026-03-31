@@ -33,6 +33,7 @@ jobs:
             revert
           scopes: |
             sdk
+            openclaw
             agent
             api
             websocket
