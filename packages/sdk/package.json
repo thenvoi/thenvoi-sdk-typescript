@@ -3,6 +3,11 @@
   "version": "0.1.2",
   "description": "Thenvoi TypeScript SDK core runtime",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thenvoi/thenvoi-sdk-typescript.git",
+    "directory": "packages/sdk"
+  },
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
