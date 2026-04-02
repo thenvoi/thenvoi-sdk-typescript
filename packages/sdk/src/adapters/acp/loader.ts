@@ -9,6 +9,6 @@ export const acpModule = new LazyAsyncValue<ACPModule>({
       throw new UnsupportedFeatureError(
         `ACP adapters require optional dependency "@agentclientprotocol/sdk". Install it with "pnpm add @agentclientprotocol/sdk". (${error instanceof Error ? error.message : String(error)})`,
       )
-    }) as ACPModule
+    })
   },
 });
