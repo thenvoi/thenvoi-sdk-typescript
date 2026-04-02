@@ -359,12 +359,16 @@ export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
 }
 
 async function loadClaudeQuery(): Promise<ClaudeSDKQuery> {
-  const module = (await import("@anthropic-ai/claude-agent-sdk")) as {
+  const module = await import("@anthropic-ai/claude-agent-sdk").catch((error: unknown) => {
+    throw new UnsupportedFeatureError(
+      `ClaudeSDKAdapter requires optional dependency "@anthropic-ai/claude-agent-sdk". Install it with "pnpm add @anthropic-ai/claude-agent-sdk". (${error instanceof Error ? error.message : String(error)})`,
+    );
+  }) as {
     query?: ClaudeSDKQuery;
   };
 
   if (!module.query) {
-    throw new Error("@anthropic-ai/claude-agent-sdk did not export query()");
+    throw new UnsupportedFeatureError("@anthropic-ai/claude-agent-sdk did not export query()");
   }
 
   return module.query;

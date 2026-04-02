@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentToolsProtocol } from "../src/core";
-import { createThenvoiMcpBridge } from "../src/adapters/claude-sdk/mcp";
+import { createThenvoiSdkMcpServer } from "../src/mcp/sdk";
 
-describe("createThenvoiMcpBridge", () => {
+describe("createThenvoiSdkMcpServer", () => {
   it("builds thenvoi MCP tools and routes calls to room-scoped tool execution", async () => {
     const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
 
@@ -35,7 +35,7 @@ describe("createThenvoiMcpBridge", () => {
       },
     };
 
-    const bridge = createThenvoiMcpBridge({
+    const bridge = createThenvoiSdkMcpServer({
       enableMemoryTools: false,
       getToolsForRoom: (roomId: string) => (roomId === "room-1" ? roomTools : undefined),
     });
