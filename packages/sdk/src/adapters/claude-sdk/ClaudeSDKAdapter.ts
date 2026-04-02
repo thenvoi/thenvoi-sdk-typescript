@@ -2,15 +2,19 @@ import { SimpleAdapter } from "../../core/simpleAdapter";
 import type { AdapterToolsProtocol } from "../../contracts/protocols";
 import type { Logger } from "../../core/logger";
 import { NoopLogger } from "../../core/logger";
+import { UnsupportedFeatureError } from "../../core/errors";
 import type { HistoryProvider, PlatformMessage } from "../../runtime/types";
 import { renderSystemPrompt } from "../../runtime/prompts";
+import { mcpToolNames } from "../../runtime/tools/schemas";
 import { buildConversationPrompt } from "../shared/conversationPrompt";
+import { LazyAsyncValue } from "../shared/lazyAsyncValue";
 import { extractClaudeSessionId } from "../../converters/claude-sdk";
 import {
-  createThenvoiMcpBridge,
-  type ThenvoiMcpBridge,
-} from "./mcp";
-import type { McpToolRegistration } from "../../mcp/registrations";
+  buildRoomScopedRegistrations,
+  type McpToolRegistration,
+} from "../../mcp/registrations";
+import { buildZodShape } from "../../mcp/zod";
+import { z } from "zod";
 
 export type ClaudePermissionMode =
   | "default"
@@ -74,6 +78,83 @@ export interface ClaudeSDKAdapterOptions {
 
 const DEFAULT_MODEL = "claude-sonnet-4-6";
 
+interface ThenvoiMcpBridge {
+  serverConfig: Record<string, unknown>;
+  allowedTools: string[];
+}
+
+type ClaudeSdkToolFactory = (
+  name: string,
+  description: string,
+  shape: Record<string, import("zod").ZodTypeAny>,
+  handler: (args: Record<string, unknown>) => Promise<unknown>,
+) => unknown;
+
+type ThenvoiMcpBridgeFactory = (input: {
+  enableMemoryTools: boolean;
+  getToolsForRoom: (roomId: string) => AdapterToolsProtocol | undefined;
+  additionalTools?: McpToolRegistration[];
+}) => ThenvoiMcpBridge;
+
+const thenvoiMcpBridgeFactory = new LazyAsyncValue<ThenvoiMcpBridgeFactory>({
+  load: async () => {
+    const module = await import("@anthropic-ai/claude-agent-sdk").catch((error: unknown) => {
+      throw new UnsupportedFeatureError(
+        `ClaudeSDKAdapter requires optional dependency "@anthropic-ai/claude-agent-sdk" when MCP tools are enabled. Install it with "pnpm add @anthropic-ai/claude-agent-sdk". (${error instanceof Error ? error.message : String(error)})`,
+      )
+    })
+
+    if (
+      typeof module.createSdkMcpServer !== "function"
+      || typeof module.tool !== "function"
+    ) {
+      throw new UnsupportedFeatureError(
+        'ClaudeSDKAdapter requires optional dependency "@anthropic-ai/claude-agent-sdk" when MCP tools are enabled. Install it with "pnpm add @anthropic-ai/claude-agent-sdk".',
+      )
+    }
+
+    const createSdkMcpServer = module.createSdkMcpServer as (input: {
+      name: string;
+      tools: unknown[];
+    }) => Record<string, unknown>
+    const defineTool = module.tool as ClaudeSdkToolFactory
+
+    return (input) => {
+      const registrations = buildRoomScopedRegistrations(
+        input.getToolsForRoom,
+        {
+          enableMemoryTools: input.enableMemoryTools,
+          enableContactTools: true,
+          additionalTools: input.additionalTools,
+        },
+      )
+
+      const toolDefinitions = registrations.map((registration) => {
+        const shape = buildZodShape(
+          z,
+          registration.inputSchema.properties,
+          new Set(registration.inputSchema.required),
+        )
+
+        return defineTool(
+          registration.name,
+          registration.description,
+          shape,
+          async (args: Record<string, unknown>) => registration.execute(args),
+        )
+      })
+
+      return {
+        serverConfig: createSdkMcpServer({
+          name: "thenvoi",
+          tools: toolDefinitions,
+        }),
+        allowedTools: mcpToolNames(new Set(registrations.map((registration) => registration.name))),
+      }
+    }
+  },
+})
+
 export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterToolsProtocol> {
   private readonly model: string;
   private readonly customSection?: string;
@@ -119,6 +200,7 @@ export class ClaudeSDKAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
     });
 
     if (this.enableMcpTools) {
+      const createThenvoiMcpBridge = await thenvoiMcpBridgeFactory.get()
       this.mcpBridge = createThenvoiMcpBridge({
         enableMemoryTools: this.enableMemoryTools,
         getToolsForRoom: (roomId) => this.roomTools.get(roomId),

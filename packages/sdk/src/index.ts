@@ -31,25 +31,25 @@ export {
 
 export { isDirectExecution } from "./core/isDirectExecution";
 
+export { GenericAdapter } from "./adapters/GenericAdapter";
 export {
   CODEX_REASONING_EFFORTS,
   CODEX_REASONING_SUMMARIES,
   CODEX_WEB_SEARCH_MODES,
-  VercelAISDKAdapter,
-  GenericAdapter,
-  OpenAIAdapter,
-  AnthropicAdapter,
-  GeminiAdapter,
-  GoogleADKAdapter,
-  LangGraphAdapter,
-  A2AAdapter,
-  A2AGatewayAdapter,
-  ParlantAdapter,
-  LettaAdapter,
-  OpencodeAdapter,
-  ClaudeSDKAdapter,
-  CodexAdapter,
-} from "./adapters";
+} from "./adapters/codex";
+export { VercelAISDKAdapter } from "./adapters/vercel-ai-sdk";
+export { OpenAIAdapter } from "./adapters/openai";
+export { AnthropicAdapter } from "./adapters/anthropic";
+export { GeminiAdapter } from "./adapters/gemini";
+export { GoogleADKAdapter } from "./adapters/google-adk";
+export { LangGraphAdapter } from "./adapters/langgraph";
+export { A2AAdapter } from "./adapters/a2a";
+export { A2AGatewayAdapter } from "./adapters/a2a-gateway";
+export { ParlantAdapter } from "./adapters/parlant";
+export { LettaAdapter } from "./adapters/letta";
+export { OpencodeAdapter } from "./adapters/opencode";
+export { ClaudeSDKAdapter } from "./adapters/claude-sdk";
+export { CodexAdapter } from "./adapters/codex";
 
 export type {
   AdapterToolsProtocol,

@@ -11,19 +11,14 @@ import type {
   RequestPermissionResponse,
 } from "@agentclientprotocol/sdk";
 
-import { acpModule } from "./loader";
-
 import { ACPClientHistoryConverter, type ACPClientSessionState } from "../../converters/acp-client";
 import { SimpleAdapter } from "../../core/simpleAdapter";
 import type { AdapterToolsProtocol } from "../../contracts/protocols";
 import { renderSystemPrompt } from "../../runtime/prompts";
 import type { PlatformMessage } from "../../runtime/types";
-import {
-  createThenvoiMcpBackend,
-  type ThenvoiMcpBackend,
-  type ThenvoiMcpBackendKind,
-  type McpToolRegistration,
-} from "../../mcp";
+import type { McpToolRegistration } from "../../mcp/registrations";
+import { ThenvoiMcpServer } from "../../mcp/server";
+import { ThenvoiMcpSseServer } from "../../mcp/sse";
 import {
   ThenvoiACPClient,
 } from "./client";
@@ -32,8 +27,19 @@ import {
   type ACPClientConnectionFactory,
   type ACPClientConnectionHandle,
 } from "./types";
+import { acpModule } from "./loader";
 
-type SupportedInjectedMcpTransport = Extract<ThenvoiMcpBackendKind, "http" | "sse">
+type InjectedMcpBackend =
+  | {
+    kind: "http";
+    server: ThenvoiMcpServer;
+    stop(): Promise<void>;
+  }
+  | {
+    kind: "sse";
+    server: ThenvoiMcpSseServer;
+    stop(): Promise<void>;
+  }
 
 export interface ACPClientAdapterOptions {
   command: string | string[];
@@ -65,7 +71,7 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
   private readonly activeSessions = new Set<string>()
   private readonly bootstrappedSessions = new Set<string>()
 
-  private backend: ThenvoiMcpBackend | null = null
+  private backend: InjectedMcpBackend | null = null
   private client: ThenvoiACPClient | null = null
   private connectionHandle: ACPClientConnectionHandle | null = null
   private connection: ClientSideConnection | null = null
@@ -240,7 +246,7 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
   }
 
   private async spawnConnection(): Promise<ClientSideConnection> {
-    const acp = await acpModule.get()
+    const sdk = await acpModule.get()
     const client = new ThenvoiACPClient()
     const handle = await this.connectionFactory(client as Client, {
       command: this.command,
@@ -249,7 +255,7 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
     })
     const connection = handle.connection
     const initializeResult = await connection.initialize({
-      protocolVersion: acp.PROTOCOL_VERSION,
+      protocolVersion: sdk.PROTOCOL_VERSION,
       clientCapabilities: this.clientCapabilities ?? {},
     })
 
@@ -373,10 +379,10 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
       return mcpServers
     }
 
-    throw new Error(`Unsupported MCP backend for ACP client injection: ${backend.kind}`)
+    return mcpServers
   }
 
-  private async getOrCreateBackend(): Promise<ThenvoiMcpBackend> {
+  private async getOrCreateBackend(): Promise<InjectedMcpBackend> {
     if (this.backend) {
       return this.backend
     }
@@ -385,12 +391,38 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
       ? "http"
       : (this.connectionState?.agentCapabilities?.mcpCapabilities?.sse ? "sse" : "http")
 
-    this.backend = await createThenvoiMcpBackend({
-      kind: transport as SupportedInjectedMcpTransport,
+    if (transport === "sse") {
+      const server = new ThenvoiMcpSseServer({
+        tools: (roomId) => this.roomTools.get(roomId),
+        enableMemoryTools: this.enableMemoryTools,
+        enableContactTools: true,
+        additionalTools: this.additionalMcpTools,
+      })
+      await server.start()
+      this.backend = {
+        kind: "sse",
+        server,
+        stop: async () => {
+          await server.stop()
+        },
+      }
+      return this.backend
+    }
+
+    const server = new ThenvoiMcpServer({
+      tools: (roomId) => this.roomTools.get(roomId),
       enableMemoryTools: this.enableMemoryTools,
-      getToolsForRoom: (roomId) => this.roomTools.get(roomId),
+      enableContactTools: true,
       additionalTools: this.additionalMcpTools,
     })
+    await server.start()
+    this.backend = {
+      kind: "http",
+      server,
+      stop: async () => {
+        await server.stop()
+      },
+    }
 
     return this.backend
   }
@@ -490,7 +522,7 @@ export async function createSubprocessConnection(
     env?: Record<string, string>;
   },
 ): Promise<ACPClientConnectionHandle> {
-  const acp = await acpModule.get()
+  const sdk = await acpModule.get()
   const child = spawn(options.command[0], options.command.slice(1), {
     cwd: options.cwd,
     env: {
@@ -504,12 +536,12 @@ export async function createSubprocessConnection(
     throw new Error("ACP subprocess did not expose stdio pipes")
   }
 
-  const stream = acp.ndJsonStream(
+  const stream = sdk.ndJsonStream(
     Writable.toWeb(child.stdin) as unknown as WritableStream<Uint8Array>,
     Readable.toWeb(child.stdout) as unknown as ReadableStream<Uint8Array>,
   )
 
-  const connection = new acp.ClientSideConnection(() => client, stream)
+  const connection = new sdk.ClientSideConnection(() => client, stream)
 
   return {
     connection,
