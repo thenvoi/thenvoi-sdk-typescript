@@ -348,12 +348,19 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
   }
 
   public async getNextMessage(roomId: string): Promise<PlatformMessage | null> {
-    if (!this.rest.getNextMessage) {
-      throw new UnsupportedFeatureError("Message queue access is not available in current REST adapter");
-    }
+    try {
+      if (!this.rest.getNextMessage) {
+        return null;
+      }
 
-    const message = await this.rest.getNextMessage({ chatId: roomId });
-    return message ? toPlatformMessage(roomId, message) : null;
+      const message = await this.rest.getNextMessage({ chatId: roomId });
+      return message ? toPlatformMessage(roomId, message) : null;
+    } catch (error) {
+      if (error instanceof UnsupportedFeatureError) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   public async getStaleProcessingMessages(roomId: string): Promise<PlatformMessage[]> {
