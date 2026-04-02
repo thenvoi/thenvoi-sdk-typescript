@@ -61,36 +61,32 @@ jobs:
         if: steps.release.outputs['packages/sdk--release_created'] == 'true' || steps.release.outputs['packages/openclaw--release_created'] == 'true'
         run: pnpm build
 
-      - name: Publish SDK to npm
+      - name: Publish SDK to npm (@thenvoi)
         if: steps.release.outputs['packages/sdk--release_created'] == 'true'
-        run: pnpm --filter @thenvoi/sdk publish --no-git-checks --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd packages/sdk
+          npm publish --provenance --access public
 
-      - name: Publish OpenClaw to npm
-        if: steps.release.outputs['packages/openclaw--release_created'] == 'true'
-        run: pnpm --filter @thenvoi/openclaw-channel-thenvoi publish --no-git-checks --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      # ── Dual-publish under @band-ai scope ──
       - name: Publish SDK to npm (@band-ai)
         if: steps.release.outputs['packages/sdk--release_created'] == 'true'
         run: |
           cd packages/sdk
-          jq '.name = "@band-ai/sdk"' package.json > package.json.tmp && mv package.json.tmp package.json
-          pnpm publish --no-git-checks --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.BAND_AI_NPM_TOKEN }}
+          sed -i 's/"@thenvoi\/sdk"/"@band-ai\/sdk"/' package.json
+          npm publish --provenance --access public
+
+      - name: Publish OpenClaw to npm (@thenvoi)
+        if: steps.release.outputs['packages/openclaw--release_created'] == 'true'
+        run: |
+          cd packages/openclaw
+          npm publish --provenance --access public
 
       - name: Publish OpenClaw to npm (@band-ai)
         if: steps.release.outputs['packages/openclaw--release_created'] == 'true'
         run: |
           cd packages/openclaw
-          jq '.name = "@band-ai/openclaw-channel-thenvoi" | .dependencies["@band-ai/sdk"] = .dependencies["@thenvoi/sdk"] | del(.dependencies["@thenvoi/sdk"])' package.json > package.json.tmp && mv package.json.tmp package.json
-          pnpm publish --no-git-checks --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.BAND_AI_NPM_TOKEN }}
+          sed -i 's/"@thenvoi\/openclaw-channel-thenvoi"/"@band-ai\/openclaw-channel-thenvoi"/' package.json
+          sed -i 's/"@thenvoi\/sdk"/"@band-ai\/sdk"/' package.json
+          npm publish --provenance --access public
 
       - name: Publish release summary
         if: steps.release.outputs['packages/sdk--release_created'] == 'true' || steps.release.outputs['packages/openclaw--release_created'] == 'true'
