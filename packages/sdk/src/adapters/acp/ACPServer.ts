@@ -28,11 +28,10 @@ import type {
   Stream,
 } from "@agentclientprotocol/sdk";
 
-import { acpModule } from "./loader";
-
 import { ThenvoiACPServerAdapter } from "./ThenvoiACPServerAdapter";
 import { CursorExtensionHandler } from "./cursorExtensions";
 import type { ACPExtensionHandler } from "./extensions";
+import { acpModule } from "./loader";
 
 export interface ACPServerOptions {
   modes?: SessionMode[];
@@ -85,21 +84,20 @@ export class ACPServer implements Agent {
     return this.connection
   }
 
-  public async connectStdio(
+  public connectStdio(
     options?: {
       stdin?: NodeJS.ReadableStream;
       stdout?: NodeJS.WritableStream;
     },
   ): Promise<AgentSideConnection> {
-    const acp = await acpModule.get()
     const stdin = options?.stdin ?? process.stdin
     const stdout = options?.stdout ?? process.stdout
-    return this.connectStream(
+    return acpModule.get().then((acp) => this.connectStream(
       acp.ndJsonStream(
         Writable.toWeb(stdout as Writable) as unknown as WritableStream<Uint8Array>,
         Readable.toWeb(stdin as Readable) as unknown as ReadableStream<Uint8Array>,
       ),
-    )
+    ))
   }
 
   public get closed(): Promise<void> {
@@ -260,13 +258,14 @@ export class ACPServer implements Agent {
   public async authenticate(
     params: AuthenticateRequest,
   ): Promise<AuthenticateResponse> {
-    const acp = await acpModule.get()
     if (params.methodId !== "api_key" && params.methodId !== "cursor_login") {
+      const acp = await acpModule.get()
       throw acp.RequestError.authRequired(undefined, `Unsupported auth method: ${params.methodId}`)
     }
 
     const ok = await this.adapter.verifyCredentials()
     if (!ok) {
+      const acp = await acpModule.get()
       throw acp.RequestError.authRequired(undefined, "Authentication failed")
     }
 
