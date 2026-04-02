@@ -27,16 +27,11 @@ import type {
   SessionMode,
   Stream,
 } from "@agentclientprotocol/sdk";
-import {
-  AgentSideConnection as ACPAgentSideConnection,
-  PROTOCOL_VERSION,
-  RequestError,
-  ndJsonStream,
-} from "@agentclientprotocol/sdk";
 
 import { ThenvoiACPServerAdapter } from "./ThenvoiACPServerAdapter";
 import { CursorExtensionHandler } from "./cursorExtensions";
 import type { ACPExtensionHandler } from "./extensions";
+import { acpModule } from "./loader";
 
 export interface ACPServerOptions {
   modes?: SessionMode[];
@@ -69,12 +64,13 @@ export class ACPServer implements Agent {
     this.extensionHandler = options?.extensionHandler ?? new CursorExtensionHandler()
   }
 
-  public connectStream(stream: Stream): AgentSideConnection {
+  public async connectStream(stream: Stream): Promise<AgentSideConnection> {
     if (this.connection && !this.connection.signal.aborted) {
       return this.connection
     }
 
-    this.connection = new ACPAgentSideConnection((connection) => {
+    const acp = await acpModule.get()
+    this.connection = new acp.AgentSideConnection((connection) => {
       this.adapter.bindConnection(connection)
       return this
     }, stream)
@@ -93,15 +89,15 @@ export class ACPServer implements Agent {
       stdin?: NodeJS.ReadableStream;
       stdout?: NodeJS.WritableStream;
     },
-  ): AgentSideConnection {
+  ): Promise<AgentSideConnection> {
     const stdin = options?.stdin ?? process.stdin
     const stdout = options?.stdout ?? process.stdout
-    return this.connectStream(
-      ndJsonStream(
+    return acpModule.get().then((acp) => this.connectStream(
+      acp.ndJsonStream(
         Writable.toWeb(stdout as Writable) as unknown as WritableStream<Uint8Array>,
         Readable.toWeb(stdin as Readable) as unknown as ReadableStream<Uint8Array>,
       ),
-    )
+    ))
   }
 
   public get closed(): Promise<void> {
@@ -111,10 +107,11 @@ export class ACPServer implements Agent {
   public async initialize(
     params: InitializeRequest,
   ): Promise<InitializeResponse> {
+    const acp = await acpModule.get()
     return {
-      protocolVersion: params.protocolVersion === PROTOCOL_VERSION
+      protocolVersion: params.protocolVersion === acp.PROTOCOL_VERSION
         ? params.protocolVersion
-        : PROTOCOL_VERSION,
+        : acp.PROTOCOL_VERSION,
       agentCapabilities: {
         loadSession: true,
         promptCapabilities: {
@@ -156,7 +153,8 @@ export class ACPServer implements Agent {
     params: LoadSessionRequest,
   ): Promise<LoadSessionResponse> {
     if (!this.adapter.hasSession(params.sessionId)) {
-      throw RequestError.resourceNotFound(params.sessionId)
+      const acp = await acpModule.get()
+      throw acp.RequestError.resourceNotFound(params.sessionId)
     }
 
     this.adapter.updateSessionContext(params.sessionId, {
@@ -186,7 +184,8 @@ export class ACPServer implements Agent {
     params: ForkSessionRequest,
   ): Promise<ForkSessionResponse> {
     if (!this.adapter.hasSession(params.sessionId)) {
-      throw RequestError.resourceNotFound(params.sessionId)
+      const acp = await acpModule.get()
+      throw acp.RequestError.resourceNotFound(params.sessionId)
     }
 
     const sessionId = await this.adapter.createSession({
@@ -203,7 +202,8 @@ export class ACPServer implements Agent {
     params: ResumeSessionRequest,
   ): Promise<ResumeSessionResponse> {
     if (!this.adapter.hasSession(params.sessionId)) {
-      throw RequestError.resourceNotFound(params.sessionId)
+      const acp = await acpModule.get()
+      throw acp.RequestError.resourceNotFound(params.sessionId)
     }
 
     this.adapter.updateSessionContext(params.sessionId, {
@@ -227,7 +227,8 @@ export class ACPServer implements Agent {
     params: SetSessionModeRequest,
   ): Promise<SetSessionModeResponse> {
     if (!this.adapter.hasSession(params.sessionId)) {
-      throw RequestError.resourceNotFound(params.sessionId)
+      const acp = await acpModule.get()
+      throw acp.RequestError.resourceNotFound(params.sessionId)
     }
 
     this.adapter.setSessionMode(params.sessionId, params.modeId)
@@ -238,7 +239,8 @@ export class ACPServer implements Agent {
     params: SetSessionModelRequest,
   ): Promise<SetSessionModelResponse> {
     if (!this.adapter.hasSession(params.sessionId)) {
-      throw RequestError.resourceNotFound(params.sessionId)
+      const acp = await acpModule.get()
+      throw acp.RequestError.resourceNotFound(params.sessionId)
     }
 
     this.adapter.setSessionModel(params.sessionId, params.modelId)
@@ -257,12 +259,14 @@ export class ACPServer implements Agent {
     params: AuthenticateRequest,
   ): Promise<AuthenticateResponse> {
     if (params.methodId !== "api_key" && params.methodId !== "cursor_login") {
-      throw RequestError.authRequired(undefined, `Unsupported auth method: ${params.methodId}`)
+      const acp = await acpModule.get()
+      throw acp.RequestError.authRequired(undefined, `Unsupported auth method: ${params.methodId}`)
     }
 
     const ok = await this.adapter.verifyCredentials()
     if (!ok) {
-      throw RequestError.authRequired(undefined, "Authentication failed")
+      const acp = await acpModule.get()
+      throw acp.RequestError.authRequired(undefined, "Authentication failed")
     }
 
     return {}

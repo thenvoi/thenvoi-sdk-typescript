@@ -30,7 +30,14 @@ describe("createSubprocessConnection", () => {
       ClientSideConnection: class {
         public constructor() {}
       },
+      AgentSideConnection: class {
+        public constructor() {}
+      },
       PROTOCOL_VERSION: 1,
+      RequestError: class extends Error {
+        static resourceNotFound(id: string) { return new this(id) }
+        static authRequired(_: unknown, msg: string) { return new this(msg) }
+      },
       ndJsonStream: vi.fn(() => ({})),
     }))
 

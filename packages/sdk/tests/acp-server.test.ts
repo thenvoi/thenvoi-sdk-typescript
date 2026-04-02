@@ -33,7 +33,7 @@ describe("ACPServer", () => {
 
     const toAgent = new TransformStream<Uint8Array, Uint8Array>()
     const toClient = new TransformStream<Uint8Array, Uint8Array>()
-    server.connectStream(ndJsonStream(toClient.writable, toAgent.readable))
+    await server.connectStream(ndJsonStream(toClient.writable, toAgent.readable))
 
     const sessionUpdates: Array<Record<string, unknown>> = []
     const client = new ClientSideConnection(() => ({
