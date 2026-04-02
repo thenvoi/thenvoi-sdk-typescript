@@ -246,7 +246,7 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
   }
 
   private async spawnConnection(): Promise<ClientSideConnection> {
-    const sdk = await acpModule.get()
+    const acp = await acpModule.get()
     const client = new ThenvoiACPClient()
     const handle = await this.connectionFactory(client as Client, {
       command: this.command,
@@ -255,7 +255,7 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
     })
     const connection = handle.connection
     const initializeResult = await connection.initialize({
-      protocolVersion: sdk.PROTOCOL_VERSION,
+      protocolVersion: acp.PROTOCOL_VERSION,
       clientCapabilities: this.clientCapabilities ?? {},
     })
 
@@ -522,7 +522,7 @@ export async function createSubprocessConnection(
     env?: Record<string, string>;
   },
 ): Promise<ACPClientConnectionHandle> {
-  const sdk = await acpModule.get()
+  const acp = await acpModule.get()
   const child = spawn(options.command[0], options.command.slice(1), {
     cwd: options.cwd,
     env: {
@@ -536,12 +536,12 @@ export async function createSubprocessConnection(
     throw new Error("ACP subprocess did not expose stdio pipes")
   }
 
-  const stream = sdk.ndJsonStream(
+  const stream = acp.ndJsonStream(
     Writable.toWeb(child.stdin) as unknown as WritableStream<Uint8Array>,
     Readable.toWeb(child.stdout) as unknown as ReadableStream<Uint8Array>,
   )
 
-  const connection = new sdk.ClientSideConnection(() => client, stream)
+  const connection = new acp.ClientSideConnection(() => client, stream)
 
   return {
     connection,

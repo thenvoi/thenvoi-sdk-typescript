@@ -69,8 +69,8 @@ export class ACPServer implements Agent {
       return this.connection
     }
 
-    const sdk = await acpModule.get()
-    this.connection = new sdk.AgentSideConnection((connection) => {
+    const acp = await acpModule.get()
+    this.connection = new acp.AgentSideConnection((connection) => {
       this.adapter.bindConnection(connection)
       return this
     }, stream)
@@ -92,8 +92,8 @@ export class ACPServer implements Agent {
   ): Promise<AgentSideConnection> {
     const stdin = options?.stdin ?? process.stdin
     const stdout = options?.stdout ?? process.stdout
-    return acpModule.get().then((sdk) => this.connectStream(
-      sdk.ndJsonStream(
+    return acpModule.get().then((acp) => this.connectStream(
+      acp.ndJsonStream(
         Writable.toWeb(stdout as Writable) as unknown as WritableStream<Uint8Array>,
         Readable.toWeb(stdin as Readable) as unknown as ReadableStream<Uint8Array>,
       ),
@@ -107,11 +107,11 @@ export class ACPServer implements Agent {
   public async initialize(
     params: InitializeRequest,
   ): Promise<InitializeResponse> {
-    const sdk = await acpModule.get()
+    const acp = await acpModule.get()
     return {
-      protocolVersion: params.protocolVersion === sdk.PROTOCOL_VERSION
+      protocolVersion: params.protocolVersion === acp.PROTOCOL_VERSION
         ? params.protocolVersion
-        : sdk.PROTOCOL_VERSION,
+        : acp.PROTOCOL_VERSION,
       agentCapabilities: {
         loadSession: true,
         promptCapabilities: {
@@ -153,8 +153,8 @@ export class ACPServer implements Agent {
     params: LoadSessionRequest,
   ): Promise<LoadSessionResponse> {
     if (!this.adapter.hasSession(params.sessionId)) {
-      const sdk = await acpModule.get()
-      throw sdk.RequestError.resourceNotFound(params.sessionId)
+      const acp = await acpModule.get()
+      throw acp.RequestError.resourceNotFound(params.sessionId)
     }
 
     this.adapter.updateSessionContext(params.sessionId, {
@@ -184,8 +184,8 @@ export class ACPServer implements Agent {
     params: ForkSessionRequest,
   ): Promise<ForkSessionResponse> {
     if (!this.adapter.hasSession(params.sessionId)) {
-      const sdk = await acpModule.get()
-      throw sdk.RequestError.resourceNotFound(params.sessionId)
+      const acp = await acpModule.get()
+      throw acp.RequestError.resourceNotFound(params.sessionId)
     }
 
     const sessionId = await this.adapter.createSession({
@@ -202,8 +202,8 @@ export class ACPServer implements Agent {
     params: ResumeSessionRequest,
   ): Promise<ResumeSessionResponse> {
     if (!this.adapter.hasSession(params.sessionId)) {
-      const sdk = await acpModule.get()
-      throw sdk.RequestError.resourceNotFound(params.sessionId)
+      const acp = await acpModule.get()
+      throw acp.RequestError.resourceNotFound(params.sessionId)
     }
 
     this.adapter.updateSessionContext(params.sessionId, {
@@ -227,8 +227,8 @@ export class ACPServer implements Agent {
     params: SetSessionModeRequest,
   ): Promise<SetSessionModeResponse> {
     if (!this.adapter.hasSession(params.sessionId)) {
-      const sdk = await acpModule.get()
-      throw sdk.RequestError.resourceNotFound(params.sessionId)
+      const acp = await acpModule.get()
+      throw acp.RequestError.resourceNotFound(params.sessionId)
     }
 
     this.adapter.setSessionMode(params.sessionId, params.modeId)
@@ -239,8 +239,8 @@ export class ACPServer implements Agent {
     params: SetSessionModelRequest,
   ): Promise<SetSessionModelResponse> {
     if (!this.adapter.hasSession(params.sessionId)) {
-      const sdk = await acpModule.get()
-      throw sdk.RequestError.resourceNotFound(params.sessionId)
+      const acp = await acpModule.get()
+      throw acp.RequestError.resourceNotFound(params.sessionId)
     }
 
     this.adapter.setSessionModel(params.sessionId, params.modelId)
@@ -259,14 +259,14 @@ export class ACPServer implements Agent {
     params: AuthenticateRequest,
   ): Promise<AuthenticateResponse> {
     if (params.methodId !== "api_key" && params.methodId !== "cursor_login") {
-      const sdk = await acpModule.get()
-      throw sdk.RequestError.authRequired(undefined, `Unsupported auth method: ${params.methodId}`)
+      const acp = await acpModule.get()
+      throw acp.RequestError.authRequired(undefined, `Unsupported auth method: ${params.methodId}`)
     }
 
     const ok = await this.adapter.verifyCredentials()
     if (!ok) {
-      const sdk = await acpModule.get()
-      throw sdk.RequestError.authRequired(undefined, "Authentication failed")
+      const acp = await acpModule.get()
+      throw acp.RequestError.authRequired(undefined, "Authentication failed")
     }
 
     return {}
