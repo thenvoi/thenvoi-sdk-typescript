@@ -1,5 +1,13 @@
 # Changelog
 
+
+## [0.1.4](https://github.com/thenvoi/thenvoi-sdk-typescript/compare/sdk-v0.1.3...sdk-v0.1.4) (2026-04-02)
+
+
+### Features
+
+* publish packages to [@band-ai](https://github.com/band-ai) npm org ([#26](https://github.com/thenvoi/thenvoi-sdk-typescript/issues/26)) ([aec24a0](https://github.com/thenvoi/thenvoi-sdk-typescript/commit/aec24a0e7e28e257be585c10cdd63d08a3753916))
+
 ## [0.1.3](https://github.com/thenvoi/thenvoi-sdk-typescript/compare/sdk-v0.1.2...sdk-v0.1.3) (2026-03-31)
 
 
