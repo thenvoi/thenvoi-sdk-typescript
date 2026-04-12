@@ -8,6 +8,10 @@ export interface LinearActivityClient {
     agentSessionId: string;
     content: Record<string, unknown>;
   }): Promise<unknown>;
+  updateAgentSession?: (
+    id: string,
+    input: Record<string, unknown>,
+  ) => Promise<unknown>;
   updateIssue?: (
     issueId: string,
     input: Record<string, unknown>,
@@ -87,11 +91,30 @@ export async function postAction(
     parameter: "",
   });
 }
+const PLAN_STATUS_MAP: Record<PlanStep["status"], string> = {
+  pending: "pending",
+  in_progress: "inProgress",
+  completed: "completed",
+  failed: "canceled",
+};
+
 export async function updatePlan(
   client: LinearActivityClient,
   sessionId: string,
   steps: PlanStep[],
 ): Promise<void> {
+  if (typeof client.updateAgentSession === "function") {
+    const plan = {
+      steps: steps.map((step) => ({
+        content: step.title,
+        status: PLAN_STATUS_MAP[step.status],
+      })),
+    };
+
+    await client.updateAgentSession(sessionId, { plan });
+    return;
+  }
+
   const planSummary = steps
     .map((step) => {
       const icon =

@@ -57,6 +57,7 @@ class MemorySessionRoomStore implements SessionRoomStore {
 function makeMockClient(): LinearActivityClient {
   return {
     createAgentActivity: vi.fn(async () => ({ ok: true })),
+    updateAgentSession: vi.fn(async () => ({ success: true })),
     updateIssue: vi.fn(async () => ({ ok: true })),
     createComment: vi.fn(async () => ({ ok: true })),
     workflowStates: vi.fn(async ({ teamId }: { teamId?: string } = {}) => ({
@@ -206,7 +207,7 @@ describe("createLinearTools", () => {
     });
   });
 
-  it("linear_update_plan validates steps and calls the activity layer", async () => {
+  it("linear_update_plan validates steps and calls updateAgentSession with structured plan", async () => {
     const client = makeMockClient();
     const tools = createLinearTools({ client });
     const tool = tools.find((entry) => entry.name === "linear_update_plan")!;
@@ -220,7 +221,15 @@ describe("createLinearTools", () => {
     });
 
     expect(result).toEqual({ ok: true });
-    expect(client.createAgentActivity).toHaveBeenCalledOnce();
+    expect(client.createAgentActivity).not.toHaveBeenCalled();
+    expect(client.updateAgentSession).toHaveBeenCalledWith("sess-1", {
+      plan: {
+        steps: [
+          { content: "Step 1", status: "completed" },
+          { content: "Step 2", status: "inProgress" },
+        ],
+      },
+    });
   });
 
   it("rejects invalid input with Zod validation error", async () => {

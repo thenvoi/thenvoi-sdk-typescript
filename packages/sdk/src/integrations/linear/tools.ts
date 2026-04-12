@@ -105,7 +105,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
   tools.push(
     {
       name: "linear_update_plan",
-      description: "Update the plan for the Linear agent session, showing progress on each step.",
+      description: "Update the structured plan for the Linear agent session. Renders as a native checklist in the Linear Agent Session UI with live status indicators.",
       schema: z.object({
         session_id: z.string().describe("The Linear agent session ID"),
         steps: z.array(z.object({
