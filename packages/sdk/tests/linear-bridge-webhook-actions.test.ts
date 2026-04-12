@@ -126,13 +126,22 @@ function makePayload(action: "created" | "updated" | "canceled") {
   return payload;
 }
 
-function makeLinearClient(): HandleAgentSessionEventInput["deps"]["linearClient"] & {
+function makeLinearClient(options?: { delegateId?: string | null }): HandleAgentSessionEventInput["deps"]["linearClient"] & {
   createAgentActivity: ReturnType<typeof vi.fn>;
+  issue: ReturnType<typeof vi.fn>;
+  updateIssue: ReturnType<typeof vi.fn>;
 } {
   return {
     createAgentActivity: vi.fn(async () => ({ ok: true })),
+    issue: vi.fn(async () => ({
+      id: "issue-1",
+      delegateId: options?.delegateId ?? undefined,
+    })),
+    updateIssue: vi.fn(async () => ({ success: true })),
   } as unknown as HandleAgentSessionEventInput["deps"]["linearClient"] & {
     createAgentActivity: ReturnType<typeof vi.fn>;
+    issue: ReturnType<typeof vi.fn>;
+    updateIssue: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -560,5 +569,80 @@ describe("linear bridge webhook actions", () => {
     await expect(store.listPendingBootstrapRequests()).resolves.toEqual([
       expect.objectContaining({ messageType: "task" }),
     ]);
+  });
+
+  it("sets agent as delegate on created event when no delegate exists", async () => {
+    const restApi = new LinearThenvoiExampleRestApi();
+    const store = new MemorySessionRoomStore();
+    const linearClient = makeLinearClient({ delegateId: null });
+
+    await handleAgentSessionEvent({
+      payload: makePayload("created"),
+      config,
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    expect(linearClient.issue).toHaveBeenCalledWith("issue-1");
+    expect(linearClient.updateIssue).toHaveBeenCalledWith("issue-1", {
+      delegateId: "app-user",
+    });
+  });
+
+  it("does not overwrite existing delegate on created event", async () => {
+    const restApi = new LinearThenvoiExampleRestApi();
+    const store = new MemorySessionRoomStore();
+    const linearClient = makeLinearClient({ delegateId: "existing-delegate" });
+
+    await handleAgentSessionEvent({
+      payload: makePayload("created"),
+      config,
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    expect(linearClient.issue).toHaveBeenCalledWith("issue-1");
+    expect(linearClient.updateIssue).not.toHaveBeenCalled();
+  });
+
+  it("does not attempt delegate on updated events", async () => {
+    const restApi = new LinearThenvoiExampleRestApi();
+    const store = new MemorySessionRoomStore();
+    const linearClient = makeLinearClient();
+
+    // First create to set up the room.
+    await handleAgentSessionEvent({
+      payload: makePayload("created"),
+      config,
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    const updatedClient = makeLinearClient();
+    await handleAgentSessionEvent({
+      payload: makePayload("updated"),
+      config,
+      deps: { thenvoiRest: restApi, linearClient: updatedClient, store },
+    });
+
+    // The updated client should not have fetched the issue for delegate check.
+    expect(updatedClient.updateIssue).not.toHaveBeenCalled();
+  });
+
+  it("continues normally when auto-delegate fails", async () => {
+    const restApi = new LinearThenvoiExampleRestApi();
+    const store = new MemorySessionRoomStore();
+    const linearClient = makeLinearClient();
+    linearClient.issue.mockRejectedValueOnce(new Error("API rate limit"));
+
+    await handleAgentSessionEvent({
+      payload: makePayload("created"),
+      config,
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    // Should still forward the message successfully despite delegate failure.
+    expect(restApi.roomEvents).toHaveLength(1);
+    expect(restApi.roomEvents[0]?.metadata).toMatchObject({
+      linear_event_action: "created",
+      linear_session_id: "session-1",
+    });
   });
 });

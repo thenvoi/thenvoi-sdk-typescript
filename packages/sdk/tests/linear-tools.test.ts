@@ -80,6 +80,8 @@ function makeMockClient(): LinearActivityClient {
       updatedAt: "2026-03-06T01:00:00.000Z",
       state: { id: "state-1", name: "In Progress", type: "started" },
       assignee: { id: "user-1", name: "Darvell" },
+      delegate: { id: "agent-1", name: "Thenvoi Agent", displayName: "Thenvoi Agent" },
+      delegateId: "agent-1",
       team: { id: "team-1", key: "SOF", name: "SoftwareFactory" },
       comments: vi.fn(async () => ({
         nodes: [
@@ -282,6 +284,8 @@ describe("createLinearTools", () => {
         identifier: "SOF-1",
         title: "Example issue",
         team: expect.objectContaining({ key: "SOF" }),
+        delegate: expect.objectContaining({ id: "agent-1", name: "Thenvoi Agent" }),
+        delegate_id: "agent-1",
       }),
     });
     expect(client.issue).toHaveBeenCalledWith(TEST_ISSUE_ID);

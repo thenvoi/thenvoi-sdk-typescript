@@ -117,6 +117,8 @@ async function startServer(dispatcher?: LinearBridgeDispatcher) {
   const store = new MemorySessionRoomStore();
   const linearClient = {
     createAgentActivity: vi.fn(async () => ({ ok: true })),
+    issue: vi.fn(async () => ({ id: "issue-1", delegateId: undefined })),
+    updateIssue: vi.fn(async () => ({ success: true })),
   };
   const handler = createLinearWebhookHandler({
     config,
@@ -322,6 +324,8 @@ describe("createLinearWebhookHandler", () => {
         .fn()
         .mockRejectedValueOnce(new Error("initial error reporting failed"))
         .mockResolvedValueOnce({ ok: true }),
+      issue: vi.fn(async () => ({ id: "issue-1", delegateId: undefined })),
+      updateIssue: vi.fn(async () => ({ success: true })),
     };
     const thenvoiRest = {
       getAgentMe: vi.fn(async () => ({ id: "agent-1", handle: "linear-host" })),
