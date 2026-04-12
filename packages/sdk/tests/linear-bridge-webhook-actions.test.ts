@@ -605,6 +605,8 @@ describe("linear bridge webhook actions", () => {
     expect(linearClient.updateIssue).toHaveBeenCalledWith("issue-1", {
       delegateId: "app-user",
     });
+    // Bridge message should reflect the newly-set delegate, not the stale webhook payload.
+    expect(restApi.roomEvents[0]?.content).toContain("issue_delegate_id: app-user");
   });
 
   it("does not overwrite existing delegate on created event", async () => {

@@ -138,7 +138,7 @@ export async function handleAgentSessionEvent(
   }
 
   // Auto-delegate: fire in background, runs concurrently with room resolution (best-effort).
-  let delegatePromise: Promise<void> | undefined;
+  let delegatePromise: Promise<boolean> | undefined;
   if (action === "created" && issueId) {
     const appUserId = input.payload.appUserId;
     if (appUserId) {
@@ -154,6 +154,7 @@ export async function handleAgentSessionEvent(
           appUserId,
           error: delegateError instanceof Error ? delegateError.message : String(delegateError),
         });
+        return false;
       });
     }
   }
@@ -203,6 +204,18 @@ export async function handleAgentSessionEvent(
       logger,
     });
 
+    // Await auto-delegate before building the message so delegate info is up-to-date.
+    const delegateWasSet = await delegatePromise?.catch(() => false);
+
+    let issueDelegateId = extractIssueDelegateField(input.payload.agentSession.issue, "id");
+    let issueDelegateName: string | null =
+      extractIssueDelegateField(input.payload.agentSession.issue, "displayName")
+      ?? extractIssueDelegateField(input.payload.agentSession.issue, "name");
+    if (delegateWasSet && input.payload.appUserId) {
+      issueDelegateId = input.payload.appUserId;
+      issueDelegateName = issueDelegateName ?? input.payload.appUserId;
+    }
+
     const message = buildBridgeMessage({
       sessionId,
       issueId,
@@ -227,10 +240,8 @@ export async function handleAgentSessionEvent(
       issueAssigneeName:
         extractIssueAssigneeField(input.payload.agentSession.issue, "displayName")
         ?? extractIssueAssigneeField(input.payload.agentSession.issue, "name"),
-      issueDelegateId: extractIssueDelegateField(input.payload.agentSession.issue, "id"),
-      issueDelegateName:
-        extractIssueDelegateField(input.payload.agentSession.issue, "displayName")
-        ?? extractIssueDelegateField(input.payload.agentSession.issue, "name"),
+      issueDelegateId,
+      issueDelegateName,
       commentBody: input.payload.agentSession.comment?.body,
       commentId: input.payload.agentSession.comment?.id,
       sessionIntent,
@@ -343,7 +354,8 @@ export async function handleAgentSessionEvent(
 
     throw error;
   } finally {
-    await delegatePromise;
+    // Ensure the delegate promise is settled even if the handler threw before awaiting it above.
+    await delegatePromise?.catch(() => {});
   }
 }
 
@@ -409,7 +421,7 @@ async function trySetAgentAsDelegate(input: {
   issueId: string;
   appUserId: string;
   logger: Logger;
-}): Promise<void> {
+}): Promise<boolean> {
   const issue = await input.linearClient.issue(input.issueId);
   const existingDelegateId = issue.delegateId;
   if (existingDelegateId) {
@@ -417,7 +429,7 @@ async function trySetAgentAsDelegate(input: {
       issueId: input.issueId,
       existingDelegateId,
     });
-    return;
+    return false;
   }
 
   await input.linearClient.updateIssue(input.issueId, {
@@ -428,6 +440,7 @@ async function trySetAgentAsDelegate(input: {
     issueId: input.issueId,
     delegateId: input.appUserId,
   });
+  return true;
 }
 
 async function resolveHostAgentHandle(input: {
