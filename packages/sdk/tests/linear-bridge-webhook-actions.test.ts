@@ -623,6 +623,7 @@ describe("linear bridge webhook actions", () => {
     });
 
     // The updated client should not have fetched the issue for delegate check.
+    expect(updatedClient.issue).not.toHaveBeenCalled();
     expect(updatedClient.updateIssue).not.toHaveBeenCalled();
   });
 

@@ -12,7 +12,7 @@ import type {
   SessionRoomRecord,
 } from "../types";
 import { dedupeHandles, stripHandlePrefix } from "../handles";
-import { postThought, postAction, postError } from "../activities";
+import { postThought, postError } from "../activities";
 import {
   buildBridgeMessage,
   detectSessionIntent,
