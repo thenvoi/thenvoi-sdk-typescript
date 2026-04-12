@@ -137,25 +137,24 @@ export async function handleAgentSessionEvent(
     }
   }
 
-  // Auto-delegate: set the agent as delegate on the issue when no delegate exists.
+  // Auto-delegate: fire in background, runs concurrently with room resolution (best-effort).
+  let delegatePromise: Promise<void> | undefined;
   if (action === "created" && issueId) {
     const appUserId = input.payload.appUserId;
     if (appUserId) {
-      try {
-        await trySetAgentAsDelegate({
-          linearClient: input.deps.linearClient,
-          issueId,
-          appUserId,
-          logger,
-        });
-      } catch (delegateError) {
+      delegatePromise = trySetAgentAsDelegate({
+        linearClient: input.deps.linearClient,
+        issueId,
+        appUserId,
+        logger,
+      }).catch((delegateError) => {
         logger.warn("linear_thenvoi_bridge.auto_delegate_failed", {
           sessionId,
           issueId,
           appUserId,
           error: delegateError instanceof Error ? delegateError.message : String(delegateError),
         });
-      }
+      });
     }
   }
 
@@ -343,6 +342,8 @@ export async function handleAgentSessionEvent(
     }
 
     throw error;
+  } finally {
+    await delegatePromise;
   }
 }
 

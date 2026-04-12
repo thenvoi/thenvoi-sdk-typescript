@@ -135,7 +135,7 @@ function makeLinearClient(options?: { delegateId?: string | null }): HandleAgent
     createAgentActivity: vi.fn(async () => ({ ok: true })),
     issue: vi.fn(async () => ({
       id: "issue-1",
-      delegateId: options?.delegateId ?? undefined,
+      delegateId: options?.delegateId ?? null,
     })),
     updateIssue: vi.fn(async () => ({ success: true })),
   } as unknown as HandleAgentSessionEventInput["deps"]["linearClient"] & {
@@ -569,6 +569,25 @@ describe("linear bridge webhook actions", () => {
     await expect(store.listPendingBootstrapRequests()).resolves.toEqual([
       expect.objectContaining({ messageType: "task" }),
     ]);
+  });
+
+  it("skips delegate when appUserId is absent", async () => {
+    const restApi = new LinearThenvoiExampleRestApi();
+    const store = new MemorySessionRoomStore();
+    const linearClient = makeLinearClient();
+    const payload = makePayload("created");
+    (payload as Record<string, unknown>).appUserId = undefined;
+
+    await handleAgentSessionEvent({
+      payload,
+      config,
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    expect(linearClient.issue).not.toHaveBeenCalled();
+    expect(linearClient.updateIssue).not.toHaveBeenCalled();
+    // Should still forward the message successfully.
+    expect(restApi.roomEvents).toHaveLength(1);
   });
 
   it("sets agent as delegate on created event when no delegate exists", async () => {

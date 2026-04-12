@@ -289,28 +289,30 @@ function resolveOptionalIssueId(
   return args.issue_id;
 }
 
+interface LinearIssueSnapshot {
+  id: string;
+  identifier?: string | null;
+  title?: string | null;
+  description?: string | null;
+  url?: string | null;
+  priority?: number | null;
+  estimate?: number | null;
+  dueDate?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  state?: { id?: string | null; name?: string | null; type?: string | null } | null;
+  assignee?: { id?: string | null; name?: string | null; displayName?: string | null } | null;
+  delegate?: { id?: string | null; name?: string | null; displayName?: string | null } | null;
+  delegateId?: string | null;
+  team?: { id?: string | null; key?: string | null; name?: string | null } | null;
+}
+
 async function readIssue(client: LinearActivityClient, issueId: string): Promise<unknown> {
   if (typeof client.issue !== "function") {
     throw new Error("linear_get_issue is unavailable: Linear client does not support issue().");
   }
 
-  const issue = await client.issue(issueId) as {
-    id: string;
-    identifier?: string | null;
-    title?: string | null;
-    description?: string | null;
-    url?: string | null;
-    priority?: number | null;
-    estimate?: number | null;
-    dueDate?: string | null;
-    createdAt?: string | null;
-    updatedAt?: string | null;
-    state?: { id?: string | null; name?: string | null; type?: string | null } | null;
-    assignee?: { id?: string | null; name?: string | null; displayName?: string | null } | null;
-    delegate?: { id?: string | null; name?: string | null; displayName?: string | null } | null;
-    delegateId?: string | null;
-    team?: { id?: string | null; key?: string | null; name?: string | null } | null;
-  };
+  const issue = await client.issue(issueId) as LinearIssueSnapshot;
 
   return {
     issue: {
