@@ -594,6 +594,15 @@ describe("linear bridge webhook actions", () => {
     const restApi = new LinearThenvoiExampleRestApi();
     const store = new MemorySessionRoomStore();
     const linearClient = makeLinearClient({ delegateId: null });
+    // First call: check existing delegate (none). Second call: re-fetch after setting delegate.
+    linearClient.issue
+      .mockReset()
+      .mockResolvedValueOnce({ id: "issue-1", delegateId: null })
+      .mockResolvedValueOnce({
+        id: "issue-1",
+        delegateId: "app-user",
+        delegate: { id: "app-user", name: "Thenvoi Agent", displayName: "Thenvoi Agent" },
+      });
 
     await handleAgentSessionEvent({
       payload: makePayload("created"),
@@ -605,8 +614,9 @@ describe("linear bridge webhook actions", () => {
     expect(linearClient.updateIssue).toHaveBeenCalledWith("issue-1", {
       delegateId: "app-user",
     });
-    // Bridge message should reflect the newly-set delegate, not the stale webhook payload.
+    // Bridge message should reflect the newly-set delegate with a human-readable name.
     expect(restApi.roomEvents[0]?.content).toContain("issue_delegate_id: app-user");
+    expect(restApi.roomEvents[0]?.content).toContain("issue_delegate: Thenvoi Agent");
   });
 
   it("does not overwrite existing delegate on created event", async () => {
