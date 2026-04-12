@@ -113,6 +113,25 @@ describe("linear activities", () => {
     });
   });
 
+  it("updatePlan falls back to thought activity when updateAgentSession throws", async () => {
+    const client = makeMockClient();
+    client.updateAgentSession = vi.fn(async () => { throw new Error("mutation not found"); });
+    const steps: PlanStep[] = [
+      { title: "Analyze issue", status: "completed" },
+      { title: "Search codebase", status: "in_progress" },
+      { title: "Write fix", status: "pending" },
+      { title: "Old approach", status: "failed" },
+    ];
+
+    await updatePlan(client, "session-6", steps);
+
+    expect(client.updateAgentSession).toHaveBeenCalledOnce();
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0]?.agentSessionId).toBe("session-6");
+    const body = (client.calls[0]?.content as { body: string }).body;
+    expect(body).toContain("**Plan:**");
+  });
+
   it("updatePlan falls back to thought activity when updateAgentSession is unavailable", async () => {
     const client = makeMockClient();
     delete (client as Partial<typeof client>).updateAgentSession;

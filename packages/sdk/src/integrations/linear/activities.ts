@@ -117,8 +117,8 @@ export async function updatePlan(
     try {
       await client.updateAgentSession(sessionId, { plan });
       return;
-    } catch {
-      // Fall through to legacy Thought-based plan
+    } catch (err) {
+      console.warn("updateAgentSession failed, falling back to legacy plan", err);
     }
   }
 
