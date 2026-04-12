@@ -92,7 +92,9 @@ export async function postAction(
   });
 }
 
-const PLAN_STATUS_MAP: Record<PlanStep["status"], string> = {
+type LinearPlanStatus = "pending" | "inProgress" | "completed" | "canceled";
+
+const PLAN_STATUS_MAP: Record<PlanStep["status"], LinearPlanStatus> = {
   pending: "pending",
   in_progress: "inProgress",
   completed: "completed",
@@ -112,8 +114,12 @@ export async function updatePlan(
       })),
     };
 
-    await client.updateAgentSession(sessionId, { plan });
-    return;
+    try {
+      await client.updateAgentSession(sessionId, { plan });
+      return;
+    } catch {
+      // Fall through to legacy Thought-based plan
+    }
   }
 
   const planSummary = steps
