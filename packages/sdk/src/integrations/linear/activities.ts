@@ -76,6 +76,43 @@ export async function postElicitation(
   await postBodyActivity(client, sessionId, L.AgentActivityType.Elicitation, body);
 }
 
+export interface SelectOption {
+  label: string;
+  value: string;
+}
+
+export async function postSelectElicitation(
+  client: LinearActivityClient,
+  sessionId: string,
+  body: string,
+  options: SelectOption[],
+): Promise<void> {
+  await postActivity(client, sessionId, {
+    type: L.AgentActivityType.Elicitation,
+    body,
+    signal: L.AgentActivitySignal.Select,
+    signalMetadata: { options },
+  });
+}
+
+export async function postAuthElicitation(
+  client: LinearActivityClient,
+  sessionId: string,
+  body: string,
+  url: string,
+  provider?: string,
+): Promise<void> {
+  await postActivity(client, sessionId, {
+    type: L.AgentActivityType.Elicitation,
+    body,
+    signal: L.AgentActivitySignal.Auth,
+    signalMetadata: {
+      url,
+      ...(provider ? { provider } : {}),
+    },
+  });
+}
+
 export async function postAction(
   client: LinearActivityClient,
   sessionId: string,

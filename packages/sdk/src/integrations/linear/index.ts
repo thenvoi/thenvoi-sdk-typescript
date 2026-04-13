@@ -17,6 +17,8 @@ export {
   postError,
   postResponse,
   postElicitation,
+  postSelectElicitation,
+  postAuthElicitation,
   updatePlan,
 } from "./activities";
 export { createLinearTools } from "./tools";
@@ -37,6 +39,7 @@ export type {
   HandleAgentSessionEventInput,
   LinearActivityClient,
   PlanStep,
+  SelectOption,
   LinearSessionStatus,
 } from "./types";
 export type {

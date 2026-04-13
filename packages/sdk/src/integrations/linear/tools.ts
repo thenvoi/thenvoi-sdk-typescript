@@ -1,12 +1,14 @@
 import { z } from "zod";
 
 import type { CustomToolDef } from "../../runtime/tools/customTools";
-import type { LinearActivityClient, PlanStep } from "./activities";
+import type { LinearActivityClient, PlanStep, SelectOption } from "./activities";
 import {
   postThought,
   postAction,
   postError,
   postElicitation,
+  postSelectElicitation,
+  postAuthElicitation,
   updatePlan,
 } from "./activities";
 import { completeLinearSession } from "./bridge";
@@ -78,14 +80,50 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
   );
 
   if (enableElicitation) {
-    addSessionBodyTool(
-      "linear_ask_user",
-      "Ask the Linear user a question via an elicitation activity.",
-      async (args) => {
-        await postElicitation(client, args.session_id as string, args.body as string);
+    tools.push({
+      name: "linear_ask_user",
+      description: "Ask the Linear user a question. When options are provided, Linear renders them as a clickable picker (select signal); otherwise the user sees a free-text prompt.",
+      schema: z.object({
+        session_id: z.string().describe("The Linear agent session ID"),
+        body: z.string().describe("The question to ask, in Markdown format"),
+        options: z.array(z.object({
+          label: z.string().describe("Display text for the option"),
+          value: z.string().describe("Value returned when the option is selected"),
+        })).optional().describe("Clickable options for a select picker. Omit for free-text input."),
+      }),
+      handler: async (args: Record<string, unknown>) => {
+        const sessionId = args.session_id as string;
+        const body = args.body as string;
+        const options = args.options as SelectOption[] | undefined;
+        if (options && options.length > 0) {
+          await postSelectElicitation(client, sessionId, body, options);
+        } else {
+          await postElicitation(client, sessionId, body);
+        }
         return { ok: true };
       },
-    );
+    });
+
+    tools.push({
+      name: "linear_request_auth",
+      description: "Ask the Linear user to link an external account by presenting an authentication button. The user sees a 'Link account' UI that opens the provided URL.",
+      schema: z.object({
+        session_id: z.string().describe("The Linear agent session ID"),
+        body: z.string().describe("Explanation of why authentication is needed, in Markdown format"),
+        url: z.string().url().describe("The authentication URL to open when the user clicks the link button"),
+        provider: z.string().optional().describe("Name of the external service (e.g. 'GitHub', 'Slack')"),
+      }),
+      handler: async (args: Record<string, unknown>) => {
+        await postAuthElicitation(
+          client,
+          args.session_id as string,
+          args.body as string,
+          args.url as string,
+          args.provider as string | undefined,
+        );
+        return { ok: true };
+      },
+    });
   }
 
   addSessionBodyTool(
