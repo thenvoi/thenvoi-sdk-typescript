@@ -81,6 +81,9 @@ export interface SelectOption {
   value: string;
 }
 
+/** Longest label or value string allowed in a select option. */
+export const SELECT_OPTION_MAX_LENGTH = 200;
+
 export async function postSelectElicitation(
   client: LinearActivityClient,
   sessionId: string,

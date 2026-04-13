@@ -285,7 +285,7 @@ describe("createLinearTools", () => {
     ).rejects.toThrow("Invalid arguments");
   });
 
-  it("linear_request_auth rejects non-http(s) url", async () => {
+  it("linear_request_auth rejects non-https url for remote hosts", async () => {
     const tools = createLinearTools({ client: makeMockClient() });
     const tool = tools.find((entry) => entry.name === "linear_request_auth")!;
 
@@ -296,6 +296,28 @@ describe("createLinearTools", () => {
         url: "ftp://example.com/auth",
       }),
     ).rejects.toThrow("Invalid arguments");
+
+    await expect(
+      executeCustomTool(tool, {
+        session_id: "sess-1",
+        body: "Please authenticate.",
+        url: "http://example.com/auth",
+      }),
+    ).rejects.toThrow("Invalid arguments");
+  });
+
+  it("linear_request_auth allows http for localhost", async () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_request_auth")!;
+
+    const result = await executeCustomTool(tool, {
+      session_id: "sess-1",
+      body: "Please authenticate locally.",
+      url: "http://localhost:3000/auth/callback",
+    });
+
+    expect(result).toEqual({ ok: true });
   });
 
   it("linear_ask_user rejects options with fewer than 2 items", async () => {

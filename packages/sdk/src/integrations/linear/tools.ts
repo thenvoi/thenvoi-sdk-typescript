@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { CustomToolDef } from "../../runtime/tools/customTools";
 import type { LinearActivityClient, PlanStep, SelectOption } from "./activities";
 import {
+  SELECT_OPTION_MAX_LENGTH,
   postThought,
   postAction,
   postError,
@@ -87,15 +88,15 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
         session_id: z.string().describe("The Linear agent session ID"),
         body: z.string().describe("The question to ask, in Markdown format"),
         options: z.array(z.object({
-          label: z.string().describe("Display text for the option"),
-          value: z.string().describe("Value returned when the option is selected"),
+          label: z.string().max(SELECT_OPTION_MAX_LENGTH).describe("Display text for the option"),
+          value: z.string().max(SELECT_OPTION_MAX_LENGTH).describe("Value returned when the option is selected"),
         })).min(2).max(20).optional().describe("Clickable options for a select picker (2–20 items). Omit for free-text input."),
       }),
       handler: async (args: Record<string, unknown>) => {
         const sessionId = args.session_id as string;
         const body = args.body as string;
         const options = args.options as SelectOption[] | undefined;
-        if (options && options.length > 0) {
+        if (options) {
           await postSelectElicitation(client, sessionId, body, options);
         } else {
           await postElicitation(client, sessionId, body);
@@ -110,7 +111,13 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
       schema: z.object({
         session_id: z.string().describe("The Linear agent session ID"),
         body: z.string().describe("Explanation of why authentication is needed, in Markdown format"),
-        url: z.string().url().refine((u) => /^https?:\/\//i.test(u), { message: "URL must use http or https" }).describe("The authentication URL to open when the user clicks the link button"),
+        url: z.string().url().refine(
+          (u) => {
+            try { const parsed = new URL(u); return parsed.protocol === "https:" || parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1"; }
+            catch { return false; }
+          },
+          { message: "URL must use https (http allowed only for localhost)" },
+        ).describe("The authentication URL to open when the user clicks the link button"),
         provider: z.string().optional().describe("Name of the external service (e.g. 'GitHub', 'Slack')"),
       }),
       handler: async (args: Record<string, unknown>) => {
