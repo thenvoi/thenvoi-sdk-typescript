@@ -20,6 +20,8 @@ export {
   postSelectElicitation,
   postAuthElicitation,
   updatePlan,
+  SELECT_OPTION_MAX_LENGTH,
+  PROVIDER_MAX_LENGTH,
 } from "./activities";
 export { createLinearTools } from "./tools";
 export {

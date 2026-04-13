@@ -320,6 +320,34 @@ describe("createLinearTools", () => {
     expect(result).toEqual({ ok: true });
   });
 
+  it("linear_request_auth allows http for IPv6 localhost", async () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_request_auth")!;
+
+    const result = await executeCustomTool(tool, {
+      session_id: "sess-1",
+      body: "Please authenticate locally.",
+      url: "http://[::1]:3000/auth/callback",
+    });
+
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("linear_request_auth rejects overly long provider name", async () => {
+    const tools = createLinearTools({ client: makeMockClient() });
+    const tool = tools.find((entry) => entry.name === "linear_request_auth")!;
+
+    await expect(
+      executeCustomTool(tool, {
+        session_id: "sess-1",
+        body: "Please authenticate.",
+        url: "https://example.com/auth",
+        provider: "A".repeat(101),
+      }),
+    ).rejects.toThrow("Invalid arguments");
+  });
+
   it("linear_ask_user rejects options with fewer than 2 items", async () => {
     const tools = createLinearTools({ client: makeMockClient() });
     const tool = tools.find((entry) => entry.name === "linear_ask_user")!;

@@ -84,6 +84,9 @@ export interface SelectOption {
 /** Longest label or value string allowed in a select option. */
 export const SELECT_OPTION_MAX_LENGTH = 200;
 
+/** Longest provider name string allowed in an auth elicitation. */
+export const PROVIDER_MAX_LENGTH = 100;
+
 export async function postSelectElicitation(
   client: LinearActivityClient,
   sessionId: string,

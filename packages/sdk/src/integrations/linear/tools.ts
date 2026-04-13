@@ -4,6 +4,7 @@ import type { CustomToolDef } from "../../runtime/tools/customTools";
 import type { LinearActivityClient, PlanStep, SelectOption } from "./activities";
 import {
   SELECT_OPTION_MAX_LENGTH,
+  PROVIDER_MAX_LENGTH,
   postThought,
   postAction,
   postError,
@@ -14,6 +15,19 @@ import {
 } from "./activities";
 import { completeLinearSession } from "./bridge";
 import type { SessionRoomStore } from "./types";
+
+const LOCALHOST_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/** Zod refine predicate: allow https for any host, http only for localhost. */
+function isAllowedAuthUrl(u: string): boolean {
+  try {
+    const parsed = new URL(u);
+    if (parsed.protocol === "https:") return true;
+    return LOCALHOST_HOSTNAMES.has(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
 
 interface CreateLinearToolsOptions {
   client: LinearActivityClient;
@@ -95,6 +109,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
       handler: async (args: Record<string, unknown>) => {
         const sessionId = args.session_id as string;
         const body = args.body as string;
+        // Zod .min(2) guarantees options is either undefined or has ≥2 items
         const options = args.options as SelectOption[] | undefined;
         if (options) {
           await postSelectElicitation(client, sessionId, body, options);
@@ -112,13 +127,10 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
         session_id: z.string().describe("The Linear agent session ID"),
         body: z.string().describe("Explanation of why authentication is needed, in Markdown format"),
         url: z.string().url().refine(
-          (u) => {
-            try { const parsed = new URL(u); return parsed.protocol === "https:" || parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1"; }
-            catch { return false; }
-          },
+          isAllowedAuthUrl,
           { message: "URL must use https (http allowed only for localhost)" },
         ).describe("The authentication URL to open when the user clicks the link button"),
-        provider: z.string().optional().describe("Name of the external service (e.g. 'GitHub', 'Slack')"),
+        provider: z.string().max(PROVIDER_MAX_LENGTH).optional().describe("Name of the external service (e.g. 'GitHub', 'Slack')"),
       }),
       handler: async (args: Record<string, unknown>) => {
         await postAuthElicitation(
