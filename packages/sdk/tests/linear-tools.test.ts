@@ -361,6 +361,20 @@ describe("createLinearTools", () => {
     ).rejects.toThrow("Invalid arguments");
   });
 
+  it("linear_request_auth rejects empty provider string", async () => {
+    const tools = createLinearTools({ client: makeMockClient() });
+    const tool = tools.find((entry) => entry.name === "linear_request_auth")!;
+
+    await expect(
+      executeCustomTool(tool, {
+        session_id: "sess-1",
+        body: "Please authenticate.",
+        url: "https://example.com/auth",
+        provider: "",
+      }),
+    ).rejects.toThrow("Invalid arguments");
+  });
+
   it("linear_request_auth and linear_ask_user are excluded when enableElicitation is false", () => {
     const tools = createLinearTools({ client: makeMockClient(), enableElicitation: false });
     const names = tools.map((t) => t.name);

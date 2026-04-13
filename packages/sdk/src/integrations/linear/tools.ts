@@ -131,7 +131,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
           isAllowedAuthUrl,
           { message: "URL must use https (http allowed only for localhost)" },
         ).describe("The authentication URL to open when the user clicks the link button"),
-        provider: z.string().max(PROVIDER_MAX_LENGTH).optional().describe("Name of the external service (e.g. 'GitHub', 'Slack')"),
+        provider: z.string().min(1).max(PROVIDER_MAX_LENGTH).optional().describe("Name of the external service (e.g. 'GitHub', 'Slack')"),
       }),
       handler: async (args: Record<string, unknown>) => {
         await postAuthElicitation(
