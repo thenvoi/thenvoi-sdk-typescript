@@ -504,6 +504,33 @@ describe("createLinearTools", () => {
     expect(result).toEqual({ suggestions: [] });
   });
 
+  it("linear_suggest_repositories sorts suggestions by confidence descending", async () => {
+    const client = makeMockClient({ withRepoSuggestions: true });
+    (client.issueRepositorySuggestions as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      suggestions: [
+        { repositoryFullName: "org/low", hostname: "github.com", confidence: 0.2 },
+        { repositoryFullName: "org/high", hostname: "github.com", confidence: 0.95 },
+        { repositoryFullName: "org/mid", hostname: "github.com", confidence: 0.6 },
+      ],
+    });
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_suggest_repositories")!;
+
+    const result = await executeCustomTool(tool, {
+      session_id: "sess-1",
+      issue_id: TEST_ISSUE_ID,
+      repositories: [{ hostname: "github.com", repositoryFullName: "org/repo" }],
+    });
+
+    expect(result).toEqual({
+      suggestions: [
+        { repositoryFullName: "org/high", hostname: "github.com", confidence: 0.95 },
+        { repositoryFullName: "org/mid", hostname: "github.com", confidence: 0.6 },
+        { repositoryFullName: "org/low", hostname: "github.com", confidence: 0.2 },
+      ],
+    });
+  });
+
   it("linear_suggest_repositories skips malformed entries missing repositoryFullName", async () => {
     const client = makeMockClient({ withRepoSuggestions: true });
     (client.issueRepositorySuggestions as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
