@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { CustomToolDef } from "../../runtime/tools/customTools";
 import type { LinearActivityClient, PlanStep, SelectOption } from "./activities";
 import {
+  ELICITATION_BODY_MAX_LENGTH,
   SELECT_OPTION_MAX_LENGTH,
   PROVIDER_MAX_LENGTH,
   postThought,
@@ -100,7 +101,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
       description: "Ask the Linear user a question. When options are provided, Linear renders them as a clickable picker (select signal); otherwise the user sees a free-text prompt.",
       schema: z.object({
         session_id: z.string().describe("The Linear agent session ID"),
-        body: z.string().describe("The question to ask, in Markdown format"),
+        body: z.string().max(ELICITATION_BODY_MAX_LENGTH).describe("The question to ask, in Markdown format"),
         options: z.array(z.object({
           label: z.string().max(SELECT_OPTION_MAX_LENGTH).describe("Display text for the option"),
           value: z.string().max(SELECT_OPTION_MAX_LENGTH).describe("Value returned when the option is selected"),
@@ -125,7 +126,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
       description: "Ask the Linear user to link an external account by presenting an authentication button. The user sees a 'Link account' UI that opens the provided URL.",
       schema: z.object({
         session_id: z.string().describe("The Linear agent session ID"),
-        body: z.string().describe("Explanation of why authentication is needed, in Markdown format"),
+        body: z.string().max(ELICITATION_BODY_MAX_LENGTH).describe("Explanation of why authentication is needed, in Markdown format"),
         url: z.string().url().refine(
           isAllowedAuthUrl,
           { message: "URL must use https (http allowed only for localhost)" },

@@ -20,6 +20,7 @@ export {
   postSelectElicitation,
   postAuthElicitation,
   updatePlan,
+  ELICITATION_BODY_MAX_LENGTH,
   SELECT_OPTION_MAX_LENGTH,
   PROVIDER_MAX_LENGTH,
 } from "./activities";

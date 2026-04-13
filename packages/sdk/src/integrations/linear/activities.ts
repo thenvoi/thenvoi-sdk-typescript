@@ -81,6 +81,9 @@ export interface SelectOption {
   value: string;
 }
 
+/** Longest body string allowed in an elicitation activity. */
+export const ELICITATION_BODY_MAX_LENGTH = 10_000;
+
 /** Longest label or value string allowed in a select option. */
 export const SELECT_OPTION_MAX_LENGTH = 200;
 
