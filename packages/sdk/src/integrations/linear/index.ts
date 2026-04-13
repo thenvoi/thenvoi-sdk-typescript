@@ -20,6 +20,7 @@ export {
   updatePlan,
 } from "./activities";
 export { createLinearTools } from "./tools";
+export { handleAppUserNotification } from "./notification";
 export {
   createInlineLinearBridgeDispatcher,
   createInProcessLinearBridgeDispatcher,
@@ -35,6 +36,7 @@ export type {
   SessionRoomStore,
   LinearThenvoiBridgeDeps,
   HandleAgentSessionEventInput,
+  HandleAppUserNotificationInput,
   LinearActivityClient,
   PlanStep,
   LinearSessionStatus,

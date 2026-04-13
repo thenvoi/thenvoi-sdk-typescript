@@ -5,9 +5,11 @@ import {
   LINEAR_WEBHOOK_SIGNATURE_HEADER,
   LINEAR_WEBHOOK_TS_HEADER,
   type AgentSessionEventWebhookPayload,
+  type AppUserNotificationWebhookPayloadWithNotification,
 } from "@linear/sdk/webhooks";
 
 import { NoopLogger, type Logger } from "../../core/logger";
+import { handleAppUserNotification } from "./notification";
 import { postError, postThought } from "./activities";
 import {
   createLinearBridgeRuntime,
@@ -231,13 +233,13 @@ export function createLinearWebhookHandler(
     }
 
     const rawBody = await readRawBody(request as NodeRequestWithBody);
-    let payload: AgentSessionEventWebhookPayload;
+    let rawPayload: { type?: string };
     try {
-      payload = webhookClient.parseData(
+      rawPayload = webhookClient.parseData(
         rawBody,
         signature,
         timestamp,
-      ) as AgentSessionEventWebhookPayload;
+      ) as { type?: string };
     } catch (error) {
       logger.warn("linear_thenvoi_bridge.webhook_invalid_signature", {
         error: error instanceof Error ? error.message : String(error),
@@ -246,13 +248,40 @@ export function createLinearWebhookHandler(
       return;
     }
 
-    if (payload.type !== "AgentSessionEvent") {
+    if (rawPayload.type === "AppUserNotification") {
+      const notificationPayload = rawPayload as AppUserNotificationWebhookPayloadWithNotification;
+      logger.info("linear_thenvoi_bridge.webhook_notification_received", {
+        notificationType: notificationPayload.notification?.__typename ?? null,
+        appUserId: notificationPayload.appUserId,
+        organizationId: notificationPayload.organizationId,
+      });
+
+      try {
+        await handleAppUserNotification({
+          payload: notificationPayload,
+          deps: options.deps,
+          logger,
+        });
+      } catch (error) {
+        logger.error("linear_thenvoi_bridge.webhook_notification_failed", {
+          notificationType: notificationPayload.notification?.__typename ?? null,
+          error: serializeError(error),
+        });
+      }
+
+      sendText(response, 200, "OK");
+      return;
+    }
+
+    if (rawPayload.type !== "AgentSessionEvent") {
       logger.info("linear_thenvoi_bridge.webhook_ignored_event", {
-        type: payload.type,
+        type: rawPayload.type,
       });
       sendText(response, 200, "OK");
       return;
     }
+
+    const payload = rawPayload as AgentSessionEventWebhookPayload;
 
     const eventKey = getAgentSessionEventKey(payload);
     logger.info("linear_thenvoi_bridge.webhook_received", {

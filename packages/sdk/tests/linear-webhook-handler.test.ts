@@ -371,4 +371,127 @@ describe("createLinearWebhookHandler", () => {
       }),
     );
   });
+
+  it("returns 200 for AppUserNotification webhook payloads", async () => {
+    const dispatcher = {
+      dispatch: vi.fn(),
+    } satisfies LinearBridgeDispatcher;
+    const { url } = await startServer(dispatcher);
+
+    const payload = {
+      type: "AppUserNotification",
+      action: "create",
+      appUserId: "app-user",
+      createdAt: new Date().toISOString(),
+      oauthClientId: "oauth-client",
+      organizationId: "org-1",
+      webhookId: "webhook-1",
+      webhookTimestamp: Date.now(),
+      notification: {
+        __typename: "IssueUnassignedFromYouNotificationWebhookPayload",
+        id: "notif-1",
+        issueId: "issue-1",
+        actorId: "user-1",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        userId: "app-user",
+        issue: { id: "issue-1", title: "Test issue" },
+      },
+    };
+    const rawBody = JSON.stringify(payload);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "linear-signature": sign(config.linearWebhookSecret, rawBody),
+        "linear-timestamp": String(payload.webhookTimestamp),
+      },
+      body: rawBody,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("OK");
+    expect(dispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("returns 200 even when notification handling throws", async () => {
+    const store = new MemorySessionRoomStore();
+    const linearClient = {
+      createAgentActivity: vi.fn(async () => ({ ok: true })),
+    };
+    const thenvoiRest = {
+      getAgentMe: vi.fn(async () => ({ id: "agent-1", handle: "linear-host" })),
+      createChatEvent: vi.fn(async () => {
+        throw new Error("room write failed");
+      }),
+    };
+
+    const handler = createLinearWebhookHandler({
+      config,
+      deps: {
+        thenvoiRest: thenvoiRest as never,
+        linearClient: linearClient as never,
+        store,
+      },
+    });
+
+    const server = createServer((request, response) => {
+      void handler(request, response);
+    });
+    servers.add(server);
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected TCP server address");
+    }
+    const url = `http://127.0.0.1:${address.port}/linear/webhook`;
+
+    const session: SessionRoomRecord = {
+      linearSessionId: "session-fail",
+      linearIssueId: "issue-fail",
+      thenvoiRoomId: "room-fail",
+      status: "active",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await store.upsert(session);
+
+    const payload = {
+      type: "AppUserNotification",
+      action: "create",
+      appUserId: "app-user",
+      createdAt: new Date().toISOString(),
+      oauthClientId: "oauth-client",
+      organizationId: "org-1",
+      webhookId: "webhook-1",
+      webhookTimestamp: Date.now(),
+      notification: {
+        __typename: "IssueUnassignedFromYouNotificationWebhookPayload",
+        id: "notif-fail",
+        issueId: "issue-fail",
+        actorId: "user-1",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        userId: "app-user",
+        issue: { id: "issue-fail", title: "Fail test" },
+      },
+    };
+    const rawBody = JSON.stringify(payload);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "linear-signature": sign(config.linearWebhookSecret, rawBody),
+        "linear-timestamp": String(payload.webhookTimestamp),
+      },
+      body: rawBody,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("OK");
+  });
 });

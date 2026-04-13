@@ -67,6 +67,7 @@ export interface HandleAgentSessionEventInput {
 }
 
 export type { LinearActivityClient, PlanStep } from "./activities";
+export type { HandleAppUserNotificationInput } from "./notification";
 
 export type LinearSessionStatus =
   SessionStatus;
