@@ -72,8 +72,9 @@ async function handleIssueUnassigned(input: {
     return;
   }
 
-  await deps.store.markCanceled(existing.linearSessionId);
-
+  // Send the disengagement message before canceling the session. If the message
+  // fails, the session stays active so a retried notification can try again.
+  // Canceling first would make retries no-ops (getByIssueId filters canceled sessions).
   await deps.thenvoiRest.createChatEvent(existing.thenvoiRoomId, {
     content:
       "[Linear]: Issue unassigned from agent. Disengage from active work and await reassignment.",
@@ -85,6 +86,8 @@ async function handleIssueUnassigned(input: {
       linear_bridge: "thenvoi",
     },
   });
+
+  await deps.store.markCanceled(existing.linearSessionId);
 
   logger.info("linear_thenvoi_bridge.notification_unassigned_handled", {
     issueId: notification.issueId,
