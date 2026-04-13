@@ -394,7 +394,7 @@ async function trySetSessionExternalUrl(input: {
   logger: Logger;
 }): Promise<void> {
   if (typeof input.linearClient.agentSessionUpdateExternalUrl !== "function") {
-    input.logger.warn("linear_thenvoi_bridge.set_external_url_skipped_no_api", {
+    input.logger.info("linear_thenvoi_bridge.set_external_url_skipped_no_api", {
       sessionId: input.sessionId,
     });
     return;
