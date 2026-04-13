@@ -141,9 +141,8 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
         "Returns ranked suggestions with confidence scores. Use this before asking the user " +
         "which repository to work in — if a suggestion has high confidence, auto-select it; " +
         "otherwise present the top options via the select elicitation signal.",
-      schema: z.object({
+      schema: requiredIssueIdSchema.extend({
         session_id: z.string().describe("The Linear agent session ID"),
-        issue_id: z.string().describe("The Linear issue ID (UUID)"),
         repositories: z
           .array(
             z.object({

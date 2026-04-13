@@ -531,6 +531,23 @@ describe("createLinearTools", () => {
     });
   });
 
+  it("linear_suggest_repositories propagates API errors to the caller", async () => {
+    const client = makeMockClient({ withRepoSuggestions: true });
+    (client.issueRepositorySuggestions as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("Linear API unavailable"),
+    );
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_suggest_repositories")!;
+
+    await expect(
+      executeCustomTool(tool, {
+        session_id: "sess-1",
+        issue_id: TEST_ISSUE_ID,
+        repositories: [{ hostname: "github.com", repositoryFullName: "org/repo" }],
+      }),
+    ).rejects.toThrow("Linear API unavailable");
+  });
+
   it("linear_suggest_repositories skips malformed entries missing repositoryFullName", async () => {
     const client = makeMockClient({ withRepoSuggestions: true });
     (client.issueRepositorySuggestions as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
