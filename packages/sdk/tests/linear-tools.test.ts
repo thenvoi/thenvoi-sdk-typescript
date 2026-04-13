@@ -207,7 +207,7 @@ describe("createLinearTools", () => {
     });
   });
 
-  it("linear_ask_user falls back to plain elicitation when options is empty", async () => {
+  it("linear_ask_user falls back to plain elicitation when options is omitted", async () => {
     const client = makeMockClient();
     const tools = createLinearTools({ client });
     const tool = tools.find((entry) => entry.name === "linear_ask_user")!;
@@ -215,7 +215,6 @@ describe("createLinearTools", () => {
     await executeCustomTool(tool, {
       session_id: "sess-1",
       body: "What do you think?",
-      options: [],
     });
 
     expect(client.createAgentActivity).toHaveBeenCalledWith({
@@ -282,6 +281,32 @@ describe("createLinearTools", () => {
         session_id: "sess-1",
         body: "Please authenticate.",
         url: "not-a-url",
+      }),
+    ).rejects.toThrow("Invalid arguments");
+  });
+
+  it("linear_request_auth rejects non-http(s) url", async () => {
+    const tools = createLinearTools({ client: makeMockClient() });
+    const tool = tools.find((entry) => entry.name === "linear_request_auth")!;
+
+    await expect(
+      executeCustomTool(tool, {
+        session_id: "sess-1",
+        body: "Please authenticate.",
+        url: "ftp://example.com/auth",
+      }),
+    ).rejects.toThrow("Invalid arguments");
+  });
+
+  it("linear_ask_user rejects options with fewer than 2 items", async () => {
+    const tools = createLinearTools({ client: makeMockClient() });
+    const tool = tools.find((entry) => entry.name === "linear_ask_user")!;
+
+    await expect(
+      executeCustomTool(tool, {
+        session_id: "sess-1",
+        body: "Pick one",
+        options: [{ label: "Only", value: "only" }],
       }),
     ).rejects.toThrow("Invalid arguments");
   });

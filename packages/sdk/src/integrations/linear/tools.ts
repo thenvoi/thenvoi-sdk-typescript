@@ -89,7 +89,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
         options: z.array(z.object({
           label: z.string().describe("Display text for the option"),
           value: z.string().describe("Value returned when the option is selected"),
-        })).optional().describe("Clickable options for a select picker. Omit for free-text input."),
+        })).min(2).max(20).optional().describe("Clickable options for a select picker (2–20 items). Omit for free-text input."),
       }),
       handler: async (args: Record<string, unknown>) => {
         const sessionId = args.session_id as string;
@@ -110,7 +110,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
       schema: z.object({
         session_id: z.string().describe("The Linear agent session ID"),
         body: z.string().describe("Explanation of why authentication is needed, in Markdown format"),
-        url: z.string().url().describe("The authentication URL to open when the user clicks the link button"),
+        url: z.string().url().refine((u) => /^https?:\/\//i.test(u), { message: "URL must use http or https" }).describe("The authentication URL to open when the user clicks the link button"),
         provider: z.string().optional().describe("Name of the external service (e.g. 'GitHub', 'Slack')"),
       }),
       handler: async (args: Record<string, unknown>) => {
