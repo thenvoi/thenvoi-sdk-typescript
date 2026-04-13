@@ -457,7 +457,7 @@ describe("createLinearTools", () => {
         issue_id: "SOF-1",
         repositories: [{ hostname: "github.com", repositoryFullName: "org/repo" }],
       }),
-    ).rejects.toThrow("Invalid uuid");
+    ).rejects.toThrow("requires the exact Linear issue UUID");
   });
 
   it("linear_suggest_repositories rejects empty repositories array", async () => {

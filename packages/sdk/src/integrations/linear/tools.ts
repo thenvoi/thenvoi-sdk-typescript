@@ -143,7 +143,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
         "otherwise present the top options via the select elicitation signal.",
       schema: z.object({
         session_id: z.string().describe("The Linear agent session ID"),
-        issue_id: z.string().uuid().describe("The Linear issue ID (UUID)"),
+        issue_id: z.string().describe("The Linear issue ID (UUID)"),
         repositories: z
           .array(
             z.object({
@@ -159,11 +159,17 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
         const sessionId = args.session_id as string;
         const candidates = args.repositories as CandidateRepositoryInput[];
 
-        const response = await suggestRepositories(
-          candidates,
-          issueId,
-          { agentSessionId: sessionId },
-        );
+        let response: unknown;
+        try {
+          response = await suggestRepositories(
+            candidates,
+            issueId,
+            { agentSessionId: sessionId },
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          throw new Error(`linear_suggest_repositories failed: ${message}`);
+        }
 
         const suggestions = extractRepositorySuggestions(response);
         return { suggestions };
@@ -489,11 +495,14 @@ function extractRepositorySuggestions(response: unknown): RepositorySuggestion[]
 
   return payload.suggestions
     .filter((entry): entry is Record<string, unknown> =>
-      entry != null && typeof entry === "object" && typeof (entry as Record<string, unknown>).repositoryFullName === "string",
+      entry != null &&
+      typeof entry === "object" &&
+      typeof (entry as Record<string, unknown>).repositoryFullName === "string",
     )
     .map((entry) => ({
       repositoryFullName: entry.repositoryFullName as string,
       hostname: typeof entry.hostname === "string" ? entry.hostname : null,
       confidence: typeof entry.confidence === "number" ? entry.confidence : 0,
-    }));
+    }))
+    .sort((a, b) => b.confidence - a.confidence);
 }
