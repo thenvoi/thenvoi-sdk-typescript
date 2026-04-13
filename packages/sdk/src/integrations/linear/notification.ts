@@ -11,6 +11,12 @@ type NotificationByType<T extends NonNullable<Notification["__typename"]>> =
   Extract<Notification, { __typename?: T }>;
 
 const MAX_COMMENT_LENGTH = 4_000;
+const MAX_ACTOR_NAME_LENGTH = 100;
+
+/** Strip control characters (newlines, tabs, etc.) that could break the message prefix format. */
+function sanitizeInlineText(text: string): string {
+  return text.replace(/[\x00-\x1f\x7f]/g, " ").trim();
+}
 
 export interface HandleAppUserNotificationInput {
   payload: AppUserNotificationWebhookPayloadWithNotification;
@@ -28,14 +34,14 @@ export async function handleAppUserNotification(
   switch (typename) {
     case "IssueUnassignedFromYouNotificationWebhookPayload":
       await handleIssueUnassigned({
-        notification: notification as NotificationByType<"IssueUnassignedFromYouNotificationWebhookPayload">,
+        notification,
         deps,
         logger,
       });
       return;
     case "IssueNewCommentNotificationWebhookPayload":
       await handleIssueNewComment({
-        notification: notification as NotificationByType<"IssueNewCommentNotificationWebhookPayload">,
+        notification,
         deps,
         logger,
       });
@@ -43,9 +49,7 @@ export async function handleAppUserNotification(
     case "IssueCommentReactionNotificationWebhookPayload":
     case "IssueEmojiReactionNotificationWebhookPayload":
       logReaction({
-        notification: notification as
-          | NotificationByType<"IssueCommentReactionNotificationWebhookPayload">
-          | NotificationByType<"IssueEmojiReactionNotificationWebhookPayload">,
+        notification,
         logger,
       });
       return;
@@ -113,13 +117,19 @@ async function handleIssueNewComment(input: {
     return;
   }
 
-  const actorName = notification.actor?.name ?? "Unknown user";
+  let actorName = sanitizeInlineText(notification.actor?.name ?? "");
+  if (actorName.length > MAX_ACTOR_NAME_LENGTH) {
+    actorName = actorName.slice(0, MAX_ACTOR_NAME_LENGTH) + "\u2026";
+  }
+  if (actorName.length === 0) {
+    actorName = "Unknown user";
+  }
   let commentBody = notification.comment.body ?? "";
   if (commentBody.length > MAX_COMMENT_LENGTH) {
     commentBody = commentBody.slice(0, MAX_COMMENT_LENGTH) + "\u2026";
   }
 
-  if (actorName === "Unknown user") {
+  if (!notification.actor?.name) {
     logger.info("linear_thenvoi_bridge.notification_comment_actor_fallback", {
       issueId: notification.issueId,
       commentId: notification.commentId,

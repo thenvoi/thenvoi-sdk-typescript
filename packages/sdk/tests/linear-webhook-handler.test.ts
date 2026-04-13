@@ -415,6 +415,82 @@ describe("createLinearWebhookHandler", () => {
     expect(dispatcher.dispatch).not.toHaveBeenCalled();
   });
 
+  it("deduplicates notification webhooks with the same notification id", async () => {
+    const store = new MemorySessionRoomStore();
+    const session: SessionRoomRecord = {
+      linearSessionId: "session-dedup",
+      linearIssueId: "issue-dedup",
+      thenvoiRoomId: "room-dedup",
+      status: "active",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await store.upsert(session);
+
+    const thenvoiRest = new LinearThenvoiExampleRestApi();
+    const linearClient = {
+      createAgentActivity: vi.fn(async () => ({ ok: true })),
+    };
+
+    const handler = createLinearWebhookHandler({
+      config,
+      deps: {
+        thenvoiRest,
+        linearClient: linearClient as never,
+        store,
+      },
+    });
+
+    const server = createServer((request, response) => {
+      void handler(request, response);
+    });
+    servers.add(server);
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected TCP server address");
+    }
+    const url = `http://127.0.0.1:${address.port}/linear/webhook`;
+
+    const payload = {
+      type: "AppUserNotification",
+      action: "create",
+      appUserId: "app-user",
+      createdAt: new Date().toISOString(),
+      oauthClientId: "oauth-client",
+      organizationId: "org-1",
+      webhookId: "webhook-1",
+      webhookTimestamp: Date.now(),
+      notification: {
+        __typename: "IssueUnassignedFromYouNotificationWebhookPayload",
+        id: "notif-dedup",
+        issueId: "issue-dedup",
+        actorId: "user-1",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        userId: "app-user",
+        issue: { id: "issue-dedup", title: "Dedup test" },
+      },
+    };
+    const rawBody = JSON.stringify(payload);
+    const headers = {
+      "content-type": "application/json",
+      "linear-signature": sign(config.linearWebhookSecret, rawBody),
+      "linear-timestamp": String(payload.webhookTimestamp),
+    };
+
+    const first = await fetch(url, { method: "POST", headers, body: rawBody });
+    expect(first.status).toBe(200);
+
+    const second = await fetch(url, { method: "POST", headers, body: rawBody });
+    expect(second.status).toBe(200);
+
+    // Only one disengagement message should have been sent
+    expect(thenvoiRest.roomEvents).toHaveLength(1);
+  });
+
   it("returns 200 even when notification handling throws", async () => {
     const store = new MemorySessionRoomStore();
     const linearClient = {
