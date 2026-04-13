@@ -209,6 +209,7 @@ export function createLinearWebhookHandler(
   const dispatcher = options.dispatcher ?? createInlineLinearBridgeDispatcher({ logger });
   const webhookClient = new LinearWebhookClient(options.config.linearWebhookSecret);
   const inFlightEventKeys = new Set<string>();
+  const processedNotificationIds = new Set<string>();
 
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     if (request.method !== "POST") {
@@ -250,11 +251,31 @@ export function createLinearWebhookHandler(
 
     if (rawPayload.type === "AppUserNotification") {
       const notificationPayload = rawPayload as AppUserNotificationWebhookPayloadWithNotification;
+      const notificationId: string | undefined =
+        (notificationPayload.notification as { id?: string } | undefined)?.id;
+
+      if (notificationId && processedNotificationIds.has(notificationId)) {
+        logger.info("linear_thenvoi_bridge.webhook_notification_duplicate_ignored", {
+          notificationId,
+        });
+        sendText(response, 200, "OK");
+        return;
+      }
+
       logger.info("linear_thenvoi_bridge.webhook_notification_received", {
         notificationType: notificationPayload.notification?.__typename ?? null,
+        notificationId: notificationId ?? null,
         appUserId: notificationPayload.appUserId,
         organizationId: notificationPayload.organizationId,
       });
+
+      if (notificationId) {
+        processedNotificationIds.add(notificationId);
+        if (processedNotificationIds.size > 1000) {
+          const oldest = processedNotificationIds.values().next().value;
+          if (oldest) processedNotificationIds.delete(oldest);
+        }
+      }
 
       try {
         await handleAppUserNotification({

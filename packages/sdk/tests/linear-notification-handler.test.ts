@@ -187,7 +187,7 @@ describe("handleAppUserNotification", () => {
         issueId: "issue-2",
         commentId: "comment-1",
         comment: { body: "Please also check the edge case" },
-        actor: { name: "Alice", displayName: "Alice B." },
+        actor: { name: "Alice" },
         actorId: "alice-id",
         id: "notif-3",
         createdAt: new Date().toISOString(),
@@ -203,7 +203,7 @@ describe("handleAppUserNotification", () => {
     expect(deps.thenvoiRest.roomEvents[0]).toEqual(
       expect.objectContaining({
         roomId: "room-for-issue-2",
-        content: "[Linear Comment from Alice B.]: Please also check the edge case",
+        content: "[Linear Comment from Alice]: Please also check the edge case",
         messageType: "text",
         metadata: expect.objectContaining({
           linear_notification_type: "issueNewComment",
