@@ -159,17 +159,11 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
         const sessionId = args.session_id as string;
         const candidates = args.repositories as CandidateRepositoryInput[];
 
-        let response: unknown;
-        try {
-          response = await suggestRepositories(
-            candidates,
-            issueId,
-            { agentSessionId: sessionId },
-          );
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          throw new Error(`linear_suggest_repositories failed: ${message}`);
-        }
+        const response = await suggestRepositories(
+          candidates,
+          issueId,
+          { agentSessionId: sessionId },
+        );
 
         const suggestions = extractRepositorySuggestions(response);
         return { suggestions };
