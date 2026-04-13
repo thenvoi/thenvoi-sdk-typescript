@@ -281,6 +281,40 @@ describe("handleAppUserNotification", () => {
     expect(content).not.toContain("\n");
   });
 
+  it("sanitizes comment body by stripping dangerous control characters but preserving newlines", async () => {
+    const store = new MemorySessionRoomStore();
+    const session = makeActiveSession("issue-sanitize-body");
+    await store.upsert(session);
+
+    const deps = makeDeps(store);
+    const logger = makeLogger();
+
+    await handleAppUserNotification({
+      payload: makeNotificationPayload({
+        __typename: "IssueNewCommentNotificationWebhookPayload",
+        issueId: "issue-sanitize-body",
+        commentId: "comment-sanitize-body",
+        comment: { body: "\x00First line\nSecond line\x07\x0e" },
+        actor: { name: "Alice" },
+        actorId: "alice-id",
+        id: "notif-sanitize-body",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        userId: "app-user-1",
+        issue: { id: "issue-sanitize-body", title: "Test" },
+      }),
+      deps,
+      logger,
+    });
+
+    expect(deps.thenvoiRest.roomEvents).toHaveLength(1);
+    const content = deps.thenvoiRest.roomEvents[0]!.content;
+    expect(content).toBe("[Linear Comment from Alice]: First line\nSecond line");
+    expect(content).not.toContain("\x00");
+    expect(content).not.toContain("\x07");
+    expect(content).toContain("\n");
+  });
+
   it("skips comment forwarding when session is completed", async () => {
     const store = new MemorySessionRoomStore();
     const session: SessionRoomRecord = {

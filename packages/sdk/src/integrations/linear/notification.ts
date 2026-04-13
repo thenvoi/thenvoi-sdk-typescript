@@ -18,6 +18,11 @@ function sanitizeInlineText(text: string): string {
   return text.replace(/[\x00-\x1f\x7f]/g, " ").trim();
 }
 
+/** Strip non-whitespace control characters; preserve newlines and tabs for Markdown content. */
+function sanitizeBodyText(text: string): string {
+  return text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "").trim();
+}
+
 export interface HandleAppUserNotificationInput {
   payload: AppUserNotificationWebhookPayloadWithNotification;
   deps: LinearThenvoiBridgeDeps;
@@ -124,7 +129,7 @@ async function handleIssueNewComment(input: {
   if (actorName.length === 0) {
     actorName = "Unknown user";
   }
-  let commentBody = notification.comment.body ?? "";
+  let commentBody = sanitizeBodyText(notification.comment.body ?? "");
   if (commentBody.length > MAX_COMMENT_LENGTH) {
     commentBody = commentBody.slice(0, MAX_COMMENT_LENGTH) + "\u2026";
   }
