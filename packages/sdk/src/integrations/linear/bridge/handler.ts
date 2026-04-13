@@ -323,6 +323,10 @@ export async function handleAgentSessionEvent(
       action,
     });
   } catch (error) {
+    // Ensure auto-delegate has settled so we don't leave a fire-and-forget side-effect running
+    // after the handler returns an error (the promise already has .catch, so this won't throw).
+    await delegatePromise;
+
     // Report errors back to Linear before re-throwing.
     try {
       await postError(
