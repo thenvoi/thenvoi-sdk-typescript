@@ -151,6 +151,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
             }),
           )
           .min(1)
+          .max(50)
           .describe("Candidate repositories the agent has access to"),
       }),
       handler: async (args: Record<string, unknown>) => {
