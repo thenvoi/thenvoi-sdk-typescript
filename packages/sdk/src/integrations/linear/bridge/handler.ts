@@ -205,7 +205,8 @@ export async function handleAgentSessionEvent(
     });
 
     // Await auto-delegate before building the message so delegate info is up-to-date.
-    const delegateResult = await delegatePromise?.catch(() => ({ set: false, delegateName: null as string | null }));
+    // The promise already has a .catch() at creation that converts errors to { set: false, delegateName: null }.
+    const delegateResult = await delegatePromise;
 
     let issueDelegateId = extractIssueDelegateField(input.payload.agentSession.issue, "id");
     let issueDelegateName: string | null =
@@ -353,9 +354,6 @@ export async function handleAgentSessionEvent(
     }
 
     throw error;
-  } finally {
-    // Ensure the delegate promise is settled even if the handler threw before awaiting it above.
-    await delegatePromise?.catch(() => {});
   }
 }
 
