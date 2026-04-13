@@ -29,7 +29,7 @@ interface NormalizedBridgeConfig {
   roomStrategy: "issue" | "session";
   writebackMode: "final_only" | "activity_stream";
   hostAgentHandle: string | null;
-  thenvoiAppBaseUrl: string | null;
+  thenvoiAppBaseUrl: string;
 }
 
 const DEFAULT_THENVOI_APP_BASE_URL = "https://app.thenvoi.com";
@@ -160,17 +160,18 @@ export async function handleAgentSessionEvent(
       logger,
       runtime,
     });
-    if (action === "created" && config.thenvoiAppBaseUrl) {
+    if (action === "created") {
+      const roomId = roomRecord.thenvoiRoomId;
       externalUrlPromise = trySetSessionExternalUrl({
         linearClient: input.deps.linearClient,
         sessionId,
-        roomId: roomRecord.thenvoiRoomId,
+        roomId,
         appBaseUrl: config.thenvoiAppBaseUrl,
         logger,
       }).catch((urlError) => {
         logger.warn("linear_thenvoi_bridge.set_external_url_failed", {
           sessionId,
-          roomId: roomRecord!.thenvoiRoomId,
+          roomId,
           error: urlError instanceof Error ? urlError.message : String(urlError),
         });
       });
@@ -393,13 +394,14 @@ async function trySetSessionExternalUrl(input: {
   logger: Logger;
 }): Promise<void> {
   if (typeof input.linearClient.agentSessionUpdateExternalUrl !== "function") {
-    input.logger.info("linear_thenvoi_bridge.set_external_url_skipped_no_api", {
+    input.logger.warn("linear_thenvoi_bridge.set_external_url_skipped_no_api", {
       sessionId: input.sessionId,
     });
     return;
   }
 
-  const roomUrl = `${input.appBaseUrl}/rooms/${input.roomId}`;
+  const base = input.appBaseUrl.replace(/\/+$/, "");
+  const roomUrl = `${base}/rooms/${input.roomId}`;
   await input.linearClient.agentSessionUpdateExternalUrl(input.sessionId, {
     externalUrls: [{ label: "View in Thenvoi", url: roomUrl }],
   });
