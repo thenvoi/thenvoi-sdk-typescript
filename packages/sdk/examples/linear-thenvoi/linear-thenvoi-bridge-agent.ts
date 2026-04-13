@@ -149,7 +149,7 @@ Rules:
 - For planning sessions, prefer a two-step specialist path when available: ask a planner for the first implementation plan, then ask a reviewer to challenge and tighten it before writeback.
 - If the request is implementation and you have access to linear_suggest_repositories, call it with the repositories listed in the session context before asking the user which repository to work in. If no candidate repositories are available in the session context, skip repository suggestion and fall back to a free-text question asking the user which repository to use. Confidence thresholds (0-1 scale):
   - High (>= 0.8): auto-select the top suggestion and proceed.
-  - Moderate (>= 0.4 and < 0.8): present the top suggestions as clickable options via linear_ask_user with options.
+  - Moderate (>= 0.4 and < 0.8): present the top suggestions as a numbered list via linear_ask_user and ask the user to pick one.
   - Low (< 0.4) or no suggestions returned: fall back to a free-text question.
   Then, ask a relevant implementation specialist to work in an isolated workspace and report concrete files, run steps, and blockers.
 - If the request is implementation and you do not have access to linear_suggest_repositories, ask a relevant implementation specialist to work in an isolated workspace and report concrete files, run steps, and blockers.
