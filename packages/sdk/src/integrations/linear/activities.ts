@@ -1,5 +1,16 @@
 import { LinearDocument as L } from "@linear/sdk";
 
+export interface CandidateRepositoryInput {
+  hostname: string;
+  repositoryFullName: string;
+}
+
+export interface RepositorySuggestion {
+  repositoryFullName: string;
+  hostname?: string | null;
+  confidence: number;
+}
+
 /**
  * Subset of `LinearClient` covering only the activity-reporting methods.
  */
@@ -17,6 +28,11 @@ export interface LinearActivityClient {
   ) => Promise<unknown>;
   issue?: (issueId: string) => Promise<unknown>;
   workflowStates?: (variables?: Record<string, unknown>) => Promise<unknown>;
+  issueRepositorySuggestions?: (
+    candidateRepositories: CandidateRepositoryInput[],
+    issueId: string,
+    variables?: { agentSessionId?: string | null },
+  ) => Promise<unknown>;
 }
 
 export interface PlanStep {

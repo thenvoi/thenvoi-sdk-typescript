@@ -66,7 +66,7 @@ export interface HandleAgentSessionEventInput {
   deps: LinearThenvoiBridgeDeps;
 }
 
-export type { LinearActivityClient, PlanStep } from "./activities";
+export type { CandidateRepositoryInput, LinearActivityClient, PlanStep, RepositorySuggestion } from "./activities";
 
 export type LinearSessionStatus =
   SessionStatus;

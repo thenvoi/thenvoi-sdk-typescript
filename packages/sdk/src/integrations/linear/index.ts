@@ -35,8 +35,10 @@ export type {
   SessionRoomStore,
   LinearThenvoiBridgeDeps,
   HandleAgentSessionEventInput,
+  CandidateRepositoryInput,
   LinearActivityClient,
   PlanStep,
+  RepositorySuggestion,
   LinearSessionStatus,
 } from "./types";
 export type {

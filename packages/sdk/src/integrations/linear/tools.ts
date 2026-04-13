@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { CustomToolDef } from "../../runtime/tools/customTools";
-import type { LinearActivityClient, PlanStep } from "./activities";
+import type { CandidateRepositoryInput, LinearActivityClient, PlanStep, RepositorySuggestion } from "./activities";
 import {
   postThought,
   postAction,
@@ -131,6 +131,44 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     optionalIssueIdSchema,
     issueCommentLimitSchema,
   });
+
+  if (typeof client.issueRepositorySuggestions === "function") {
+    tools.push({
+      name: "linear_suggest_repositories",
+      description:
+        "Ask Linear to rank candidate repositories by relevance for the current issue. " +
+        "Returns ranked suggestions with confidence scores. Use this before asking the user " +
+        "which repository to work in — if a suggestion has high confidence, auto-select it; " +
+        "otherwise present the top options via the select elicitation signal.",
+      schema: z.object({
+        session_id: z.string().describe("The Linear agent session ID"),
+        issue_id: z.string().describe("The Linear issue ID (UUID)"),
+        repositories: z
+          .array(
+            z.object({
+              hostname: z.string().describe("Hostname of the Git service (e.g. 'github.com')"),
+              repositoryFullName: z.string().describe("Full name in owner/name format (e.g. 'acme/backend')"),
+            }),
+          )
+          .min(1)
+          .describe("Candidate repositories the agent has access to"),
+      }),
+      handler: async (args: Record<string, unknown>) => {
+        const issueId = resolveIssueId("linear_suggest_repositories", args);
+        const sessionId = args.session_id as string;
+        const candidates = args.repositories as CandidateRepositoryInput[];
+
+        const response = await client.issueRepositorySuggestions!(
+          candidates,
+          issueId,
+          { agentSessionId: sessionId },
+        );
+
+        const suggestions = extractRepositorySuggestions(response);
+        return { suggestions };
+      },
+    });
+  }
 
   return tools;
 }
@@ -436,4 +474,20 @@ async function readWorkflowStates(
     .sort((left, right) => (left.position ?? Number.MAX_SAFE_INTEGER) - (right.position ?? Number.MAX_SAFE_INTEGER));
 
   return { team_id: teamId, states };
+}
+
+function extractRepositorySuggestions(response: unknown): RepositorySuggestion[] {
+  const payload = response as {
+    suggestions?: Array<{
+      repositoryFullName?: string | null;
+      hostname?: string | null;
+      confidence?: number | null;
+    }>;
+  } | null;
+
+  return (payload?.suggestions ?? []).map((entry) => ({
+    repositoryFullName: entry.repositoryFullName ?? "",
+    hostname: entry.hostname ?? null,
+    confidence: entry.confidence ?? 0,
+  }));
 }

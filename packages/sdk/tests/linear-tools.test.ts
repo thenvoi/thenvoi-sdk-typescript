@@ -54,7 +54,7 @@ class MemorySessionRoomStore implements SessionRoomStore {
   }
 }
 
-function makeMockClient(): LinearActivityClient {
+function makeMockClient(options?: { withRepoSuggestions?: boolean }): LinearActivityClient {
   return {
     createAgentActivity: vi.fn(async () => ({ ok: true })),
     updateIssue: vi.fn(async () => ({ ok: true })),
@@ -93,6 +93,16 @@ function makeMockClient(): LinearActivityClient {
         ],
       })),
     })),
+    ...(options?.withRepoSuggestions
+      ? {
+        issueRepositorySuggestions: vi.fn(async () => ({
+          suggestions: [
+            { repositoryFullName: "org/frontend-app", hostname: "github.com", confidence: 0.92 },
+            { repositoryFullName: "org/backend-api", hostname: "github.com", confidence: 0.45 },
+          ],
+        })),
+      }
+      : {}),
   };
 }
 
@@ -390,5 +400,77 @@ describe("createLinearTools", () => {
       issueId: TEST_ISSUE_ID,
       body: "Implemented and verified.",
     });
+  });
+
+  it("includes linear_suggest_repositories when client supports issueRepositorySuggestions", () => {
+    const client = makeMockClient({ withRepoSuggestions: true });
+    const tools = createLinearTools({ client });
+    const names = tools.map((tool) => tool.name);
+    expect(names).toContain("linear_suggest_repositories");
+  });
+
+  it("excludes linear_suggest_repositories when client lacks issueRepositorySuggestions", () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client });
+    const names = tools.map((tool) => tool.name);
+    expect(names).not.toContain("linear_suggest_repositories");
+  });
+
+  it("linear_suggest_repositories returns ranked suggestions from the Linear API", async () => {
+    const client = makeMockClient({ withRepoSuggestions: true });
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_suggest_repositories")!;
+
+    const result = await executeCustomTool(tool, {
+      session_id: "sess-1",
+      issue_id: TEST_ISSUE_ID,
+      repositories: [
+        { hostname: "github.com", repositoryFullName: "org/frontend-app" },
+        { hostname: "github.com", repositoryFullName: "org/backend-api" },
+      ],
+    });
+
+    expect(result).toEqual({
+      suggestions: [
+        { repositoryFullName: "org/frontend-app", hostname: "github.com", confidence: 0.92 },
+        { repositoryFullName: "org/backend-api", hostname: "github.com", confidence: 0.45 },
+      ],
+    });
+    expect(client.issueRepositorySuggestions).toHaveBeenCalledWith(
+      [
+        { hostname: "github.com", repositoryFullName: "org/frontend-app" },
+        { hostname: "github.com", repositoryFullName: "org/backend-api" },
+      ],
+      TEST_ISSUE_ID,
+      { agentSessionId: "sess-1" },
+    );
+  });
+
+  it("linear_suggest_repositories rejects non-UUID issue_id", async () => {
+    const client = makeMockClient({ withRepoSuggestions: true });
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_suggest_repositories")!;
+
+    await expect(
+      executeCustomTool(tool, {
+        session_id: "sess-1",
+        issue_id: "SOF-1",
+        repositories: [{ hostname: "github.com", repositoryFullName: "org/repo" }],
+      }),
+    ).rejects.toThrow("requires the exact Linear issue UUID");
+  });
+
+  it("linear_suggest_repositories rejects empty repositories array", async () => {
+    const client = makeMockClient({ withRepoSuggestions: true });
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_suggest_repositories")!;
+
+    await expect(
+      executeCustomTool(tool, {
+        session_id: "sess-1",
+        issue_id: TEST_ISSUE_ID,
+        repositories: [],
+      }),
+    ).rejects.toThrow("Invalid arguments");
   });
 });
