@@ -128,11 +128,14 @@ function makePayload(action: "created" | "updated" | "canceled") {
 
 function makeLinearClient(): HandleAgentSessionEventInput["deps"]["linearClient"] & {
   createAgentActivity: ReturnType<typeof vi.fn>;
+  agentSessionUpdateExternalUrl: ReturnType<typeof vi.fn>;
 } {
   return {
     createAgentActivity: vi.fn(async () => ({ ok: true })),
+    agentSessionUpdateExternalUrl: vi.fn(async () => ({ success: true })),
   } as unknown as HandleAgentSessionEventInput["deps"]["linearClient"] & {
     createAgentActivity: ReturnType<typeof vi.fn>;
+    agentSessionUpdateExternalUrl: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -560,5 +563,101 @@ describe("linear bridge webhook actions", () => {
     await expect(store.listPendingBootstrapRequests()).resolves.toEqual([
       expect.objectContaining({ messageType: "task" }),
     ]);
+  });
+
+  it("sets external URL on Linear session on created event", async () => {
+    const restApi = new LinearThenvoiExampleRestApi();
+    const store = new MemorySessionRoomStore();
+    const linearClient = makeLinearClient();
+
+    await handleAgentSessionEvent({
+      payload: makePayload("created"),
+      config,
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    expect(linearClient.agentSessionUpdateExternalUrl).toHaveBeenCalledWith(
+      "session-1",
+      {
+        externalUrls: [{ label: "View in Thenvoi", url: expect.stringMatching(/^https:\/\/app\.thenvoi\.com\/rooms\//) }],
+      },
+    );
+  });
+
+  it("uses custom thenvoiAppBaseUrl for external URL", async () => {
+    const restApi = new LinearThenvoiExampleRestApi();
+    const store = new MemorySessionRoomStore();
+    const linearClient = makeLinearClient();
+
+    await handleAgentSessionEvent({
+      payload: makePayload("created"),
+      config: { ...config, thenvoiAppBaseUrl: "https://custom.example.com" },
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    expect(linearClient.agentSessionUpdateExternalUrl).toHaveBeenCalledWith(
+      "session-1",
+      {
+        externalUrls: [{ label: "View in Thenvoi", url: expect.stringContaining("https://custom.example.com/rooms/") }],
+      },
+    );
+  });
+
+  it("does not set external URL on updated events", async () => {
+    const restApi = new LinearThenvoiExampleRestApi();
+    const store = new MemorySessionRoomStore();
+    const linearClient = makeLinearClient();
+
+    // Create first to set up the room.
+    await handleAgentSessionEvent({
+      payload: makePayload("created"),
+      config,
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    const updatedClient = makeLinearClient();
+    await handleAgentSessionEvent({
+      payload: makePayload("updated"),
+      config,
+      deps: { thenvoiRest: restApi, linearClient: updatedClient, store },
+    });
+
+    expect(updatedClient.agentSessionUpdateExternalUrl).not.toHaveBeenCalled();
+  });
+
+  it("continues normally when setting external URL fails", async () => {
+    const restApi = new LinearThenvoiExampleRestApi();
+    const store = new MemorySessionRoomStore();
+    const linearClient = makeLinearClient();
+    linearClient.agentSessionUpdateExternalUrl.mockRejectedValueOnce(new Error("API error"));
+
+    await handleAgentSessionEvent({
+      payload: makePayload("created"),
+      config,
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    // Should still forward the message successfully despite external URL failure.
+    expect(restApi.roomEvents).toHaveLength(1);
+    expect(restApi.roomEvents[0]?.metadata).toMatchObject({
+      linear_event_action: "created",
+      linear_session_id: "session-1",
+    });
+  });
+
+  it("skips external URL when agentSessionUpdateExternalUrl is unavailable", async () => {
+    const restApi = new LinearThenvoiExampleRestApi();
+    const store = new MemorySessionRoomStore();
+    const linearClient = makeLinearClient();
+    delete (linearClient as Partial<typeof linearClient>).agentSessionUpdateExternalUrl;
+
+    await handleAgentSessionEvent({
+      payload: makePayload("created"),
+      config,
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    // Should still forward the message successfully.
+    expect(restApi.roomEvents).toHaveLength(1);
   });
 });

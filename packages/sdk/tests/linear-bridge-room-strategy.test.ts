@@ -207,6 +207,7 @@ function makePayload(sessionId: string, issueId: string) {
 function makeLinearClient(): HandleAgentSessionEventInput["deps"]["linearClient"] {
   return {
     createAgentActivity: async () => ({ ok: true }),
+    agentSessionUpdateExternalUrl: async () => ({ success: true }),
   } as unknown as HandleAgentSessionEventInput["deps"]["linearClient"];
 }
 

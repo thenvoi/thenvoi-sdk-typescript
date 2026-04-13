@@ -17,6 +17,10 @@ export interface LinearActivityClient {
   ) => Promise<unknown>;
   issue?: (issueId: string) => Promise<unknown>;
   workflowStates?: (variables?: Record<string, unknown>) => Promise<unknown>;
+  agentSessionUpdateExternalUrl?: (
+    id: string,
+    input: Record<string, unknown>,
+  ) => Promise<unknown>;
 }
 
 export interface PlanStep {
