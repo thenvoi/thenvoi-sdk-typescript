@@ -209,6 +209,9 @@ export function createLinearWebhookHandler(
   const dispatcher = options.dispatcher ?? createInlineLinearBridgeDispatcher({ logger });
   const webhookClient = new LinearWebhookClient(options.config.linearWebhookSecret);
   const inFlightEventKeys = new Set<string>();
+  // Best-effort, process-scoped dedup for notification webhooks. Capped at 1 000 entries with
+  // FIFO eviction and no TTL — a process restart or a retry arriving after eviction will be
+  // reprocessed. This is acceptable because notification handlers are idempotent.
   const processedNotificationIds = new Set<string>();
 
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
@@ -262,13 +265,8 @@ export function createLinearWebhookHandler(
         return;
       }
 
-      logger.info("linear_thenvoi_bridge.webhook_notification_received", {
-        notificationType: notificationPayload.notification?.__typename ?? null,
-        notificationId: notificationId ?? null,
-        appUserId: notificationPayload.appUserId,
-        organizationId: notificationPayload.organizationId,
-      });
-
+      // Mark as processed immediately after the has-check to minimise the race window
+      // when concurrent deliveries of the same notification arrive.
       if (notificationId) {
         processedNotificationIds.add(notificationId);
         if (processedNotificationIds.size > 1000) {
@@ -276,6 +274,13 @@ export function createLinearWebhookHandler(
           if (oldest) processedNotificationIds.delete(oldest);
         }
       }
+
+      logger.info("linear_thenvoi_bridge.webhook_notification_received", {
+        notificationType: notificationPayload.notification?.__typename ?? null,
+        notificationId: notificationId ?? null,
+        appUserId: notificationPayload.appUserId,
+        organizationId: notificationPayload.organizationId,
+      });
 
       try {
         await handleAppUserNotification({
