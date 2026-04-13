@@ -133,6 +133,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
   });
 
   if (typeof client.issueRepositorySuggestions === "function") {
+    const suggestRepositories = client.issueRepositorySuggestions.bind(client);
     tools.push({
       name: "linear_suggest_repositories",
       description:
@@ -142,7 +143,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
         "otherwise present the top options via the select elicitation signal.",
       schema: z.object({
         session_id: z.string().describe("The Linear agent session ID"),
-        issue_id: z.string().describe("The Linear issue ID (UUID)"),
+        issue_id: z.string().uuid().describe("The Linear issue ID (UUID)"),
         repositories: z
           .array(
             z.object({
@@ -158,7 +159,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
         const sessionId = args.session_id as string;
         const candidates = args.repositories as CandidateRepositoryInput[];
 
-        const response = await client.issueRepositorySuggestions!(
+        const response = await suggestRepositories(
           candidates,
           issueId,
           { agentSessionId: sessionId },
@@ -477,17 +478,22 @@ async function readWorkflowStates(
 }
 
 function extractRepositorySuggestions(response: unknown): RepositorySuggestion[] {
-  const payload = response as {
-    suggestions?: Array<{
-      repositoryFullName?: string | null;
-      hostname?: string | null;
-      confidence?: number | null;
-    }>;
-  } | null;
+  if (response == null || typeof response !== "object") {
+    return [];
+  }
 
-  return (payload?.suggestions ?? []).map((entry) => ({
-    repositoryFullName: entry.repositoryFullName ?? "",
-    hostname: entry.hostname ?? null,
-    confidence: entry.confidence ?? 0,
-  }));
+  const payload = response as { suggestions?: unknown };
+  if (!Array.isArray(payload.suggestions)) {
+    return [];
+  }
+
+  return payload.suggestions
+    .filter((entry): entry is Record<string, unknown> =>
+      entry != null && typeof entry === "object" && typeof (entry as Record<string, unknown>).repositoryFullName === "string",
+    )
+    .map((entry) => ({
+      repositoryFullName: entry.repositoryFullName as string,
+      hostname: typeof entry.hostname === "string" ? entry.hostname : null,
+      confidence: typeof entry.confidence === "number" ? entry.confidence : 0,
+    }));
 }

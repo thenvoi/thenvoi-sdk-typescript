@@ -457,7 +457,7 @@ describe("createLinearTools", () => {
         issue_id: "SOF-1",
         repositories: [{ hostname: "github.com", repositoryFullName: "org/repo" }],
       }),
-    ).rejects.toThrow("requires the exact Linear issue UUID");
+    ).rejects.toThrow("Invalid uuid");
   });
 
   it("linear_suggest_repositories rejects empty repositories array", async () => {
@@ -472,5 +472,61 @@ describe("createLinearTools", () => {
         repositories: [],
       }),
     ).rejects.toThrow("Invalid arguments");
+  });
+
+  it("linear_suggest_repositories returns empty array when API returns null", async () => {
+    const client = makeMockClient({ withRepoSuggestions: true });
+    (client.issueRepositorySuggestions as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_suggest_repositories")!;
+
+    const result = await executeCustomTool(tool, {
+      session_id: "sess-1",
+      issue_id: TEST_ISSUE_ID,
+      repositories: [{ hostname: "github.com", repositoryFullName: "org/repo" }],
+    });
+
+    expect(result).toEqual({ suggestions: [] });
+  });
+
+  it("linear_suggest_repositories returns empty array when API response has no suggestions key", async () => {
+    const client = makeMockClient({ withRepoSuggestions: true });
+    (client.issueRepositorySuggestions as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ results: [] });
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_suggest_repositories")!;
+
+    const result = await executeCustomTool(tool, {
+      session_id: "sess-1",
+      issue_id: TEST_ISSUE_ID,
+      repositories: [{ hostname: "github.com", repositoryFullName: "org/repo" }],
+    });
+
+    expect(result).toEqual({ suggestions: [] });
+  });
+
+  it("linear_suggest_repositories skips malformed entries missing repositoryFullName", async () => {
+    const client = makeMockClient({ withRepoSuggestions: true });
+    (client.issueRepositorySuggestions as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      suggestions: [
+        { repositoryFullName: "org/valid", hostname: "github.com", confidence: 0.9 },
+        { hostname: "github.com", confidence: 0.5 },
+        null,
+        { repositoryFullName: 123, hostname: "github.com", confidence: 0.3 },
+      ],
+    });
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_suggest_repositories")!;
+
+    const result = await executeCustomTool(tool, {
+      session_id: "sess-1",
+      issue_id: TEST_ISSUE_ID,
+      repositories: [{ hostname: "github.com", repositoryFullName: "org/repo" }],
+    });
+
+    expect(result).toEqual({
+      suggestions: [
+        { repositoryFullName: "org/valid", hostname: "github.com", confidence: 0.9 },
+      ],
+    });
   });
 });

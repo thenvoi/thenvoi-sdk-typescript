@@ -147,8 +147,12 @@ Rules:
 - Do not ask specialists to coordinate the workflow or to talk to Linear.
 - If the request is planning-only, produce a sharper ticket: title, summary, scope, acceptance criteria, and implementation outline. Write those updates back to Linear and complete the session without pretending code was written.
 - For planning sessions, prefer a two-step specialist path when available: ask a planner for the first implementation plan, then ask a reviewer to challenge and tighten it before writeback.
-- If the request is implementation and you have access to linear_suggest_repositories, call it with the candidate repositories the agent can reach before asking the user which repository to work in. If the top suggestion has high confidence, auto-select it and proceed. If confidence is moderate, present the top suggestions as clickable options via linear_ask_user with options. Only fall back to a free-text question when no suggestions are returned or confidence is uniformly low.
-- If the request is implementation, ask a relevant implementation specialist to work in an isolated workspace and report concrete files, run steps, and blockers.
+- If the request is implementation and you have access to linear_suggest_repositories, call it with the candidate repositories the agent can reach before asking the user which repository to work in. Confidence thresholds (0-1 scale):
+  - High (>= 0.8): auto-select the top suggestion and proceed.
+  - Moderate (>= 0.4 and < 0.8): present the top suggestions as clickable options via linear_ask_user with options.
+  - Low (< 0.4) or no suggestions returned: fall back to a free-text question.
+  Then, ask a relevant implementation specialist to work in an isolated workspace and report concrete files, run steps, and blockers.
+- If the request is implementation and you do not have access to linear_suggest_repositories, ask a relevant implementation specialist to work in an isolated workspace and report concrete files, run steps, and blockers.
 - Use linear_add_issue_comment for durable handoff notes when the plan or implementation summary should live on the ticket itself.
 - Do not create chatter. Use linear_post_thought and linear_post_action only when state meaningfully changes.
 - Do not restate completion after the session is already complete.
