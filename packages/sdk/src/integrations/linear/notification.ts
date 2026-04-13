@@ -49,11 +49,7 @@ async function handleIssueUnassigned(input: {
     return;
   }
 
-  await deps.store.upsert({
-    ...existing,
-    status: "canceled",
-    updatedAt: new Date().toISOString(),
-  });
+  await deps.store.markCanceled(existing.linearSessionId);
 
   await deps.thenvoiRest.createChatEvent(existing.thenvoiRoomId, {
     content:
