@@ -523,6 +523,80 @@ describe("handleAppUserNotification", () => {
     );
   });
 
+  it("skips comment when actorId matches appUserId (self-notification guard)", async () => {
+    const store = new MemorySessionRoomStore();
+    const session = makeActiveSession("issue-self");
+    await store.upsert(session);
+
+    const deps = makeDeps(store);
+    const logger = makeLogger();
+
+    await handleAppUserNotification({
+      payload: makeNotificationPayload({
+        __typename: "IssueNewCommentNotificationWebhookPayload",
+        issueId: "issue-self",
+        commentId: "comment-self",
+        comment: { body: "Bot's own comment" },
+        actor: { name: "Bot" },
+        actorId: "app-user-1",
+        id: "notif-self",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        userId: "app-user-1",
+        issue: { id: "issue-self", title: "Test" },
+      }),
+      deps,
+      logger,
+      appUserId: "app-user-1",
+    });
+
+    expect(deps.thenvoiRest.roomEvents).toHaveLength(0);
+    expect(logger.info).toHaveBeenCalledWith(
+      "linear_thenvoi_bridge.notification_comment_self_skipped",
+      expect.objectContaining({
+        issueId: "issue-self",
+        commentId: "comment-self",
+        actorId: "app-user-1",
+      }),
+    );
+  });
+
+  it("forwards comment when actorId differs from appUserId", async () => {
+    const store = new MemorySessionRoomStore();
+    const session = makeActiveSession("issue-other");
+    await store.upsert(session);
+
+    const deps = makeDeps(store);
+    const logger = makeLogger();
+
+    await handleAppUserNotification({
+      payload: makeNotificationPayload({
+        __typename: "IssueNewCommentNotificationWebhookPayload",
+        issueId: "issue-other",
+        commentId: "comment-other",
+        comment: { body: "Human comment" },
+        actor: { name: "Alice" },
+        actorId: "alice-id",
+        id: "notif-other",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        userId: "app-user-1",
+        issue: { id: "issue-other", title: "Test" },
+      }),
+      deps,
+      logger,
+      appUserId: "app-user-1",
+    });
+
+    expect(deps.thenvoiRest.roomEvents).toHaveLength(1);
+    expect(deps.thenvoiRest.roomEvents[0]).toEqual(
+      expect.objectContaining({
+        roomId: "room-for-issue-other",
+        content: "[Linear Comment from Alice]: Human comment",
+      }),
+    );
+  });
+
   it("gracefully handles OtherNotificationWebhookPayload", async () => {
     const store = new MemorySessionRoomStore();
     const deps = makeDeps(store);

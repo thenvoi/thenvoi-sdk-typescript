@@ -27,12 +27,14 @@ export interface HandleAppUserNotificationInput {
   payload: AppUserNotificationWebhookPayloadWithNotification;
   deps: LinearThenvoiBridgeDeps;
   logger: Logger;
+  /** The Linear app-user id from the webhook envelope; used to skip self-notifications. */
+  appUserId?: string;
 }
 
 export async function handleAppUserNotification(
   input: HandleAppUserNotificationInput,
 ): Promise<void> {
-  const { payload, deps, logger } = input;
+  const { payload, deps, logger, appUserId } = input;
   const notification = payload.notification;
   const typename = notification.__typename;
 
@@ -49,6 +51,7 @@ export async function handleAppUserNotification(
         notification,
         deps,
         logger,
+        appUserId,
       });
       return;
     case "IssueCommentReactionNotificationWebhookPayload":
@@ -110,8 +113,21 @@ async function handleIssueNewComment(input: {
   notification: NotificationByType<"IssueNewCommentNotificationWebhookPayload">;
   deps: LinearThenvoiBridgeDeps;
   logger: Logger;
+  appUserId?: string;
 }): Promise<void> {
-  const { notification, deps, logger } = input;
+  const { notification, deps, logger, appUserId } = input;
+
+  // Skip comments authored by the app user itself to prevent feedback loops
+  // (bot comments → notification → forward to room → bot may comment again).
+  if (appUserId && notification.actorId === appUserId) {
+    logger.info("linear_thenvoi_bridge.notification_comment_self_skipped", {
+      issueId: notification.issueId,
+      commentId: notification.commentId,
+      actorId: notification.actorId,
+    });
+    return;
+  }
+
   // getByIssueId returns the most recent non-canceled session for this issue
   const existing = await deps.store.getByIssueId(notification.issueId);
 

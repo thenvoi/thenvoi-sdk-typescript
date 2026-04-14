@@ -254,11 +254,25 @@ export function createLinearWebhookHandler(
 
     if (rawPayload.type === "AppUserNotification") {
       const notificationPayload = rawPayload as AppUserNotificationWebhookPayloadWithNotification;
+
+      if (!notificationPayload.notification) {
+        logger.warn("linear_thenvoi_bridge.webhook_notification_missing_payload", {
+          appUserId: notificationPayload.appUserId ?? null,
+          organizationId: notificationPayload.organizationId ?? null,
+        });
+        sendText(response, 200, "OK");
+        return;
+      }
+
       // The Linear SDK does not expose `id` on the notification union type yet; extract defensively.
       const notificationId: string | undefined =
         (notificationPayload.notification as { id?: string } | undefined)?.id;
+      const notificationType = notificationPayload.notification.__typename;
+      // Reactions are fire-and-forget (log-only) — don't let them evict actionable entries.
+      const isDedupable = notificationType !== "IssueCommentReactionNotificationWebhookPayload"
+        && notificationType !== "IssueEmojiReactionNotificationWebhookPayload";
 
-      if (notificationId && processedNotificationIds.has(notificationId)) {
+      if (isDedupable && notificationId && processedNotificationIds.has(notificationId)) {
         logger.info("linear_thenvoi_bridge.webhook_notification_duplicate_ignored", {
           notificationId,
         });
@@ -267,7 +281,7 @@ export function createLinearWebhookHandler(
       }
 
       logger.info("linear_thenvoi_bridge.webhook_notification_received", {
-        notificationType: notificationPayload.notification?.__typename ?? null,
+        notificationType: notificationType ?? null,
         notificationId: notificationId ?? null,
         appUserId: notificationPayload.appUserId,
         organizationId: notificationPayload.organizationId,
@@ -278,10 +292,11 @@ export function createLinearWebhookHandler(
           payload: notificationPayload,
           deps: options.deps,
           logger,
+          appUserId: notificationPayload.appUserId,
         });
         // Mark as processed only after the handler succeeds so that a failed notification
         // can be retried by Linear instead of being silently deduped.
-        if (notificationId) {
+        if (isDedupable && notificationId) {
           processedNotificationIds.add(notificationId);
           if (processedNotificationIds.size > 1000) {
             const oldest = processedNotificationIds.values().next().value;
@@ -290,7 +305,7 @@ export function createLinearWebhookHandler(
         }
       } catch (error) {
         logger.error("linear_thenvoi_bridge.webhook_notification_failed", {
-          notificationType: notificationPayload.notification?.__typename ?? null,
+          notificationType: notificationType ?? null,
           error: serializeError(error),
         });
       }
