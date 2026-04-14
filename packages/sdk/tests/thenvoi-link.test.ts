@@ -206,7 +206,7 @@ describe("ThenvoiLink event waiting", () => {
 
     transport.emitDisconnect({
       code: 1000,
-      reason: "Another instance of this agent connected — only one connection per agent_id is allowed",
+      reason: "Another instance of this agent connected -- only one connection per agent_id is allowed",
       rawReason: "duplicate_agent",
     });
 

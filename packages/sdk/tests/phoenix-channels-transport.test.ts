@@ -94,7 +94,7 @@ const phoenixMock = vi.hoisted(() => {
     }
 
     public disconnect(): void {
-      this.closeHandler?.();
+      this.emitClose();
     }
 
     public emitClose(event?: { code?: number; reason?: string }): void {
@@ -228,7 +228,7 @@ describe("PhoenixChannelsTransport", () => {
     socket?.emitClose({ code: 1006 });
 
     expect(disconnectEvents).toHaveLength(1);
-    expect(disconnectEvents[0]?.reason).toBe("Abnormal closure — no close frame received");
+    expect(disconnectEvents[0]?.reason).toBe("Abnormal closure -- no close frame received");
     expect(disconnectEvents[0]?.rawReason).toBeNull();
   });
 

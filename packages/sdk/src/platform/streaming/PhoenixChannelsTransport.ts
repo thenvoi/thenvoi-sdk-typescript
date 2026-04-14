@@ -114,11 +114,12 @@ export class PhoenixChannelsTransport implements StreamingTransport {
   }
 
   public async disconnect(): Promise<void> {
+    this.intentionalDisconnect = true;
+
     for (const topic of this.channels.keys()) {
       await this.leave(topic);
     }
 
-    this.intentionalDisconnect = true;
     this.socket.disconnect();
     this.connected = false;
   }
@@ -163,6 +164,21 @@ export class PhoenixChannelsTransport implements StreamingTransport {
       refs.push([event, ref]);
     }
 
+    // Listen for Phoenix phx_close / phx_error pushed by the server so
+    // channel-level disconnects are visible in logs.  These are intentionally
+    // NOT propagated to the disconnectHandler -- that callback represents a
+    // socket-level disconnect affecting all channels.  Channel-level kicks
+    // (e.g. a single room being closed) are a different concern and are
+    // surfaced only via logging for now.
+    //
+    // Registered before join() so no server-side close can slip through.
+    channel.onClose(() => {
+      this.logger.warn("Channel closed by server", { topic });
+    });
+    channel.onError((reason?: unknown) => {
+      this.logger.warn("Channel error from server", { topic, reason });
+    });
+
     try {
       await new Promise<void>((resolve, reject) => {
         channel
@@ -182,19 +198,6 @@ export class PhoenixChannelsTransport implements StreamingTransport {
       removeSocketChannel(this.socket, channel);
       throw error;
     }
-
-    // Listen for Phoenix phx_close / phx_error pushed by the server so
-    // channel-level disconnects are visible in logs.  These are intentionally
-    // NOT propagated to the disconnectHandler — that callback represents a
-    // socket-level disconnect affecting all channels.  Channel-level kicks
-    // (e.g. a single room being closed) are a different concern and are
-    // surfaced only via logging for now.
-    channel.onClose(() => {
-      this.logger.warn("Channel closed by server", { topic });
-    });
-    channel.onError((reason?: unknown) => {
-      this.logger.warn("Channel error from server", { topic, reason });
-    });
 
     this.channels.set(topic, channel);
     this.channelRefs.set(topic, refs);

@@ -11,5 +11,9 @@ export interface StreamingTransport {
   leave(topic: string): Promise<void>;
   runForever(signal: AbortSignal): Promise<void>;
   isConnected(): boolean;
+  /**
+   * Register a callback for unexpected (non-intentional) disconnects.
+   * Calling this again replaces the previous handler.
+   */
   setDisconnectHandler(handler: DisconnectHandler): void;
 }
