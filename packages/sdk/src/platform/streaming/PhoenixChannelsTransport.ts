@@ -65,7 +65,9 @@ export class PhoenixChannelsTransport implements StreamingTransport {
       this.connected = false;
 
       const info = parseDisconnectReason(event?.code, event?.reason);
-      const level = info.code === 1000 ? "info" : "warn";
+      // Log at "warn" when the server sent an explicit reason (always
+      // actionable) or the close code signals an abnormal closure.
+      const level = info.rawReason || (info.code !== null && info.code !== 1000) ? "warn" : "info";
       this.logger[level](`Phoenix socket disconnected: ${info.reason}`, {
         code: info.code,
         rawReason: info.rawReason,
@@ -75,7 +77,11 @@ export class PhoenixChannelsTransport implements StreamingTransport {
       // no-channels disconnect() below, which can re-enter this handler.
       if (!this.intentionalDisconnect && !this.disconnectNotified) {
         this.disconnectNotified = true;
-        this.disconnectHandler?.(info);
+        try {
+          this.disconnectHandler?.(info);
+        } catch (handlerError) {
+          this.logger.error("Disconnect handler threw", { error: handlerError });
+        }
       }
 
       // If there are no active channels, stop reconnecting — the socket has
@@ -178,13 +184,20 @@ export class PhoenixChannelsTransport implements StreamingTransport {
     // (e.g. a single room being closed) are a different concern and are
     // surfaced only via logging for now.
     //
-    // Registered before join() so no server-side close can slip through.
-    channel.onClose(() => {
-      this.logger.debug("Channel closed by server", { topic });
-    });
-    channel.onError((reason?: unknown) => {
-      this.logger.debug("Channel error from server", { topic, reason });
-    });
+    // Registered via channel.on() (rather than channel.onClose/onError) so
+    // the returned refs are tracked and cleaned up on leave().
+    refs.push([
+      "phx_close",
+      channel.on("phx_close", () => {
+        this.logger.debug("Channel closed by server", { topic });
+      }),
+    ]);
+    refs.push([
+      "phx_error",
+      channel.on("phx_error", () => {
+        this.logger.debug("Channel error from server", { topic });
+      }),
+    ]);
 
     try {
       await new Promise<void>((resolve, reject) => {
