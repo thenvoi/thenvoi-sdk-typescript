@@ -315,6 +315,72 @@ describe("handleAppUserNotification", () => {
     expect(content).toContain("\n");
   });
 
+  it("forwards comment with null body as empty string", async () => {
+    const store = new MemorySessionRoomStore();
+    const session = makeActiveSession("issue-null-body");
+    await store.upsert(session);
+
+    const deps = makeDeps(store);
+    const logger = makeLogger();
+
+    await handleAppUserNotification({
+      payload: makeNotificationPayload({
+        __typename: "IssueNewCommentNotificationWebhookPayload",
+        issueId: "issue-null-body",
+        commentId: "comment-null-body",
+        comment: { body: null },
+        actor: { name: "Alice" },
+        actorId: "alice-id",
+        id: "notif-null-body",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        userId: "app-user-1",
+        issue: { id: "issue-null-body", title: "Test" },
+      }),
+      deps,
+      logger,
+    });
+
+    expect(deps.thenvoiRest.roomEvents).toHaveLength(1);
+    const content = deps.thenvoiRest.roomEvents[0]!.content;
+    expect(content).toBe("[Linear Comment from Alice]: ");
+  });
+
+  it("truncates actor name exceeding 100 characters", async () => {
+    const store = new MemorySessionRoomStore();
+    const session = makeActiveSession("issue-long-name");
+    await store.upsert(session);
+
+    const deps = makeDeps(store);
+    const logger = makeLogger();
+    const longName = "A".repeat(150);
+
+    await handleAppUserNotification({
+      payload: makeNotificationPayload({
+        __typename: "IssueNewCommentNotificationWebhookPayload",
+        issueId: "issue-long-name",
+        commentId: "comment-long-name",
+        comment: { body: "test" },
+        actor: { name: longName },
+        actorId: "alice-id",
+        id: "notif-long-name",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        userId: "app-user-1",
+        issue: { id: "issue-long-name", title: "Test" },
+      }),
+      deps,
+      logger,
+    });
+
+    expect(deps.thenvoiRest.roomEvents).toHaveLength(1);
+    const content = deps.thenvoiRest.roomEvents[0]!.content;
+    const name = content.replace("[Linear Comment from ", "").split("]: ")[0]!;
+    expect(name).toHaveLength(101); // 100 chars + ellipsis
+    expect(name.endsWith("\u2026")).toBe(true);
+    expect(name.startsWith("A".repeat(100))).toBe(true);
+  });
+
   it("skips comment forwarding when session is completed", async () => {
     const store = new MemorySessionRoomStore();
     const session: SessionRoomRecord = {
