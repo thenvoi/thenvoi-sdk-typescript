@@ -3,6 +3,7 @@ export type { AgentCreateOptions } from "./agent/Agent";
 
 export { ThenvoiLink } from "./platform/ThenvoiLink";
 export type { PlatformEvent, ContactEvent } from "./platform/events";
+export type { DisconnectInfo, DisconnectHandler } from "./platform/streaming/disconnect";
 export { PlatformRuntime } from "./runtime/PlatformRuntime";
 export type { PlatformRuntimeOptions } from "./runtime/PlatformRuntime";
 export { AgentRuntime } from "./runtime/rooms/AgentRuntime";

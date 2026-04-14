@@ -6,6 +6,7 @@ import type { RestRequestOptions } from "../client/rest/requestOptions";
 import { fetchPaginated, type PaginationOptions } from "../client/rest/pagination";
 import type { PaginatedResponse, PlatformChatMessage, ThenvoiLinkRestApi } from "../client/rest/types";
 import type { PlatformEvent } from "./events";
+import type { DisconnectHandler } from "./streaming/disconnect";
 import { UnsupportedFeatureError } from "../core/errors";
 import { assertCapability } from "../contracts/capabilities";
 import type { MetadataMap } from "../contracts/dtos";
@@ -31,6 +32,7 @@ export interface ThenvoiLinkOptions {
   transport?: StreamingTransport;
   logger?: Logger;
   capabilities?: Partial<AgentToolsCapabilities>;
+  onDisconnect?: DisconnectHandler;
 }
 
 const DEFAULT_WS_URL = "wss://app.thenvoi.com/api/v1/socket";
@@ -107,6 +109,10 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
         agentId: this.agentId,
         logger: this.logger,
       });
+
+    if (options.onDisconnect && this.transport.setDisconnectHandler) {
+      this.transport.setDisconnectHandler(options.onDisconnect);
+    }
   }
 
   public isConnected(): boolean {

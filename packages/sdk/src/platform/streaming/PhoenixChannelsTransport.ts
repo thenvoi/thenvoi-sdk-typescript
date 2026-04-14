@@ -3,6 +3,7 @@ import { WebSocket as NodeWebSocket } from "ws";
 import { TransportError } from "../../core/errors";
 import type { Logger } from "../../core/logger";
 import { NoopLogger } from "../../core/logger";
+import { parseDisconnectReason, type DisconnectHandler } from "./disconnect";
 import type { StreamingTransport, TopicHandlers } from "./transport";
 
 interface PhoenixChannelsTransportOptions {
@@ -22,6 +23,7 @@ export class PhoenixChannelsTransport implements StreamingTransport {
   private readonly pendingJoins = new Map<string, Promise<void>>();
   private readonly logger: Logger;
   private onHandlerError?: (error: unknown) => void;
+  private disconnectHandler?: DisconnectHandler;
   private connected = false;
   private connectPromise: Promise<void> | null = null;
   private connectResolve: (() => void) | null = null;
@@ -65,10 +67,12 @@ export class PhoenixChannelsTransport implements StreamingTransport {
         this.socket.disconnect();
       }
 
-      this.logger.info("Phoenix socket closed", {
-        code: event?.code ?? null,
-        reason: event?.reason ?? null,
+      const info = parseDisconnectReason(event?.code, event?.reason);
+      this.logger.warn(`Phoenix socket disconnected: ${info.reason}`, {
+        code: info.code,
+        rawReason: info.rawReason,
       });
+      this.disconnectHandler?.(info);
     });
 
     this.socket.onError((event) => {
@@ -171,9 +175,22 @@ export class PhoenixChannelsTransport implements StreamingTransport {
       throw error;
     }
 
+    // Listen for Phoenix phx_close / phx_error pushed by the server so
+    // channel-level disconnects are visible in logs.
+    channel.onClose(() => {
+      this.logger.warn("Channel closed by server", { topic });
+    });
+    channel.onError((reason?: unknown) => {
+      this.logger.warn("Channel error from server", { topic, reason });
+    });
+
     this.channels.set(topic, channel);
     this.channelRefs.set(topic, refs);
     this.logger.debug("Joined topic", { topic });
+  }
+
+  public setDisconnectHandler(handler: DisconnectHandler): void {
+    this.disconnectHandler = handler;
   }
 
   public async leave(topic: string): Promise<void> {
