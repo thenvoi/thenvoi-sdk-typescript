@@ -39,7 +39,6 @@ export class FakeTools implements AgentToolsProtocol {
     this.errorFactory =
       options?.errorFactory ??
       ((method) => new Error(`FakeTools configured failure for ${String(method)}`));
-    this.rest = new FakeRestApi();
   }
 
   public async sendMessage(
@@ -252,14 +251,4 @@ export class FakeRestApi implements RestApi {
     return this.overrides.getNextMessage?.(request, options) ?? null;
   }
 
-  public async getChatContext(
-    request: Parameters<NonNullable<RestApi["getChatContext"]>>[0],
-    options?: Parameters<NonNullable<RestApi["getChatContext"]>>[1],
-  ): Promise<PaginatedResponse<PlatformChatMessage>> {
-    if (this.overrides.getChatContext) {
-      return this.overrides.getChatContext(request, options);
-    }
-
-    return { data: [] };
-  }
 }

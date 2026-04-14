@@ -21,7 +21,7 @@ export interface CreateThenvoiSdkMcpServerOptions {
   additionalTools?: McpToolRegistration[];
 }
 
-interface GetSystemPromptContextResult {
+export interface GetSystemPromptContextResult {
   roomId: string;
   roomTitle: string | null;
   agent: {
@@ -38,6 +38,7 @@ interface GetSystemPromptContextResult {
     isSelf: boolean;
   }>;
   mentionFormat: string;
+  warnings: string[];
   markdown: string;
 }
 
@@ -51,6 +52,10 @@ export interface ThenvoiSdkMcpServer {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- matches SDK's own SdkMcpToolDefinition<any> signature
   toolDefinitions: Array<SdkMcpToolDefinition<any>>;
   getSystemPromptContext(roomId: string, options?: GetSystemPromptContextOptions): Promise<string>;
+  getSystemPromptContextData(
+    roomId: string,
+    options?: GetSystemPromptContextOptions,
+  ): Promise<GetSystemPromptContextResult>;
 }
 
 export function createThenvoiSdkMcpServer(
@@ -67,7 +72,8 @@ export function createThenvoiSdkMcpServer(
 
   const toolDefinitions = registrations.map(toSdkToolDefinition);
   const toolNames = new Set(registrations.map((r) => r.name));
-  const contextCache = new Map<string, { value: string; expiresAt: number }>();
+  const contextCache = new Map<string, { value: GetSystemPromptContextResult; expiresAt: number; lastAccessedAt: number }>();
+  const MAX_CONTEXT_CACHE_ENTRIES = 100;
 
   const serverConfig = createSdkMcpServer({
     name: "thenvoi",
@@ -79,30 +85,58 @@ export function createThenvoiSdkMcpServer(
     allowedTools: mcpToolNames(toolNames),
     toolDefinitions,
     getSystemPromptContext: async (roomId, contextOptions) => {
-      const ttlMs = contextOptions?.ttlMs ?? 30_000;
-      const now = Date.now();
-      const cached = contextCache.get(roomId);
-      if (cached && cached.expiresAt > now) {
-        return cached.value;
-      }
-      // Evict the stale entry so it doesn't accumulate indefinitely.
-      if (cached) {
-        contextCache.delete(roomId);
-      }
-
-      const tools = options.getToolsForRoom(roomId);
-      if (!tools) {
-        throw new Error(`No tool context found for room_id ${roomId}`);
-      }
-
-      const context = await buildSystemPromptContext(roomId, tools);
-      contextCache.set(roomId, {
-        value: context.markdown,
-        expiresAt: now + ttlMs,
-      });
+      const context = await getOrBuildSystemPromptContext(
+        roomId,
+        contextOptions,
+        options.getToolsForRoom,
+        contextCache,
+        MAX_CONTEXT_CACHE_ENTRIES,
+      );
       return context.markdown;
     },
+    getSystemPromptContextData: (roomId, contextOptions) => {
+      return getOrBuildSystemPromptContext(
+        roomId,
+        contextOptions,
+        options.getToolsForRoom,
+        contextCache,
+        MAX_CONTEXT_CACHE_ENTRIES,
+      );
+    },
   };
+}
+
+async function getOrBuildSystemPromptContext(
+  roomId: string,
+  contextOptions: GetSystemPromptContextOptions | undefined,
+  getToolsForRoom: (roomId: string) => AdapterToolsProtocol | undefined,
+  contextCache: Map<string, { value: GetSystemPromptContextResult; expiresAt: number; lastAccessedAt: number }>,
+  maxEntries: number,
+): Promise<GetSystemPromptContextResult> {
+  const ttlMs = contextOptions?.ttlMs ?? 30_000;
+  const now = Date.now();
+  const cached = contextCache.get(roomId);
+  if (cached && cached.expiresAt > now) {
+    cached.lastAccessedAt = now;
+    return cached.value;
+  }
+  if (cached) {
+    contextCache.delete(roomId);
+  }
+
+  const tools = getToolsForRoom(roomId);
+  if (!tools) {
+    return buildUnavailableSystemPromptContext(roomId);
+  }
+
+  const context = await buildSystemPromptContext(roomId, tools);
+  contextCache.set(roomId, {
+    value: context,
+    expiresAt: now + ttlMs,
+    lastAccessedAt: now,
+  });
+  evictLeastRecentlyUsedContext(contextCache, maxEntries);
+  return context;
 }
 
 async function buildSystemPromptContext(
@@ -110,10 +144,17 @@ async function buildSystemPromptContext(
   tools: AdapterToolsProtocol,
 ): Promise<GetSystemPromptContextResult> {
   const participants = await tools.getParticipants();
-  // Resolve agent identity and room title independently; fall back gracefully if either fails
-  // (e.g. REST unavailable) so the caller still gets a usable context block.
-  const agentIdentity = await resolveAgentIdentity(tools).catch(() => null);
-  const roomTitle = await resolveRoomTitle(tools, roomId).catch(() => null);
+  const warnings: string[] = [];
+  const agentResolution = await resolveAgentIdentity(tools);
+  if (agentResolution.warning) {
+    warnings.push(agentResolution.warning);
+  }
+  const roomResolution = await resolveRoomTitle(tools, roomId);
+  if (roomResolution.warning) {
+    warnings.push(roomResolution.warning);
+  }
+  const agentIdentity = agentResolution.value;
+  const roomTitle = roomResolution.value;
   const normalizedParticipants = participants.map((participant) => ({
     id: String(participant.id),
     name: String(participant.name ?? "Unknown"),
@@ -124,6 +165,7 @@ async function buildSystemPromptContext(
   const selfHandle = normalizeHandle(agentIdentity?.handle);
   const selfName = agentIdentity?.name ?? "Agent";
   const mentionHandles = normalizedParticipants
+    .filter((participant) => !participant.isSelf)
     .map((participant) => participant.handle)
     .filter((handle): handle is string => Boolean(handle));
   const mentionFormat = mentionHandles.length > 0 ? mentionHandles.join(", ") : "No participant handles available";
@@ -147,6 +189,7 @@ async function buildSystemPromptContext(
     "",
     "### Mention Format",
     `To address someone, use their exact handle: ${mentionFormat}`,
+    ...(warnings.length > 0 ? ["", "### Warnings", ...warnings.map((warning) => `- ${warning}`)] : []),
   ].join("\n");
 
   return {
@@ -160,11 +203,14 @@ async function buildSystemPromptContext(
     },
     participants: normalizedParticipants,
     mentionFormat,
+    warnings,
     markdown,
   };
 }
 
-async function resolveAgentIdentity(tools: AdapterToolsProtocol): Promise<AgentIdentity | null> {
+async function resolveAgentIdentity(
+  tools: AdapterToolsProtocol,
+): Promise<{ value: AgentIdentity | null; warning: string | null }> {
   // AdapterToolsProtocol doesn't surface agent identity directly. We duck-type two
   // known extension points: a dedicated `getAgentIdentity()` method (future-facing) and
   // `rest.getAgentMe()` which concrete adapters (e.g. FernRestAdapter) expose.
@@ -173,29 +219,118 @@ async function resolveAgentIdentity(tools: AdapterToolsProtocol): Promise<AgentI
     rest?: { getAgentMe?: () => Promise<AgentIdentity> };
   };
 
-  if (maybeTools.getAgentIdentity) {
-    return maybeTools.getAgentIdentity();
+  try {
+    if (maybeTools.getAgentIdentity) {
+      return { value: await maybeTools.getAgentIdentity(), warning: null };
+    }
+
+    if (maybeTools.rest?.getAgentMe) {
+      return { value: await maybeTools.rest.getAgentMe(), warning: null };
+    }
+  } catch (error) {
+    return {
+      value: null,
+      warning: `Unable to resolve agent identity: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
 
-  if (maybeTools.rest?.getAgentMe) {
-    return maybeTools.rest.getAgentMe();
-  }
-
-  return null;
+  return { value: null, warning: null };
 }
 
-async function resolveRoomTitle(tools: AdapterToolsProtocol, roomId: string): Promise<string | null> {
+async function resolveRoomTitle(
+  tools: AdapterToolsProtocol,
+  roomId: string,
+): Promise<{ value: string | null; warning: string | null }> {
   const maybeTools = tools as AdapterToolsProtocol & {
     rest?: {
-      listChats?: (request: { page: number; pageSize: number }) => Promise<{ data?: Array<Record<string, unknown>> }>;
+      listChats?: (request: { page: number; pageSize: number }) => Promise<{ data?: Array<Record<string, unknown>>; metadata?: { totalPages?: number } }>;
     };
   };
 
-  // TODO: replace with a direct getChat(roomId) call once the Fern REST client exposes one.
-  // For now we page the first 100 chats, which covers typical deployments.
-  const response = await maybeTools.rest?.listChats?.({ page: 1, pageSize: 100 });
-  const room = response?.data?.find((entry) => entry.id === roomId);
-  return typeof room?.title === "string" && room.title.length > 0 ? room.title : null;
+  const rest = maybeTools.rest;
+  if (!rest?.listChats) {
+    return { value: null, warning: null };
+  }
+
+  try {
+    let page = 1;
+    const pageSize = 100;
+
+    while (true) {
+      const response = await rest.listChats({ page, pageSize });
+      const room = response?.data?.find((entry) => entry.id === roomId);
+      if (typeof room?.title === "string" && room.title.length > 0) {
+        return { value: room.title, warning: null };
+      }
+
+      const totalPages = response?.metadata?.totalPages ?? page;
+      if (page >= totalPages) {
+        return { value: null, warning: null };
+      }
+
+      page += 1;
+    }
+  } catch (error) {
+    return {
+      value: null,
+      warning: `Unable to resolve room title: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+function buildUnavailableSystemPromptContext(roomId: string): GetSystemPromptContextResult {
+  const warnings = [`No tool context found for room_id ${roomId}`];
+  const markdown = [
+    "## Room Context",
+    "",
+    `You are **Agent** in this room (id: ${roomId}).`,
+    "",
+    "### Participants",
+    "- No participants found",
+    "",
+    "### Mention Format",
+    "No participant handles available",
+    "",
+    "### Warnings",
+    ...warnings.map((warning) => `- ${warning}`),
+  ].join("\n");
+
+  return {
+    roomId,
+    roomTitle: null,
+    agent: {
+      id: "unknown-agent",
+      name: "Agent",
+      handle: null,
+      description: null,
+    },
+    participants: [],
+    mentionFormat: "No participant handles available",
+    warnings,
+    markdown,
+  };
+}
+
+function evictLeastRecentlyUsedContext(
+  contextCache: Map<string, { value: GetSystemPromptContextResult; expiresAt: number; lastAccessedAt: number }>,
+  maxEntries: number,
+): void {
+  if (contextCache.size <= maxEntries) {
+    return;
+  }
+
+  let oldestKey: string | null = null;
+  let oldestAccessedAt = Number.POSITIVE_INFINITY;
+  for (const [key, entry] of contextCache.entries()) {
+    if (entry.lastAccessedAt < oldestAccessedAt) {
+      oldestAccessedAt = entry.lastAccessedAt;
+      oldestKey = key;
+    }
+  }
+
+  if (oldestKey) {
+    contextCache.delete(oldestKey);
+  }
 }
 
 function normalizeHandle(handle: string | null | undefined): string | null {
