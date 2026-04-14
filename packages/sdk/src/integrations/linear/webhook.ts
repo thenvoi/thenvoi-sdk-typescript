@@ -256,19 +256,25 @@ export function createLinearWebhookHandler(
 
     if (parsed.type === "PermissionChange") {
       const permPayload = parsed as unknown as AppUserTeamAccessChangedWebhookPayload;
-      logger.info("linear_thenvoi_bridge.team_access_changed", {
-        action: permPayload.action,
-        addedTeamIds: permPayload.addedTeamIds,
-        removedTeamIds: permPayload.removedTeamIds,
-        canAccessAllPublicTeams: permPayload.canAccessAllPublicTeams,
-        organizationId: permPayload.organizationId,
-      });
+      if (normalizeAction(permPayload.action) === "teamaccesschanged") {
+        logger.info("linear_thenvoi_bridge.team_access_changed", {
+          action: permPayload.action,
+          addedTeamIds: permPayload.addedTeamIds,
+          removedTeamIds: permPayload.removedTeamIds,
+          canAccessAllPublicTeams: permPayload.canAccessAllPublicTeams,
+          organizationId: permPayload.organizationId,
+        });
 
-      try {
-        await options.permissionCallbacks?.onTeamAccessChanged?.(permPayload);
-      } catch (error) {
-        logger.error("linear_thenvoi_bridge.team_access_changed_callback_failed", {
-          error: serializeError(error),
+        try {
+          await options.permissionCallbacks?.onTeamAccessChanged?.(permPayload);
+        } catch (error) {
+          logger.error("linear_thenvoi_bridge.team_access_changed_callback_failed", {
+            error: serializeError(error),
+          });
+        }
+      } else {
+        logger.info("linear_thenvoi_bridge.permission_change_event_ignored", {
+          action: permPayload.action,
         });
       }
 

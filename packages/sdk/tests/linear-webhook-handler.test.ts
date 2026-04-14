@@ -419,6 +419,27 @@ describe("createLinearWebhookHandler", () => {
     expect(onTeamAccessChanged).toHaveBeenCalledOnce();
   });
 
+  it("ignores non-teamAccessChanged PermissionChange events without invoking callback", async () => {
+    const onTeamAccessChanged = vi.fn();
+    const { url } = await startServer(undefined, { onTeamAccessChanged });
+    const payload = { ...makeTeamAccessChangedPayload(), action: "somethingElse" };
+    const rawBody = JSON.stringify(payload);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "linear-signature": sign(config.linearWebhookSecret, rawBody),
+        "linear-timestamp": String(payload.webhookTimestamp),
+      },
+      body: rawBody,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("OK");
+    expect(onTeamAccessChanged).not.toHaveBeenCalled();
+  });
+
   it("processes OAuthApp revoked webhook and invokes onOAuthAppRevoked callback", async () => {
     const onOAuthAppRevoked = vi.fn();
     const { url } = await startServer(undefined, { onOAuthAppRevoked });
