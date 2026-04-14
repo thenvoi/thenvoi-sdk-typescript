@@ -255,8 +255,9 @@ export function createLinearWebhookHandler(
     }
 
     if (parsed.type === "PermissionChange") {
-      const permPayload = parsed as unknown as AppUserTeamAccessChangedWebhookPayload;
-      if (normalizeAction(permPayload.action) === "teamaccesschanged") {
+      const action = (parsed as { action?: string }).action;
+      if (normalizeAction(action) === "teamaccesschanged") {
+        const permPayload = parsed as unknown as AppUserTeamAccessChangedWebhookPayload;
         logger.info("linear_thenvoi_bridge.team_access_changed", {
           action: permPayload.action,
           addedTeamIds: permPayload.addedTeamIds,
@@ -274,7 +275,7 @@ export function createLinearWebhookHandler(
         }
       } else {
         logger.info("linear_thenvoi_bridge.permission_change_event_ignored", {
-          action: permPayload.action,
+          action,
         });
       }
 
