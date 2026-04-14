@@ -25,6 +25,7 @@ export class PhoenixChannelsTransport implements StreamingTransport {
   private onHandlerError?: (error: unknown) => void;
   private disconnectHandler?: DisconnectHandler;
   private connected = false;
+  private intentionalDisconnect = false;
   private connectPromise: Promise<void> | null = null;
   private connectResolve: (() => void) | null = null;
 
@@ -68,11 +69,15 @@ export class PhoenixChannelsTransport implements StreamingTransport {
       }
 
       const info = parseDisconnectReason(event?.code, event?.reason);
-      this.logger.warn(`Phoenix socket disconnected: ${info.reason}`, {
+      const level = info.code === 1000 ? "info" : "warn";
+      this.logger[level](`Phoenix socket disconnected: ${info.reason}`, {
         code: info.code,
         rawReason: info.rawReason,
       });
-      this.disconnectHandler?.(info);
+
+      if (!this.intentionalDisconnect) {
+        this.disconnectHandler?.(info);
+      }
     });
 
     this.socket.onError((event) => {
@@ -111,6 +116,7 @@ export class PhoenixChannelsTransport implements StreamingTransport {
       await this.leave(topic);
     }
 
+    this.intentionalDisconnect = true;
     this.socket.disconnect();
     this.connected = false;
   }
@@ -176,7 +182,11 @@ export class PhoenixChannelsTransport implements StreamingTransport {
     }
 
     // Listen for Phoenix phx_close / phx_error pushed by the server so
-    // channel-level disconnects are visible in logs.
+    // channel-level disconnects are visible in logs.  These are intentionally
+    // NOT propagated to the disconnectHandler — that callback represents a
+    // socket-level disconnect affecting all channels.  Channel-level kicks
+    // (e.g. a single room being closed) are a different concern and are
+    // surfaced only via logging for now.
     channel.onClose(() => {
       this.logger.warn("Channel closed by server", { topic });
     });

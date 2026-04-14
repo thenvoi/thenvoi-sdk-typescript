@@ -8,7 +8,7 @@ describe("parseDisconnectReason", () => {
     expect(info).toEqual<DisconnectInfo>({
       code: 1000,
       reason:
-        "Another instance of this agent connected -- only one connection per agent_id is allowed",
+        "Another instance of this agent connected — only one connection per agent_id is allowed",
       rawReason: "duplicate_agent",
     });
   });
@@ -17,7 +17,7 @@ describe("parseDisconnectReason", () => {
     const info = parseDisconnectReason(1008, "unauthorized");
     expect(info).toEqual<DisconnectInfo>({
       code: 1008,
-      reason: "Connection rejected -- invalid or expired credentials",
+      reason: "Connection rejected — invalid or expired credentials",
       rawReason: "unauthorized",
     });
   });
@@ -62,7 +62,7 @@ describe("parseDisconnectReason", () => {
     const info = parseDisconnectReason(1006, null);
     expect(info).toEqual<DisconnectInfo>({
       code: 1006,
-      reason: "Abnormal closure -- no close frame received",
+      reason: "Abnormal closure — no close frame received",
       rawReason: null,
     });
   });

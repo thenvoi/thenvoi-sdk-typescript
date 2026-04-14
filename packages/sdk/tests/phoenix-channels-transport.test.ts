@@ -228,8 +228,24 @@ describe("PhoenixChannelsTransport", () => {
     socket?.emitClose({ code: 1006 });
 
     expect(disconnectEvents).toHaveLength(1);
-    expect(disconnectEvents[0]?.reason).toBe("Abnormal closure -- no close frame received");
+    expect(disconnectEvents[0]?.reason).toBe("Abnormal closure — no close frame received");
     expect(disconnectEvents[0]?.rawReason).toBeNull();
+  });
+
+  it("does not fire disconnect handler on intentional disconnect", async () => {
+    const disconnectEvents: Array<{ code: number | null; reason: string; rawReason: string | null }> = [];
+    const transport = new PhoenixChannelsTransport({
+      wsUrl: "wss://example.test/socket",
+      apiKey: "key-1",
+    });
+    transport.setDisconnectHandler((info) => {
+      disconnectEvents.push(info);
+    });
+
+    await transport.connect();
+    await transport.disconnect();
+
+    expect(disconnectEvents).toHaveLength(0);
   });
 
   it("fires disconnect handler with generic message when no close info", async () => {

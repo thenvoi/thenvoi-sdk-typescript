@@ -21,7 +21,7 @@ const WS_CLOSE_CODES: Record<number, string> = {
   1002: "Protocol error",
   1003: "Unsupported data",
   1005: "No status received",
-  1006: "Abnormal closure -- no close frame received",
+  1006: "Abnormal closure — no close frame received",
   1007: "Invalid payload data",
   1008: "Policy violation",
   1009: "Message too big",
@@ -34,14 +34,18 @@ const WS_CLOSE_CODES: Record<number, string> = {
 
 // ---------------------------------------------------------------------------
 // Known server-provided reason strings (Phoenix / Thenvoi backend)
+// These must stay in sync with the backend close-reason strings defined in
+// the Thenvoi platform service.  Unknown reasons are displayed verbatim, so
+// adding a new reason on the backend is non-breaking — entries here only
+// provide friendlier messages.
 // ---------------------------------------------------------------------------
 
 const KNOWN_SERVER_REASONS: Record<string, string> = {
   duplicate_agent:
-    "Another instance of this agent connected -- only one connection per agent_id is allowed",
+    "Another instance of this agent connected — only one connection per agent_id is allowed",
   stale_connection: "Connection was replaced by a newer one",
   agent_removed: "Agent was removed from the platform",
-  unauthorized: "Connection rejected -- invalid or expired credentials",
+  unauthorized: "Connection rejected — invalid or expired credentials",
   rate_limited: "Connection closed due to rate limiting",
 };
 
