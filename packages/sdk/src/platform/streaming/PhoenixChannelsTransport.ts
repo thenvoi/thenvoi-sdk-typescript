@@ -90,6 +90,8 @@ export class PhoenixChannelsTransport implements StreamingTransport {
       return;
     }
 
+    this.intentionalDisconnect = false;
+
     if (!this.connectPromise) {
       this.socket.connect();
       const pending = this.waitForConnection();

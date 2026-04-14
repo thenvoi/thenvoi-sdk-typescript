@@ -11,5 +11,5 @@ export interface StreamingTransport {
   leave(topic: string): Promise<void>;
   runForever(signal: AbortSignal): Promise<void>;
   isConnected(): boolean;
-  setDisconnectHandler?(handler: DisconnectHandler): void;
+  setDisconnectHandler(handler: DisconnectHandler): void;
 }
