@@ -4,11 +4,14 @@ import { ThenvoiClient } from "@thenvoi/rest-client";
 
 export function createA2AGatewayAgent(
   options?: { port?: number; gatewayUrl?: string; authToken?: string },
-  overrides?: { agentId?: string; apiKey?: string },
+  overrides?: { agentId?: string; apiKey?: string; wsUrl?: string; restUrl?: string },
 ): Agent {
   const thenvoiApiKey = overrides?.apiKey ?? "api-key";
   const restApi = new FernRestAdapter(
-    new ThenvoiClient({ apiKey: thenvoiApiKey }),
+    new ThenvoiClient({
+      apiKey: thenvoiApiKey,
+      ...(overrides?.restUrl ? { baseUrl: overrides.restUrl } : {}),
+    }),
   );
 
   const adapter = new A2AGatewayAdapter({
@@ -23,8 +26,11 @@ export function createA2AGatewayAgent(
     config: {
       agentId: overrides?.agentId ?? "agent-a2a-gateway",
       apiKey: thenvoiApiKey,
+      ...(overrides?.wsUrl ? { wsUrl: overrides.wsUrl } : {}),
+      ...(overrides?.restUrl ? { restUrl: overrides.restUrl } : {}),
     },
     linkOptions: { restApi },
+    agentConfig: { autoSubscribeExistingRooms: true },
   });
 }
 
