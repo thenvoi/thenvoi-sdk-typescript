@@ -40,14 +40,22 @@ export interface PlanStep {
   status: "pending" | "in_progress" | "completed" | "failed";
 }
 
+export interface SelectOption {
+  label: string;
+  value: string;
+}
+
 async function postActivity(
   client: LinearActivityClient,
   sessionId: string,
   content: Record<string, unknown>,
+  options?: { signal?: string; signalMetadata?: Record<string, unknown> },
 ): Promise<void> {
   await client.createAgentActivity({
     agentSessionId: sessionId,
     content,
+    ...(options?.signal ? { signal: options.signal } : {}),
+    ...(options?.signalMetadata ? { signalMetadata: options.signalMetadata } : {}),
   });
 }
 
@@ -90,6 +98,20 @@ export async function postElicitation(
   body: string,
 ): Promise<void> {
   await postBodyActivity(client, sessionId, L.AgentActivityType.Elicitation, body);
+}
+
+export async function postSelectElicitation(
+  client: LinearActivityClient,
+  sessionId: string,
+  body: string,
+  selectOptions: SelectOption[],
+): Promise<void> {
+  await postActivity(
+    client,
+    sessionId,
+    { type: L.AgentActivityType.Elicitation, body },
+    { signal: L.AgentActivitySignal.Select, signalMetadata: { options: selectOptions } },
+  );
 }
 
 export async function postAction(

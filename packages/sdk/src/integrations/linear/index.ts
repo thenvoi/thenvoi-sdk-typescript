@@ -17,6 +17,7 @@ export {
   postError,
   postResponse,
   postElicitation,
+  postSelectElicitation,
   updatePlan,
 } from "./activities";
 export { createLinearTools } from "./tools";
@@ -39,6 +40,7 @@ export type {
   LinearActivityClient,
   PlanStep,
   RepositorySuggestion,
+  SelectOption,
   LinearSessionStatus,
 } from "./types";
 export type {

@@ -109,7 +109,7 @@ function makeMockClient(options?: { withRepoSuggestions?: boolean }): LinearActi
 describe("createLinearTools", () => {
   it("returns the canonical v1 linear tool contract", () => {
     const tools = createLinearTools({ client: makeMockClient() });
-    expect(tools).toHaveLength(11);
+    expect(tools).toHaveLength(12);
 
     const names = tools.map((tool) => tool.name).sort();
     expect(names).toEqual([
@@ -122,6 +122,7 @@ describe("createLinearTools", () => {
       "linear_post_error",
       "linear_post_response",
       "linear_post_thought",
+      "linear_select",
       "linear_update_issue",
       "linear_update_plan",
     ]);
@@ -183,6 +184,56 @@ describe("createLinearTools", () => {
       agentSessionId: "sess-1",
       content: { type: "elicitation", body: "Which approach do you prefer?" },
     });
+  });
+
+  it("linear_select posts an elicitation with select signal and options", async () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_select")!;
+
+    const result = await executeCustomTool(tool, {
+      session_id: "sess-1",
+      body: "Which repository should I work in?",
+      options: [
+        { label: "org/frontend-app", value: "org/frontend-app" },
+        { label: "org/backend-api", value: "org/backend-api" },
+      ],
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(client.createAgentActivity).toHaveBeenCalledWith({
+      agentSessionId: "sess-1",
+      content: { type: "elicitation", body: "Which repository should I work in?" },
+      signal: "select",
+      signalMetadata: {
+        options: [
+          { label: "org/frontend-app", value: "org/frontend-app" },
+          { label: "org/backend-api", value: "org/backend-api" },
+        ],
+      },
+    });
+  });
+
+  it("linear_select is excluded when elicitation is disabled", () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client, enableElicitation: false });
+    const names = tools.map((tool) => tool.name);
+    expect(names).not.toContain("linear_select");
+    expect(names).not.toContain("linear_ask_user");
+  });
+
+  it("linear_select rejects empty options array", async () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_select")!;
+
+    await expect(
+      executeCustomTool(tool, {
+        session_id: "sess-1",
+        body: "Pick one",
+        options: [],
+      }),
+    ).rejects.toThrow("Invalid arguments");
   });
 
   it("linear_post_response posts the final response and marks the session completed", async () => {

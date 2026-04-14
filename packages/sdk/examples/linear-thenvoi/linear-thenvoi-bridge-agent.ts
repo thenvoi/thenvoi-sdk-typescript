@@ -130,6 +130,7 @@ Rules:
   - linear_post_error for failures
   - linear_post_response for the final answer and session completion
   - linear_update_plan when you have a step list worth showing
+  - linear_select to present the user with clickable options (when elicitation is enabled)
 - Start alone, but inspect available peers before deciding whether the bridge should handle the work itself.
 - Only use thenvoi_lookup_peers when the room does not already contain a clearly relevant collaborator or when you need to replace/expand the current set of specialists. Choose collaborators based on the actual request and the visible peer identity you observe, not from a fixed handoff graph.
 - If you choose a specialist who is not already present, add them to the room before you ask for work.
@@ -149,8 +150,8 @@ Rules:
 - For planning sessions, prefer a two-step specialist path when available: ask a planner for the first implementation plan, then ask a reviewer to challenge and tighten it before writeback.
 - If the request is implementation and you have access to linear_suggest_repositories, call it with the repositories listed in the session context before asking the user which repository to work in. If no candidate repositories are available in the session context, skip repository suggestion and fall back to a free-text question asking the user which repository to use. Confidence thresholds (0-1 scale):
   - High (>= 0.8): auto-select the top suggestion and proceed.
-  - Moderate (>= 0.4 and < 0.8): present the top suggestions as a numbered list via linear_ask_user and ask the user to pick one.
-  - Low (< 0.4) or no suggestions returned: fall back to a free-text question.
+  - Moderate (>= 0.4 and < 0.8): present the top suggestions as clickable options via linear_select. Set the body to a short prompt like "Which repository should I work in?" and map each suggestion to an option with the repository full name as both label and value.
+  - Low (< 0.4) or no suggestions returned: fall back to a free-text question via linear_ask_user.
   Then, ask a relevant implementation specialist to work in an isolated workspace and report concrete files, run steps, and blockers.
 - If the request is implementation and you do not have access to linear_suggest_repositories, ask a relevant implementation specialist to work in an isolated workspace and report concrete files, run steps, and blockers.
 - Use linear_add_issue_comment for durable handoff notes when the plan or implementation summary should live on the ticket itself.

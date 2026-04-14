@@ -1,12 +1,13 @@
 import { z } from "zod";
 
 import type { CustomToolDef } from "../../runtime/tools/customTools";
-import type { CandidateRepositoryInput, LinearActivityClient, PlanStep, RepositorySuggestion } from "./activities";
+import type { CandidateRepositoryInput, LinearActivityClient, PlanStep, RepositorySuggestion, SelectOption } from "./activities";
 import {
   postThought,
   postAction,
   postError,
   postElicitation,
+  postSelectElicitation,
   updatePlan,
 } from "./activities";
 import { completeLinearSession } from "./bridge";
@@ -86,6 +87,36 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
         return { ok: true };
       },
     );
+
+    tools.push({
+      name: "linear_select",
+      description:
+        "Present the Linear user with a set of clickable options via a select elicitation. " +
+        "Use this instead of linear_ask_user when the user should pick from a known list of choices.",
+      schema: z.object({
+        session_id: z.string().describe("The Linear agent session ID"),
+        body: z.string().describe("The question or prompt shown above the options (Markdown)"),
+        options: z
+          .array(
+            z.object({
+              label: z.string().describe("Display label for this option"),
+              value: z.string().describe("Value returned when this option is selected"),
+            }),
+          )
+          .min(1)
+          .max(25)
+          .describe("The selectable options"),
+      }),
+      handler: async (args: Record<string, unknown>) => {
+        await postSelectElicitation(
+          client,
+          args.session_id as string,
+          args.body as string,
+          args.options as SelectOption[],
+        );
+        return { ok: true };
+      },
+    });
   }
 
   addSessionBodyTool(
