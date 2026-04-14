@@ -74,9 +74,10 @@ async function handleIssueUnassigned(input: {
   // getByIssueId filters out canceled sessions, so retried notifications are naturally idempotent
   const existing = await deps.store.getByIssueId(notification.issueId);
 
-  if (!existing) {
+  if (!existing || (existing.status !== "active" && existing.status !== "waiting")) {
     logger.info("linear_thenvoi_bridge.notification_unassigned_no_session", {
       issueId: notification.issueId,
+      reason: existing ? `session_status_${existing.status}` : "no_active_session",
     });
     return;
   }

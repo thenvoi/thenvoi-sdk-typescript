@@ -173,6 +173,42 @@ describe("handleAppUserNotification", () => {
     );
   });
 
+  it("skips unassignment when session is already completed", async () => {
+    const store = new MemorySessionRoomStore();
+    const session: SessionRoomRecord = {
+      ...makeActiveSession("issue-completed"),
+      status: "completed",
+    };
+    await store.upsert(session);
+
+    const deps = makeDeps(store);
+    const logger = makeLogger();
+
+    await handleAppUserNotification({
+      payload: makeNotificationPayload({
+        __typename: "IssueUnassignedFromYouNotificationWebhookPayload",
+        issueId: "issue-completed",
+        actorId: "user-1",
+        id: "notif-completed",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        userId: "app-user-1",
+        issue: { id: "issue-completed", title: "Completed issue" },
+      }),
+      deps,
+      logger,
+    });
+
+    expect(deps.thenvoiRest.roomEvents).toHaveLength(0);
+    expect(logger.info).toHaveBeenCalledWith(
+      "linear_thenvoi_bridge.notification_unassigned_no_session",
+      expect.objectContaining({
+        issueId: "issue-completed",
+        reason: "session_status_completed",
+      }),
+    );
+  });
+
   it("forwards new comment to active session room", async () => {
     const store = new MemorySessionRoomStore();
     const session = makeActiveSession("issue-2");
