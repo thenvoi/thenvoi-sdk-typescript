@@ -13,6 +13,7 @@ import type {
 } from "../types";
 import { dedupeHandles, stripHandlePrefix } from "../handles";
 import { postThought, postError } from "../activities";
+import { sendRecoveryActivityIfStale } from "../stale-session-guard";
 import {
   buildBridgeMessage,
   detectSessionIntent,
@@ -124,10 +125,23 @@ export async function handleAgentSessionEvent(
     return;
   }
 
+  // If the session already exists and may have gone stale, send a recovery
+  // activity before the main update so Linear reactivates the session.
+  if (action === "updated" && existingBySession) {
+    await sendRecoveryActivityIfStale({
+      session: existingBySession,
+      linearClient: input.deps.linearClient,
+      store: input.deps.store,
+      logger,
+    });
+  }
+
   // Acknowledge receipt to Linear before room resolution (created only).
+  let lastLinearActivityAt: string | null = null;
   if (action === "created" && !options?.skipAcknowledgment) {
     try {
       await postThought(input.deps.linearClient, sessionId, "Received session. Setting up workspace...");
+      lastLinearActivityAt = new Date().toISOString();
     } catch (ackError) {
       logger.warn("linear_thenvoi_bridge.acknowledgment_failed", {
         sessionId,
@@ -271,11 +285,13 @@ export async function handleAgentSessionEvent(
       });
     }
 
+    const now = new Date().toISOString();
     await saveSessionRecord(input.deps.store, {
       ...roomRecord,
       status: "active",
       lastEventKey: eventKey,
-      updatedAt: new Date().toISOString(),
+      lastLinearActivityAt: lastLinearActivityAt ?? roomRecord.lastLinearActivityAt ?? now,
+      updatedAt: now,
     });
 
     logger.info("linear_thenvoi_bridge.message_forwarded", {
@@ -351,11 +367,13 @@ export async function completeLinearSession(input: {
     return;
   }
 
+  const now = new Date().toISOString();
   await saveSessionRecord(input.store, {
     ...existing,
     status: "completed",
     lastEventKey: input.lastEventKey ?? existing.lastEventKey ?? null,
-    updatedAt: new Date().toISOString(),
+    lastLinearActivityAt: now,
+    updatedAt: now,
   });
 }
 
@@ -499,6 +517,14 @@ async function handlePromptedAction(input: {
     });
     return;
   }
+
+  // Send a recovery activity if the session may have gone stale while waiting.
+  await sendRecoveryActivityIfStale({
+    session: existing,
+    linearClient: input.deps.linearClient,
+    store: input.deps.store,
+    logger: input.logger,
+  });
 
   const message = `[Linear User Response]: ${userResponse}`;
   const metadata = {
