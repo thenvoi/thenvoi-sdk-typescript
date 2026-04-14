@@ -18,6 +18,8 @@ export interface LinearActivityClient {
   createAgentActivity(input: {
     agentSessionId: string;
     content: Record<string, unknown>;
+    signal?: string;
+    signalMetadata?: Record<string, unknown>;
   }): Promise<unknown>;
   updateIssue?: (
     issueId: string,
