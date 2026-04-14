@@ -25,6 +25,7 @@ export type {
   LinearBridgeDispatchJob,
   LinearBridgeDispatcher,
   HandleAgentSessionEventInput,
+  PermissionChangeCallbacks,
   LinearActivityClient,
   LinearBridgeRuntime,
   LinearSessionStatus,

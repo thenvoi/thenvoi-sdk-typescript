@@ -43,5 +43,6 @@ export type {
   CreateLinearWebhookHandlerOptions,
   LinearBridgeDispatchJob,
   LinearBridgeDispatcher,
+  PermissionChangeCallbacks,
 } from "./webhook";
 export { DEFAULT_STATUS_MAPPING } from "./constants";
