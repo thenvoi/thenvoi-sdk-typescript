@@ -14,6 +14,7 @@ export interface StreamingTransport {
   /**
    * Register a callback for unexpected (non-intentional) disconnects.
    * Calling this again replaces the previous handler.
+   * Optional — transports that don't support disconnect notification can omit this.
    */
-  setDisconnectHandler(handler: DisconnectHandler): void;
+  setDisconnectHandler?(handler: DisconnectHandler): void;
 }

@@ -26,6 +26,7 @@ export class PhoenixChannelsTransport implements StreamingTransport {
   private disconnectHandler?: DisconnectHandler;
   private connected = false;
   private intentionalDisconnect = false;
+  private disconnectNotified = false;
   private connectPromise: Promise<void> | null = null;
   private connectResolve: (() => void) | null = null;
 
@@ -52,6 +53,7 @@ export class PhoenixChannelsTransport implements StreamingTransport {
 
     this.socket.onOpen(() => {
       this.connected = true;
+      this.disconnectNotified = false;
       this.connectResolve?.();
       this.connectResolve = null;
       this.logger.info("Phoenix socket opened", {
@@ -62,12 +64,6 @@ export class PhoenixChannelsTransport implements StreamingTransport {
     this.socket.onClose((event?: { code?: number; reason?: string }) => {
       this.connected = false;
 
-      // If there are no active channels, stop reconnecting — the socket has
-      // nothing to rejoin and would just churn connections.
-      if (getSocketChannelCount(this.socket) === 0) {
-        this.socket.disconnect();
-      }
-
       const info = parseDisconnectReason(event?.code, event?.reason);
       const level = info.code === 1000 ? "info" : "warn";
       this.logger[level](`Phoenix socket disconnected: ${info.reason}`, {
@@ -75,8 +71,17 @@ export class PhoenixChannelsTransport implements StreamingTransport {
         rawReason: info.rawReason,
       });
 
-      if (!this.intentionalDisconnect) {
+      // Notify once per logical disconnect.  The guard must run before the
+      // no-channels disconnect() below, which can re-enter this handler.
+      if (!this.intentionalDisconnect && !this.disconnectNotified) {
+        this.disconnectNotified = true;
         this.disconnectHandler?.(info);
+      }
+
+      // If there are no active channels, stop reconnecting — the socket has
+      // nothing to rejoin and would just churn connections.
+      if (getSocketChannelCount(this.socket) === 0) {
+        this.socket.disconnect();
       }
     });
 
@@ -116,12 +121,14 @@ export class PhoenixChannelsTransport implements StreamingTransport {
   public async disconnect(): Promise<void> {
     this.intentionalDisconnect = true;
 
-    for (const topic of this.channels.keys()) {
-      await this.leave(topic);
+    try {
+      for (const topic of this.channels.keys()) {
+        await this.leave(topic);
+      }
+    } finally {
+      this.socket.disconnect();
+      this.connected = false;
     }
-
-    this.socket.disconnect();
-    this.connected = false;
   }
 
   public isConnected(): boolean {
@@ -173,10 +180,10 @@ export class PhoenixChannelsTransport implements StreamingTransport {
     //
     // Registered before join() so no server-side close can slip through.
     channel.onClose(() => {
-      this.logger.warn("Channel closed by server", { topic });
+      this.logger.debug("Channel closed by server", { topic });
     });
     channel.onError((reason?: unknown) => {
-      this.logger.warn("Channel error from server", { topic, reason });
+      this.logger.debug("Channel error from server", { topic, reason });
     });
 
     try {

@@ -248,6 +248,54 @@ describe("PhoenixChannelsTransport", () => {
     expect(disconnectEvents).toHaveLength(0);
   });
 
+  it("fires disconnect handler only once across repeated close events", async () => {
+    const disconnectEvents: Array<{ code: number | null; reason: string; rawReason: string | null }> = [];
+    const transport = new PhoenixChannelsTransport({
+      wsUrl: "wss://example.test/socket",
+      apiKey: "key-1",
+    });
+    transport.setDisconnectHandler((info) => {
+      disconnectEvents.push(info);
+    });
+
+    await transport.connect();
+
+    const socket = phoenixMock.FakeSocket.instances[0];
+    socket?.emitClose({ code: 1006 });
+    socket?.emitClose({ code: 1006 });
+    socket?.emitClose({ code: 1006 });
+
+    expect(disconnectEvents).toHaveLength(1);
+    expect(disconnectEvents[0]?.reason).toBe("Abnormal closure -- no close frame received");
+  });
+
+  it("fires disconnect handler again after reconnect", async () => {
+    const disconnectEvents: Array<{ code: number | null; reason: string; rawReason: string | null }> = [];
+    const transport = new PhoenixChannelsTransport({
+      wsUrl: "wss://example.test/socket",
+      apiKey: "key-1",
+    });
+    transport.setDisconnectHandler((info) => {
+      disconnectEvents.push(info);
+    });
+
+    await transport.connect();
+
+    const socket = phoenixMock.FakeSocket.instances[0];
+    // First disconnect cycle — multiple close events, only one notification
+    socket?.emitClose({ code: 1006 });
+    socket?.emitClose({ code: 1006 });
+    expect(disconnectEvents).toHaveLength(1);
+
+    // Reconnect resets the notification flag
+    await transport.connect();
+
+    // Second disconnect cycle — fires once more
+    socket?.emitClose({ code: 1001 });
+    expect(disconnectEvents).toHaveLength(2);
+    expect(disconnectEvents[1]?.reason).toBe("Server going away");
+  });
+
   it("fires disconnect handler with generic message when no close info", async () => {
     const disconnectEvents: Array<{ code: number | null; reason: string; rawReason: string | null }> = [];
     const transport = new PhoenixChannelsTransport({

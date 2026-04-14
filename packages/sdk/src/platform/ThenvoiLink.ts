@@ -111,7 +111,7 @@ export class ThenvoiLink implements AsyncIterable<PlatformEvent> {
       });
 
     if (options.onDisconnect) {
-      this.transport.setDisconnectHandler(options.onDisconnect);
+      this.transport.setDisconnectHandler?.(options.onDisconnect);
     }
   }
 
