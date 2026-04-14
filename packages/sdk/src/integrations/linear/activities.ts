@@ -18,7 +18,7 @@ export interface LinearActivityClient {
   createAgentActivity(input: {
     agentSessionId: string;
     content: Record<string, unknown>;
-    signal?: string;
+    signal?: L.AgentActivitySignal | null;
     signalMetadata?: Record<string, unknown>;
   }): Promise<unknown>;
   updateIssue?: (
@@ -51,7 +51,7 @@ async function postActivity(
   client: LinearActivityClient,
   sessionId: string,
   content: Record<string, unknown>,
-  options?: { signal?: string; signalMetadata?: Record<string, unknown> },
+  options?: { signal?: L.AgentActivitySignal | null; signalMetadata?: Record<string, unknown> },
 ): Promise<void> {
   await client.createAgentActivity({
     agentSessionId: sessionId,
