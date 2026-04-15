@@ -45,8 +45,10 @@ export type {
   LinearThenvoiBridgeDeps,
   HandleAgentSessionEventInput,
   HandleAppUserNotificationInput,
+  CandidateRepositoryInput,
   LinearActivityClient,
   PlanStep,
+  RepositorySuggestion,
   SelectOption,
   LinearSessionStatus,
 } from "./types";
