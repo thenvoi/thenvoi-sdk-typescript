@@ -606,17 +606,17 @@ function addSessionCreationTools(input: {
   const { tools, client, store } = input;
 
   const sessionCreationSchema = z.object({
-    issue_id: z.string().describe("The Linear issue ID (UUID)"),
+    issue_id: z.string().uuid().describe("The Linear issue ID (UUID)"),
     external_link: z.string().url().optional().describe("Optional URL of an external page associated with this session"),
     room_id: z.string().optional().describe("The Thenvoi room ID to persist the session-room mapping. Pass this when creating a session from within a Thenvoi conversation."),
   });
 
   async function persistSessionRoom(
-    sessionId: string | null,
+    sessionId: string,
     issueId: string | null,
     roomId: string | undefined,
   ): Promise<void> {
-    if (!store || !sessionId || typeof roomId !== "string") return;
+    if (!store || typeof roomId !== "string") return;
     const now = new Date().toISOString();
     await store.upsert({
       linearSessionId: sessionId,
@@ -637,7 +637,6 @@ function addSessionCreationTools(input: {
       schema: sessionCreationSchema,
       handler: async (args: Record<string, unknown>) => {
         const issueId = args.issue_id as string;
-        assertUuid("linear_create_session_on_issue", issueId);
         const result = await createOnIssue({
           issueId,
           ...(typeof args.external_link === "string" ? { externalLink: args.external_link } : {}),
@@ -656,13 +655,12 @@ function addSessionCreationTools(input: {
       description:
         "Create a new Linear agent session on a specific comment thread. Use this to attach agent work to an existing discussion on a Linear issue.",
       schema: z.object({
-        comment_id: z.string().describe("The Linear comment ID (UUID)"),
+        comment_id: z.string().uuid().describe("The Linear comment ID (UUID)"),
         external_link: z.string().url().optional().describe("Optional URL of an external page associated with this session"),
         room_id: z.string().optional().describe("The Thenvoi room ID to persist the session-room mapping. Pass this when creating a session from within a Thenvoi conversation."),
       }),
       handler: async (args: Record<string, unknown>) => {
         const commentId = args.comment_id as string;
-        assertUuid("linear_create_session_on_comment", commentId);
         const result = await createOnComment({
           commentId,
           ...(typeof args.external_link === "string" ? { externalLink: args.external_link } : {}),
@@ -681,7 +679,7 @@ function addSessionCreationTools(input: {
       description:
         "Create a new Linear issue from scratch. Use this when the Thenvoi conversation produces work that should be tracked as a new Linear issue. Never create issues without explicit human intent or clear delegation.",
       schema: z.object({
-        team_id: z.string().describe("The Linear team ID to create the issue in"),
+        team_id: z.string().uuid().describe("The Linear team ID to create the issue in"),
         title: z.string().min(1).describe("Issue title"),
         description: z.string().optional().describe("Issue description in Markdown"),
         priority: z.number().int().min(0).max(4).optional().describe("Priority 0-4 (0=none, 1=urgent, 2=high, 3=normal, 4=low)"),
@@ -708,7 +706,7 @@ function addSessionCreationTools(input: {
 }
 
 function extractCreatedSession(result: unknown): {
-  id: string | null;
+  id: string;
   issueId: string | null;
   status: string | null;
 } {
@@ -717,15 +715,20 @@ function extractCreatedSession(result: unknown): {
     ? payload.agentSession as Record<string, unknown>
     : payload;
 
+  const id = typeof session.id === "string" ? session.id : null;
+  if (!id) {
+    throw new Error("Linear API returned a session without an ID.");
+  }
+
   return {
-    id: typeof session.id === "string" ? session.id : null,
+    id,
     issueId: typeof session.issueId === "string" ? session.issueId : null,
     status: typeof session.status === "string" ? session.status : null,
   };
 }
 
 function extractCreatedIssue(result: unknown): {
-  id: string | null;
+  id: string;
   identifier: string | null;
   url: string | null;
   title: string | null;
@@ -735,8 +738,13 @@ function extractCreatedIssue(result: unknown): {
     ? payload.issue as Record<string, unknown>
     : payload;
 
+  const id = typeof issue.id === "string" ? issue.id : null;
+  if (!id) {
+    throw new Error("Linear API returned an issue without an ID.");
+  }
+
   return {
-    id: typeof issue.id === "string" ? issue.id : null,
+    id,
     identifier: typeof issue.identifier === "string" ? issue.identifier : null,
     url: typeof issue.url === "string" ? issue.url : null,
     title: typeof issue.title === "string" ? issue.title : null,

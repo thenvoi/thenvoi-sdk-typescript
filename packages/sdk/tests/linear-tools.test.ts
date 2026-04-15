@@ -12,6 +12,7 @@ import { customToolToOpenAISchema, executeCustomTool } from "../src/runtime/tool
 const TEST_ISSUE_ID = "11111111-1111-4111-8111-111111111111";
 const OTHER_TEST_ISSUE_ID = "22222222-2222-4222-8222-222222222222";
 const TEST_COMMENT_ID = "33333333-3333-4333-8333-333333333333";
+const TEST_TEAM_ID = "44444444-4444-4444-8444-444444444444";
 
 class MemorySessionRoomStore implements SessionRoomStore {
   private readonly records = new Map<string, SessionRoomRecord>();
@@ -832,7 +833,7 @@ describe("createLinearTools", () => {
 
     await expect(
       executeCustomTool(tool, { comment_id: "not-a-uuid" }),
-    ).rejects.toThrow(/requires a valid Linear UUID/);
+    ).rejects.toThrow();
   });
 
   it("linear_create_issue creates a new issue via the Linear client", async () => {
@@ -841,7 +842,7 @@ describe("createLinearTools", () => {
     const tool = tools.find((entry) => entry.name === "linear_create_issue")!;
 
     const result = await executeCustomTool(tool, {
-      team_id: "team-1",
+      team_id: TEST_TEAM_ID,
       title: "New issue from Thenvoi",
       description: "Created during collaboration",
       priority: 2,
@@ -857,7 +858,7 @@ describe("createLinearTools", () => {
       },
     });
     expect(client.createIssue).toHaveBeenCalledWith({
-      teamId: "team-1",
+      teamId: TEST_TEAM_ID,
       title: "New issue from Thenvoi",
       description: "Created during collaboration",
       priority: 2,
@@ -870,14 +871,14 @@ describe("createLinearTools", () => {
     const tool = tools.find((entry) => entry.name === "linear_create_issue")!;
 
     await executeCustomTool(tool, {
-      team_id: "team-1",
+      team_id: TEST_TEAM_ID,
       title: "Bug report",
       state_id: "state-0",
       label_ids: ["label-1", "label-2"],
     });
 
     expect(client.createIssue).toHaveBeenCalledWith({
-      teamId: "team-1",
+      teamId: TEST_TEAM_ID,
       title: "Bug report",
       stateId: "state-0",
       labelIds: ["label-1", "label-2"],
@@ -940,7 +941,53 @@ describe("createLinearTools", () => {
     const tool = tools.find((entry) => entry.name === "linear_create_issue")!;
 
     await expect(
-      executeCustomTool(tool, { team_id: "team-1", title: "" }),
+      executeCustomTool(tool, { team_id: TEST_TEAM_ID, title: "" }),
+    ).rejects.toThrow();
+  });
+
+  it("linear_create_session_on_issue throws when API returns no session ID", async () => {
+    const client = makeMockClientWithSessionCreation();
+    (client.agentSessionCreateOnIssue as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      agentSession: { id: undefined, issueId: null, status: null },
+    });
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_issue")!;
+
+    await expect(
+      executeCustomTool(tool, { issue_id: TEST_ISSUE_ID }),
+    ).rejects.toThrow(/session without an ID/);
+  });
+
+  it("linear_create_issue throws when API returns no issue ID", async () => {
+    const client = makeMockClientWithSessionCreation();
+    (client.createIssue as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      issue: { id: undefined, identifier: null, url: null, title: null },
+    });
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_issue")!;
+
+    await expect(
+      executeCustomTool(tool, { team_id: TEST_TEAM_ID, title: "Test" }),
+    ).rejects.toThrow(/issue without an ID/);
+  });
+
+  it("linear_create_session_on_issue rejects non-UUID issue_id via schema", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_issue")!;
+
+    await expect(
+      executeCustomTool(tool, { issue_id: "not-a-uuid" }),
+    ).rejects.toThrow();
+  });
+
+  it("linear_create_issue rejects non-UUID team_id via schema", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_issue")!;
+
+    await expect(
+      executeCustomTool(tool, { team_id: "not-a-uuid", title: "Test" }),
     ).rejects.toThrow();
   });
 
