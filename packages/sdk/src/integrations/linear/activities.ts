@@ -1,5 +1,16 @@
 import { LinearDocument as L } from "@linear/sdk";
 
+export interface CandidateRepositoryInput {
+  hostname: string;
+  repositoryFullName: string;
+}
+
+export interface RepositorySuggestion {
+  repositoryFullName: string;
+  hostname?: string | null;
+  confidence: number;
+}
+
 /**
  * Subset of `LinearClient` covering only the activity-reporting methods.
  */
@@ -8,6 +19,10 @@ export interface LinearActivityClient {
     agentSessionId: string;
     content: Record<string, unknown>;
   }): Promise<unknown>;
+  updateAgentSession?: (
+    id: string,
+    input: Record<string, unknown>,
+  ) => Promise<unknown>;
   updateIssue?: (
     issueId: string,
     input: Record<string, unknown>,
@@ -17,12 +32,35 @@ export interface LinearActivityClient {
   ) => Promise<unknown>;
   issue?: (issueId: string) => Promise<unknown>;
   workflowStates?: (variables?: Record<string, unknown>) => Promise<unknown>;
+  issueRepositorySuggestions?: (
+    candidateRepositories: CandidateRepositoryInput[],
+    issueId: string,
+    variables?: { agentSessionId?: string | null },
+  ) => Promise<unknown>;
+  agentSessionUpdateExternalUrl?: (
+    id: string,
+    input: Record<string, unknown>,
+  ) => Promise<unknown>;
 }
 
 export interface PlanStep {
   title: string;
   status: "pending" | "in_progress" | "completed" | "failed";
 }
+
+export interface SelectOption {
+  label: string;
+  value: string;
+}
+
+/** Longest body string allowed in an elicitation activity. */
+export const ELICITATION_BODY_MAX_LENGTH = 10_000;
+
+/** Longest label or value string allowed in a select option. */
+export const SELECT_OPTION_MAX_LENGTH = 200;
+
+/** Longest provider name string allowed in an auth elicitation. */
+export const PROVIDER_MAX_LENGTH = 100;
 
 async function postActivity(
   client: LinearActivityClient,
@@ -76,6 +114,38 @@ export async function postElicitation(
   await postBodyActivity(client, sessionId, L.AgentActivityType.Elicitation, body);
 }
 
+export async function postSelectElicitation(
+  client: LinearActivityClient,
+  sessionId: string,
+  body: string,
+  options: SelectOption[],
+): Promise<void> {
+  await postActivity(client, sessionId, {
+    type: L.AgentActivityType.Elicitation,
+    body,
+    signal: L.AgentActivitySignal.Select,
+    signalMetadata: { options },
+  });
+}
+
+export async function postAuthElicitation(
+  client: LinearActivityClient,
+  sessionId: string,
+  body: string,
+  url: string,
+  provider?: string,
+): Promise<void> {
+  await postActivity(client, sessionId, {
+    type: L.AgentActivityType.Elicitation,
+    body,
+    signal: L.AgentActivitySignal.Auth,
+    signalMetadata: {
+      url,
+      ...(provider ? { provider } : {}),
+    },
+  });
+}
+
 export async function postAction(
   client: LinearActivityClient,
   sessionId: string,
@@ -87,11 +157,37 @@ export async function postAction(
     parameter: "",
   });
 }
+
+type LinearPlanStatus = "pending" | "inProgress" | "completed" | "canceled";
+
+const PLAN_STATUS_MAP: Record<PlanStep["status"], LinearPlanStatus> = {
+  pending: "pending",
+  in_progress: "inProgress",
+  completed: "completed",
+  failed: "canceled",
+};
+
 export async function updatePlan(
   client: LinearActivityClient,
   sessionId: string,
   steps: PlanStep[],
 ): Promise<void> {
+  if (typeof client.updateAgentSession === "function") {
+    const plan = {
+      steps: steps.map((step) => ({
+        content: step.title,
+        status: PLAN_STATUS_MAP[step.status],
+      })),
+    };
+
+    try {
+      await client.updateAgentSession(sessionId, { plan });
+      return;
+    } catch (err) {
+      console.warn("updateAgentSession failed, falling back to legacy plan", err);
+    }
+  }
+
   const planSummary = steps
     .map((step) => {
       const icon =

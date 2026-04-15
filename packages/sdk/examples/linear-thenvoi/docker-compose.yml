@@ -1,0 +1,18 @@
+services:
+  linear-bridge:
+    build: .
+    ports:
+      - "${PORT:-8787}:8787"
+    env_file:
+      - .env
+    environment:
+      - LINEAR_THENVOI_STATE_DB=/app/data/state.sqlite
+      - LINEAR_THENVOI_PROMPT_PATH=/app/config/prompt.md
+    volumes:
+      - bridge-data:/app/data
+      - ./prompt.md:/app/config/prompt.md:ro
+      - ./agent_config.yaml:/app/agent_config.yaml:ro
+    restart: unless-stopped
+
+volumes:
+  bridge-data:

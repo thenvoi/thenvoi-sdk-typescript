@@ -45,40 +45,40 @@ importers:
   packages/sdk:
     dependencies:
       '@a2a-js/sdk':
-        specifier: ^0.3.10
+        specifier: '>=0.3.10'
         version: 0.3.13(@grpc/grpc-js@1.14.3)(express@5.2.1)
       '@anthropic-ai/sdk':
-        specifier: ^0.78.0
-        version: 0.78.0(zod@3.25.76)
+        specifier: '>=0.78.0'
+        version: 0.80.0(zod@3.25.76)
       '@google/adk':
-        specifier: ^0.5.0
+        specifier: '>=0.5.0'
         version: 0.5.0(a1b02eb3cbdbf4c898aa8a35a356c4a8)
       '@google/genai':
-        specifier: ^1.44.0
+        specifier: '>=1.44.0'
         version: 1.46.0(@modelcontextprotocol/sdk@1.28.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))
       '@langchain/core':
-        specifier: ^1.1.31
+        specifier: '>=1.1.31'
         version: 1.1.36(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.0))(openai@6.33.0(ws@8.20.0)(zod@3.25.76))(ws@8.20.0)
       '@langchain/langgraph':
-        specifier: ^1.2.0
+        specifier: '>=1.2.0'
         version: 1.2.5(@langchain/core@1.1.36(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.0))(openai@6.33.0(ws@8.20.0)(zod@3.25.76))(ws@8.20.0))(zod-to-json-schema@3.25.1(zod@3.25.76))(zod@3.25.76)
       '@letta-ai/letta-client':
-        specifier: ^1.7.0
+        specifier: '>=1.7.0'
         version: 1.10.0
       '@thenvoi/rest-client':
         specifier: 0.0.113
         version: 0.0.113
       express:
-        specifier: ^5.2.1
+        specifier: '>=5.2.1'
         version: 5.2.1
       js-yaml:
         specifier: ^4.1.1
         version: 4.1.1
       openai:
-        specifier: ^6.27.0
+        specifier: '>=6.27.0'
         version: 6.33.0(ws@8.20.0)(zod@3.25.76)
       parlant-client:
-        specifier: ^3.2.0
+        specifier: '>=3.2.0'
         version: 3.2.0
       phoenix:
         specifier: ^1.8.4
@@ -198,15 +198,6 @@ packages:
 
   '@anthropic-ai/sdk@0.73.0':
     resolution: {integrity: sha512-URURVzhxXGJDGUGFunIOtBlSl7KWvZiAAKY/ttTkZAkXT9bTPqdk2eK0b8qqSxXpikh3QKPnPYpiyX98zf5ebw==}
-    hasBin: true
-    peerDependencies:
-      zod: ^3.25.0 || ^4.0.0
-    peerDependenciesMeta:
-      zod:
-        optional: true
-
-  '@anthropic-ai/sdk@0.78.0':
-    resolution: {integrity: sha512-PzQhR715td/m1UaaN5hHXjYB8Gl2lF9UVhrrGrZeysiF6Rb74Wc9GCB8hzLdzmQtBd1qe89F9OptgB9Za1Ib5w==}
     hasBin: true
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
@@ -4948,7 +4939,7 @@ snapshots:
     optionalDependencies:
       zod: 4.3.6
 
-  '@anthropic-ai/sdk@0.78.0(zod@3.25.76)':
+  '@anthropic-ai/sdk@0.80.0(zod@3.25.76)':
     dependencies:
       json-schema-to-ts: 3.1.1
     optionalDependencies:

@@ -13,7 +13,16 @@
     "resolveJsonModule": true,
     "verbatimModuleSyntax": true,
     "types": ["node", "vitest/globals"],
-    "outDir": "dist"
+    "outDir": "dist",
+    "paths": {
+      "@thenvoi/sdk": ["./src/index.ts"],
+      "@thenvoi/sdk/linear": ["./src/linear/index.ts"],
+      "@thenvoi/sdk/core": ["./src/core/index.ts"],
+      "@thenvoi/sdk/rest": ["./src/rest/index.ts"],
+      "@thenvoi/sdk/adapters": ["./src/adapters/index.ts"],
+      "@thenvoi/sdk/config": ["./src/config/index.ts"],
+      "@thenvoi/sdk/runtime": ["./src/runtime/index.ts"]
+    }
   },
   "include": ["src", "tests", "examples"],
   "exclude": ["dist", "tests/integration"]

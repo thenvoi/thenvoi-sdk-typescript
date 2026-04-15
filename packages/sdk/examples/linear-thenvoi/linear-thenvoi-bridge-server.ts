@@ -7,8 +7,8 @@ import {
   type PlatformMessage,
   isDirectExecution,
   loadAgentConfig,
-} from "../../src/index";
-import { ConsoleLogger, type Logger } from "../../src/core";
+} from "@thenvoi/sdk";
+import { ConsoleLogger, type Logger } from "@thenvoi/sdk/core";
 import {
   createSqliteSessionRoomStore,
   createLinearClient,
@@ -19,8 +19,8 @@ import {
   type RoomStrategy,
   type SessionRoomStore,
   type WritebackMode,
-} from "../../src/linear";
-import { FernRestAdapter, type RestApi } from "../../src/rest";
+} from "@thenvoi/sdk/linear";
+import { FernRestAdapter, type RestApi } from "@thenvoi/sdk/rest";
 import { createLinearThenvoiBridgeAgent } from "./linear-thenvoi-bridge-agent";
 
 interface LinearThenvoiBridgeServerOptions {

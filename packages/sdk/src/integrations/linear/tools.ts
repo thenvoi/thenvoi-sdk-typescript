@@ -1,16 +1,34 @@
 import { z } from "zod";
 
 import type { CustomToolDef } from "../../runtime/tools/customTools";
-import type { LinearActivityClient, PlanStep } from "./activities";
+import type { CandidateRepositoryInput, LinearActivityClient, PlanStep, RepositorySuggestion, SelectOption } from "./activities";
 import {
+  ELICITATION_BODY_MAX_LENGTH,
+  SELECT_OPTION_MAX_LENGTH,
+  PROVIDER_MAX_LENGTH,
   postThought,
   postAction,
   postError,
   postElicitation,
+  postSelectElicitation,
+  postAuthElicitation,
   updatePlan,
 } from "./activities";
 import { completeLinearSession } from "./bridge";
 import type { SessionRoomStore } from "./types";
+
+const LOCALHOST_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/** Zod refine predicate: allow https for any host, http only for localhost. */
+function isAllowedAuthUrl(u: string): boolean {
+  try {
+    const parsed = new URL(u);
+    if (parsed.protocol === "https:") return true;
+    return LOCALHOST_HOSTNAMES.has(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
 
 interface CreateLinearToolsOptions {
   client: LinearActivityClient;
@@ -78,14 +96,84 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
   );
 
   if (enableElicitation) {
-    addSessionBodyTool(
-      "linear_ask_user",
-      "Ask the Linear user a question via an elicitation activity.",
-      async (args) => {
-        await postElicitation(client, args.session_id as string, args.body as string);
+    tools.push({
+      name: "linear_ask_user",
+      description: "Ask the Linear user a question. When options are provided, Linear renders them as a clickable picker (select signal); otherwise the user sees a free-text prompt.",
+      schema: z.object({
+        session_id: z.string().describe("The Linear agent session ID"),
+        body: z.string().max(ELICITATION_BODY_MAX_LENGTH).describe("The question to ask, in Markdown format"),
+        options: z.array(z.object({
+          label: z.string().max(SELECT_OPTION_MAX_LENGTH).describe("Display text for the option"),
+          value: z.string().max(SELECT_OPTION_MAX_LENGTH).describe("Value returned when the option is selected"),
+        })).min(2).max(20).optional().describe("Clickable options for a select picker (2–20 items). Omit for free-text input."),
+      }),
+      handler: async (args: Record<string, unknown>) => {
+        const sessionId = args.session_id as string;
+        const body = args.body as string;
+        // Zod .min(2) guarantees options is either undefined or has ≥2 items
+        const options = args.options as SelectOption[] | undefined;
+        if (options) {
+          await postSelectElicitation(client, sessionId, body, options);
+        } else {
+          await postElicitation(client, sessionId, body);
+        }
         return { ok: true };
       },
-    );
+    });
+
+    tools.push({
+      name: "linear_select",
+      description:
+        "Present the Linear user with a set of clickable options via a select elicitation. " +
+        "Use this instead of linear_ask_user when the user should pick from a known list of choices.",
+      schema: z.object({
+        session_id: z.string().describe("The Linear agent session ID"),
+        body: z.string().describe("The question or prompt shown above the options (Markdown)"),
+        options: z
+          .array(
+            z.object({
+              label: z.string().describe("Display label for this option"),
+              value: z.string().describe("Value returned when this option is selected"),
+            }),
+          )
+          .min(1)
+          .max(25)
+          .describe("The selectable options"),
+      }),
+      handler: async (args: Record<string, unknown>) => {
+        await postSelectElicitation(
+          client,
+          args.session_id as string,
+          args.body as string,
+          args.options as SelectOption[],
+        );
+        return { ok: true };
+      },
+    });
+
+    tools.push({
+      name: "linear_request_auth",
+      description: "Ask the Linear user to link an external account by presenting an authentication button. The user sees a 'Link account' UI that opens the provided URL.",
+      schema: z.object({
+        session_id: z.string().describe("The Linear agent session ID"),
+        body: z.string().max(ELICITATION_BODY_MAX_LENGTH).describe("Explanation of why authentication is needed, in Markdown format"),
+        url: z.string().url().refine(
+          isAllowedAuthUrl,
+          { message: "URL must use https (http allowed only for localhost)" },
+        ).describe("The authentication URL to open when the user clicks the link button"),
+        provider: z.string().min(1).max(PROVIDER_MAX_LENGTH).optional().describe("Name of the external service (e.g. 'GitHub', 'Slack')"),
+      }),
+      handler: async (args: Record<string, unknown>) => {
+        await postAuthElicitation(
+          client,
+          args.session_id as string,
+          args.body as string,
+          args.url as string,
+          args.provider as string | undefined,
+        );
+        return { ok: true };
+      },
+    });
   }
 
   addSessionBodyTool(
@@ -105,7 +193,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
   tools.push(
     {
       name: "linear_update_plan",
-      description: "Update the plan for the Linear agent session, showing progress on each step.",
+      description: "Update the structured plan for the Linear agent session. Renders as a native checklist in the Linear Agent Session UI with live status indicators.",
       schema: z.object({
         session_id: z.string().describe("The Linear agent session ID"),
         steps: z.array(z.object({
@@ -131,6 +219,45 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     optionalIssueIdSchema,
     issueCommentLimitSchema,
   });
+
+  if (typeof client.issueRepositorySuggestions === "function") {
+    const suggestRepositories = client.issueRepositorySuggestions.bind(client);
+    tools.push({
+      name: "linear_suggest_repositories",
+      description:
+        "Ask Linear to rank candidate repositories by relevance for the current issue. " +
+        "Returns ranked suggestions with confidence scores. Use this before asking the user " +
+        "which repository to work in — if a suggestion has high confidence, auto-select it; " +
+        "otherwise present the top options via the select elicitation signal.",
+      schema: requiredIssueIdSchema.extend({
+        session_id: z.string().describe("The Linear agent session ID"),
+        repositories: z
+          .array(
+            z.object({
+              hostname: z.string().describe("Hostname of the Git service (e.g. 'github.com')"),
+              repositoryFullName: z.string().describe("Full name in owner/name format (e.g. 'acme/backend')"),
+            }),
+          )
+          .min(1)
+          .max(50)
+          .describe("Candidate repositories the agent has access to"),
+      }),
+      handler: async (args: Record<string, unknown>) => {
+        const issueId = resolveIssueId("linear_suggest_repositories", args);
+        const sessionId = args.session_id as string;
+        const candidates = args.repositories as CandidateRepositoryInput[];
+
+        const response = await suggestRepositories(
+          candidates,
+          issueId,
+          { agentSessionId: sessionId },
+        );
+
+        const suggestions = extractRepositorySuggestions(response);
+        return { suggestions };
+      },
+    });
+  }
 
   return tools;
 }
@@ -197,6 +324,7 @@ function addIssueTools(input: {
         priority: z.number().int().min(0).max(4).optional().describe("Priority 0-4"),
         state_id: z.string().optional().describe("Workflow state ID"),
         assignee_id: z.string().nullable().optional().describe("Assignee user ID, or null to unassign"),
+        delegate_id: z.string().nullable().optional().describe("Agent user ID to delegate the issue to, or null to clear delegate"),
         estimate: z.number().int().optional().describe("Estimate points"),
         due_date: z.string().optional().describe("Due date ISO string"),
       }),
@@ -212,6 +340,7 @@ function addIssueTools(input: {
           || args.priority !== undefined
           || args.state_id !== undefined
           || args.assignee_id !== undefined
+          || args.delegate_id !== undefined
           || args.estimate !== undefined
           || args.due_date !== undefined
         );
@@ -227,6 +356,7 @@ function addIssueTools(input: {
             ...(args.priority !== undefined ? { priority: args.priority } : {}),
             ...(args.state_id !== undefined ? { stateId: args.state_id } : {}),
             ...(args.assignee_id !== undefined ? { assigneeId: args.assignee_id } : {}),
+            ...(args.delegate_id !== undefined ? { delegateId: args.delegate_id } : {}),
             ...(args.estimate !== undefined ? { estimate: args.estimate } : {}),
             ...(args.due_date !== undefined ? { dueDate: args.due_date } : {}),
           },
@@ -286,26 +416,30 @@ function resolveOptionalIssueId(
   return args.issue_id;
 }
 
+interface LinearIssueSnapshot {
+  id: string;
+  identifier?: string | null;
+  title?: string | null;
+  description?: string | null;
+  url?: string | null;
+  priority?: number | null;
+  estimate?: number | null;
+  dueDate?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  state?: { id?: string | null; name?: string | null; type?: string | null } | null;
+  assignee?: { id?: string | null; name?: string | null; displayName?: string | null } | null;
+  delegate?: { id?: string | null; name?: string | null; displayName?: string | null } | null;
+  delegateId?: string | null;
+  team?: { id?: string | null; key?: string | null; name?: string | null } | null;
+}
+
 async function readIssue(client: LinearActivityClient, issueId: string): Promise<unknown> {
   if (typeof client.issue !== "function") {
     throw new Error("linear_get_issue is unavailable: Linear client does not support issue().");
   }
 
-  const issue = await client.issue(issueId) as {
-    id: string;
-    identifier?: string | null;
-    title?: string | null;
-    description?: string | null;
-    url?: string | null;
-    priority?: number | null;
-    estimate?: number | null;
-    dueDate?: string | null;
-    createdAt?: string | null;
-    updatedAt?: string | null;
-    state?: { id?: string | null; name?: string | null; type?: string | null } | null;
-    assignee?: { id?: string | null; name?: string | null; displayName?: string | null } | null;
-    team?: { id?: string | null; key?: string | null; name?: string | null } | null;
-  };
+  const issue = await client.issue(issueId) as LinearIssueSnapshot;
 
   return {
     issue: {
@@ -332,6 +466,13 @@ async function readIssue(client: LinearActivityClient, issueId: string): Promise
           name: issue.assignee.displayName ?? issue.assignee.name ?? null,
         }
         : null,
+      delegate: issue.delegate
+        ? {
+          id: issue.delegate.id ?? null,
+          name: issue.delegate.displayName ?? issue.delegate.name ?? null,
+        }
+        : null,
+      delegate_id: issue.delegateId ?? null,
       team: issue.team
         ? {
           id: issue.team.id ?? null,
@@ -436,4 +577,28 @@ async function readWorkflowStates(
     .sort((left, right) => (left.position ?? Number.MAX_SAFE_INTEGER) - (right.position ?? Number.MAX_SAFE_INTEGER));
 
   return { team_id: teamId, states };
+}
+
+function extractRepositorySuggestions(response: unknown): RepositorySuggestion[] {
+  if (response == null || typeof response !== "object") {
+    return [];
+  }
+
+  const payload = response as { suggestions?: unknown };
+  if (!Array.isArray(payload.suggestions)) {
+    return [];
+  }
+
+  return payload.suggestions
+    .filter((entry): entry is Record<string, unknown> =>
+      entry != null &&
+      typeof entry === "object" &&
+      typeof (entry as Record<string, unknown>).repositoryFullName === "string",
+    )
+    .map((entry) => ({
+      repositoryFullName: entry.repositoryFullName as string,
+      hostname: typeof entry.hostname === "string" ? entry.hostname : null,
+      confidence: typeof entry.confidence === "number" ? entry.confidence : 0,
+    }))
+    .sort((a, b) => b.confidence - a.confidence);
 }

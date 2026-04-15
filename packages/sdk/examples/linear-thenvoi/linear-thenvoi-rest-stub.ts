@@ -1,5 +1,4 @@
-import type { PaginatedResponse, RestApi } from "../../src/rest";
-import type { ChatParticipant, PlatformChatMessage } from "../../src/client/rest/types";
+import type { ChatParticipant, PaginatedResponse, PlatformChatMessage, RestApi } from "@thenvoi/sdk/rest";
 
 interface ExamplePeer {
   id: string;
