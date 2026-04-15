@@ -607,7 +607,7 @@ function addSessionCreationTools(input: {
 
   const sessionCreationBaseSchema = z.object({
     external_link: z.string().url().optional().describe("Optional URL of an external page associated with this session"),
-    room_id: z.string().optional().describe("The Thenvoi room ID to persist the session-room mapping. Pass this when creating a session from within a Thenvoi conversation."),
+    room_id: z.string().min(1).optional().describe("The Thenvoi room ID to persist the session-room mapping. Pass this when creating a session from within a Thenvoi conversation."),
   });
 
   const sessionCreationSchema = sessionCreationBaseSchema.extend({

@@ -907,6 +907,16 @@ describe("createLinearTools", () => {
     expect(record!.status).toBe("active");
   });
 
+  it("linear_create_session_on_issue rejects empty room_id via schema", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_issue")!;
+
+    await expect(
+      executeCustomTool(tool, { issue_id: TEST_ISSUE_ID, room_id: "" }),
+    ).rejects.toThrow();
+  });
+
   it("linear_create_session_on_issue skips persistence when room_id is not provided", async () => {
     const client = makeMockClientWithSessionCreation();
     const store = new MemorySessionRoomStore();
