@@ -1,5 +1,8 @@
 export {
   DEFAULT_STATUS_MAPPING,
+  STALE_SESSION_CHECK_INTERVAL_MS,
+  STALE_SESSION_THRESHOLD_MS,
+  StaleSessionGuard,
   buildLinearAuthorizationHeader,
   completeLinearSession,
   createLinearClient,
@@ -11,6 +14,7 @@ export {
   createSqliteSessionRoomStore,
   dedupeHandles,
   handleAgentSessionEvent,
+  isSessionStale,
   postAction,
   postElicitation,
   postError,
@@ -18,6 +22,7 @@ export {
   postSelectElicitation,
   postThought,
   isLinearApiKey,
+  sendRecoveryActivityIfStale,
   stripHandlePrefix,
   updatePlan,
 } from "../integrations/linear";
@@ -26,6 +31,7 @@ export type {
   LinearBridgeDispatchJob,
   LinearBridgeDispatcher,
   HandleAgentSessionEventInput,
+  PermissionChangeCallbacks,
   LinearActivityClient,
   LinearBridgeRuntime,
   LinearSessionStatus,
@@ -40,5 +46,6 @@ export type {
   SessionRoomRecord,
   SessionRoomStore,
   SessionStatus,
+  StaleSessionGuardOptions,
   WritebackMode,
 } from "../integrations/linear";
