@@ -579,20 +579,6 @@ async function tryMoveIssueToStarted(input: {
   teamId: string;
   logger: Logger;
 }): Promise<AutoStartResult> {
-  if (typeof input.linearClient.workflowStates !== "function") {
-    input.logger.info("linear_thenvoi_bridge.auto_start_skipped_no_workflow_api", {
-      issueId: input.issueId,
-    });
-    return { moved: false, stateId: null, stateName: null };
-  }
-
-  if (typeof input.linearClient.updateIssue !== "function") {
-    input.logger.info("linear_thenvoi_bridge.auto_start_skipped_no_update_api", {
-      issueId: input.issueId,
-    });
-    return { moved: false, stateId: null, stateName: null };
-  }
-
   const response = await input.linearClient.workflowStates({
     filter: {
       team: { id: { eq: input.teamId } },
