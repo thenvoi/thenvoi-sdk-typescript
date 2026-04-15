@@ -27,6 +27,7 @@ export interface LinearThenvoiBridgeConfig {
   planningAgentHandles?: string[];
   implementationAgentHandles?: string[];
   recoveredRoomRetryBaseDelayMs?: number;
+  thenvoiAppBaseUrl?: string;
 }
 
 export interface SessionRoomRecord {
