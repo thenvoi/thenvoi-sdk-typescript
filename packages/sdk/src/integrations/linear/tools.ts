@@ -618,8 +618,8 @@ function addSessionCreationTools(input: {
     sessionId: string,
     issueId: string | null,
     roomId: string | undefined,
-  ): Promise<void> {
-    if (!store || typeof roomId !== "string") return;
+  ): Promise<string | null> {
+    if (!store || typeof roomId !== "string") return null;
     try {
       // Timestamps reflect the SDK host clock, not Linear's server clock.
       const now = new Date().toISOString();
@@ -631,8 +631,10 @@ function addSessionCreationTools(input: {
         createdAt: now,
         updatedAt: now,
       });
+      return null;
     } catch (err) {
       console.warn("Failed to persist session-room mapping, session was still created in Linear", err);
+      return "session-room mapping not persisted";
     }
   }
 
@@ -650,8 +652,8 @@ function addSessionCreationTools(input: {
           ...(typeof args.external_link === "string" ? { externalLink: args.external_link } : {}),
         });
         const session = extractCreatedSession(result);
-        await persistSessionRoom(session.id, session.issueId, args.room_id as string | undefined);
-        return { ok: true, session };
+        const warning = await persistSessionRoom(session.id, session.issueId, args.room_id as string | undefined);
+        return { ok: true, session, ...(warning ? { warning } : {}) };
       },
     });
   }
@@ -672,8 +674,8 @@ function addSessionCreationTools(input: {
           ...(typeof args.external_link === "string" ? { externalLink: args.external_link } : {}),
         });
         const session = extractCreatedSession(result);
-        await persistSessionRoom(session.id, session.issueId, args.room_id as string | undefined);
-        return { ok: true, session };
+        const warning = await persistSessionRoom(session.id, session.issueId, args.room_id as string | undefined);
+        return { ok: true, session, ...(warning ? { warning } : {}) };
       },
     });
   }

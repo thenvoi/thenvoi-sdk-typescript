@@ -266,6 +266,23 @@ describe("createLinearTools", () => {
     });
   });
 
+  it("linear_post_error does not forward ephemeral flag to the activity layer", async () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_post_error")!;
+
+    await executeCustomTool(tool, {
+      session_id: "sess-1",
+      body: "Something broke",
+      ephemeral: true,
+    });
+
+    expect(client.createAgentActivity).toHaveBeenCalledWith({
+      agentSessionId: "sess-1",
+      content: { type: "error", body: "Something broke" },
+    });
+  });
+
   it("linear_ask_user validates and calls the activity layer", async () => {
     const client = makeMockClient();
     const tools = createLinearTools({ client });
@@ -929,6 +946,25 @@ describe("createLinearTools", () => {
 
     const record = await store.getBySessionId("new-session-1");
     expect(record).toBeNull();
+  });
+
+  it("linear_create_session_on_issue surfaces warning when store persistence fails", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const store = new MemorySessionRoomStore();
+    vi.spyOn(store, "upsert").mockRejectedValueOnce(new Error("db write failed"));
+    const tools = createLinearTools({ client, store });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_issue")!;
+
+    const result = await executeCustomTool(tool, {
+      issue_id: TEST_ISSUE_ID,
+      room_id: "room-abc",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      session: { id: "new-session-1", issueId: TEST_ISSUE_ID, status: "active" },
+      warning: "session-room mapping not persisted",
+    });
   });
 
   it("linear_create_session_on_comment persists session-room mapping when store and room_id are provided", async () => {
