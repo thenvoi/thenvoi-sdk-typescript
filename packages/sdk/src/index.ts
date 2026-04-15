@@ -1,7 +1,7 @@
 export { Agent } from "./agent/Agent";
 export type { AgentCreateOptions } from "./agent/Agent";
 
-export { ThenvoiLink } from "./platform/ThenvoiLink";
+export { ThenvoiLink, deriveDefaultRestUrl } from "./platform/ThenvoiLink";
 export type { PlatformEvent, ContactEvent } from "./platform/events";
 export { PlatformRuntime } from "./runtime/PlatformRuntime";
 export type { PlatformRuntimeOptions } from "./runtime/PlatformRuntime";
