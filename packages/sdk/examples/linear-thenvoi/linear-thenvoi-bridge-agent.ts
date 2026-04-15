@@ -129,7 +129,7 @@ Rules:
   - linear_post_action for visible work progress
   - linear_post_error for failures
   - linear_post_response for the final answer and session completion
-  - linear_update_plan when you have a step list worth showing
+  - linear_update_plan when you have a step list worth showing (renders as a native checklist in the Linear Agent Session UI with live status indicators)
   - linear_ask_user with options for structured choices, without options for free-text questions
   - linear_request_auth when external account linking is required
 - Start alone, but inspect available peers before deciding whether the bridge should handle the work itself.

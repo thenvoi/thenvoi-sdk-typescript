@@ -163,7 +163,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
   tools.push(
     {
       name: "linear_update_plan",
-      description: "Update the plan for the Linear agent session, showing progress on each step.",
+      description: "Update the structured plan for the Linear agent session. Renders as a native checklist in the Linear Agent Session UI with live status indicators.",
       schema: z.object({
         session_id: z.string().describe("The Linear agent session ID"),
         steps: z.array(z.object({
@@ -255,6 +255,7 @@ function addIssueTools(input: {
         priority: z.number().int().min(0).max(4).optional().describe("Priority 0-4"),
         state_id: z.string().optional().describe("Workflow state ID"),
         assignee_id: z.string().nullable().optional().describe("Assignee user ID, or null to unassign"),
+        delegate_id: z.string().nullable().optional().describe("Agent user ID to delegate the issue to, or null to clear delegate"),
         estimate: z.number().int().optional().describe("Estimate points"),
         due_date: z.string().optional().describe("Due date ISO string"),
       }),
@@ -270,6 +271,7 @@ function addIssueTools(input: {
           || args.priority !== undefined
           || args.state_id !== undefined
           || args.assignee_id !== undefined
+          || args.delegate_id !== undefined
           || args.estimate !== undefined
           || args.due_date !== undefined
         );
@@ -285,6 +287,7 @@ function addIssueTools(input: {
             ...(args.priority !== undefined ? { priority: args.priority } : {}),
             ...(args.state_id !== undefined ? { stateId: args.state_id } : {}),
             ...(args.assignee_id !== undefined ? { assigneeId: args.assignee_id } : {}),
+            ...(args.delegate_id !== undefined ? { delegateId: args.delegate_id } : {}),
             ...(args.estimate !== undefined ? { estimate: args.estimate } : {}),
             ...(args.due_date !== undefined ? { dueDate: args.due_date } : {}),
           },
@@ -344,26 +347,30 @@ function resolveOptionalIssueId(
   return args.issue_id;
 }
 
+interface LinearIssueSnapshot {
+  id: string;
+  identifier?: string | null;
+  title?: string | null;
+  description?: string | null;
+  url?: string | null;
+  priority?: number | null;
+  estimate?: number | null;
+  dueDate?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  state?: { id?: string | null; name?: string | null; type?: string | null } | null;
+  assignee?: { id?: string | null; name?: string | null; displayName?: string | null } | null;
+  delegate?: { id?: string | null; name?: string | null; displayName?: string | null } | null;
+  delegateId?: string | null;
+  team?: { id?: string | null; key?: string | null; name?: string | null } | null;
+}
+
 async function readIssue(client: LinearActivityClient, issueId: string): Promise<unknown> {
   if (typeof client.issue !== "function") {
     throw new Error("linear_get_issue is unavailable: Linear client does not support issue().");
   }
 
-  const issue = await client.issue(issueId) as {
-    id: string;
-    identifier?: string | null;
-    title?: string | null;
-    description?: string | null;
-    url?: string | null;
-    priority?: number | null;
-    estimate?: number | null;
-    dueDate?: string | null;
-    createdAt?: string | null;
-    updatedAt?: string | null;
-    state?: { id?: string | null; name?: string | null; type?: string | null } | null;
-    assignee?: { id?: string | null; name?: string | null; displayName?: string | null } | null;
-    team?: { id?: string | null; key?: string | null; name?: string | null } | null;
-  };
+  const issue = await client.issue(issueId) as LinearIssueSnapshot;
 
   return {
     issue: {
@@ -390,6 +397,13 @@ async function readIssue(client: LinearActivityClient, issueId: string): Promise
           name: issue.assignee.displayName ?? issue.assignee.name ?? null,
         }
         : null,
+      delegate: issue.delegate
+        ? {
+          id: issue.delegate.id ?? null,
+          name: issue.delegate.displayName ?? issue.delegate.name ?? null,
+        }
+        : null,
+      delegate_id: issue.delegateId ?? null,
       team: issue.team
         ? {
           id: issue.team.id ?? null,

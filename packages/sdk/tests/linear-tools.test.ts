@@ -57,6 +57,7 @@ class MemorySessionRoomStore implements SessionRoomStore {
 function makeMockClient(): LinearActivityClient {
   return {
     createAgentActivity: vi.fn(async () => ({ ok: true })),
+    updateAgentSession: vi.fn(async () => ({ success: true })),
     updateIssue: vi.fn(async () => ({ ok: true })),
     createComment: vi.fn(async () => ({ ok: true })),
     workflowStates: vi.fn(async ({ teamId }: { teamId?: string } = {}) => ({
@@ -80,6 +81,8 @@ function makeMockClient(): LinearActivityClient {
       updatedAt: "2026-03-06T01:00:00.000Z",
       state: { id: "state-1", name: "In Progress", type: "started" },
       assignee: { id: "user-1", name: "Darvell" },
+      delegate: { id: "agent-1", name: "Thenvoi Agent", displayName: "Thenvoi Agent" },
+      delegateId: "agent-1",
       team: { id: "team-1", key: "SOF", name: "SoftwareFactory" },
       comments: vi.fn(async () => ({
         nodes: [
@@ -413,7 +416,7 @@ describe("createLinearTools", () => {
     });
   });
 
-  it("linear_update_plan validates steps and calls the activity layer", async () => {
+  it("linear_update_plan validates steps and calls updateAgentSession with structured plan", async () => {
     const client = makeMockClient();
     const tools = createLinearTools({ client });
     const tool = tools.find((entry) => entry.name === "linear_update_plan")!;
@@ -427,7 +430,15 @@ describe("createLinearTools", () => {
     });
 
     expect(result).toEqual({ ok: true });
-    expect(client.createAgentActivity).toHaveBeenCalledOnce();
+    expect(client.createAgentActivity).not.toHaveBeenCalled();
+    expect(client.updateAgentSession).toHaveBeenCalledWith("sess-1", {
+      plan: {
+        steps: [
+          { content: "Step 1", status: "completed" },
+          { content: "Step 2", status: "inProgress" },
+        ],
+      },
+    });
   });
 
   it("rejects invalid input with Zod validation error", async () => {
@@ -489,6 +500,8 @@ describe("createLinearTools", () => {
         identifier: "SOF-1",
         title: "Example issue",
         team: expect.objectContaining({ key: "SOF" }),
+        delegate: expect.objectContaining({ id: "agent-1", name: "Thenvoi Agent" }),
+        delegate_id: "agent-1",
       }),
     });
     expect(client.issue).toHaveBeenCalledWith(TEST_ISSUE_ID);

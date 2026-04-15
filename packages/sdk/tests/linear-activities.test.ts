@@ -15,13 +15,20 @@ import {
 
 function makeMockClient(): LinearActivityClient & {
   calls: Array<{ agentSessionId: string; content: Record<string, unknown> }>;
+  sessionUpdates: Array<{ id: string; input: Record<string, unknown> }>;
 } {
   const calls: Array<{ agentSessionId: string; content: Record<string, unknown> }> = [];
+  const sessionUpdates: Array<{ id: string; input: Record<string, unknown> }> = [];
   return {
     calls,
+    sessionUpdates,
     createAgentActivity: vi.fn(async (input) => {
       calls.push(input);
       return { ok: true };
+    }),
+    updateAgentSession: vi.fn(async (id: string, input: Record<string, unknown>) => {
+      sessionUpdates.push({ id, input });
+      return { success: true };
     }),
   };
 }
@@ -82,8 +89,54 @@ describe("linear activities", () => {
     });
   });
 
-  it("updatePlan posts a thought with formatted plan steps", async () => {
+  it("updatePlan calls updateAgentSession with structured plan steps", async () => {
     const client = makeMockClient();
+    const steps: PlanStep[] = [
+      { title: "Analyze issue", status: "completed" },
+      { title: "Search codebase", status: "in_progress" },
+      { title: "Write fix", status: "pending" },
+      { title: "Old approach", status: "failed" },
+    ];
+
+    await updatePlan(client, "session-6", steps);
+
+    expect(client.calls).toHaveLength(0);
+    expect(client.sessionUpdates).toHaveLength(1);
+    expect(client.sessionUpdates[0]?.id).toBe("session-6");
+    expect(client.sessionUpdates[0]?.input).toEqual({
+      plan: {
+        steps: [
+          { content: "Analyze issue", status: "completed" },
+          { content: "Search codebase", status: "inProgress" },
+          { content: "Write fix", status: "pending" },
+          { content: "Old approach", status: "canceled" },
+        ],
+      },
+    });
+  });
+
+  it("updatePlan falls back to thought activity when updateAgentSession throws", async () => {
+    const client = makeMockClient();
+    client.updateAgentSession = vi.fn(async () => { throw new Error("mutation not found"); });
+    const steps: PlanStep[] = [
+      { title: "Analyze issue", status: "completed" },
+      { title: "Search codebase", status: "in_progress" },
+      { title: "Write fix", status: "pending" },
+      { title: "Old approach", status: "failed" },
+    ];
+
+    await updatePlan(client, "session-6", steps);
+
+    expect(client.updateAgentSession).toHaveBeenCalledOnce();
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0]?.agentSessionId).toBe("session-6");
+    const body = (client.calls[0]?.content as { body: string }).body;
+    expect(body).toContain("**Plan:**");
+  });
+
+  it("updatePlan falls back to thought activity when updateAgentSession is unavailable", async () => {
+    const client = makeMockClient();
+    delete (client as Partial<typeof client>).updateAgentSession;
     const steps: PlanStep[] = [
       { title: "Analyze issue", status: "completed" },
       { title: "Search codebase", status: "in_progress" },
