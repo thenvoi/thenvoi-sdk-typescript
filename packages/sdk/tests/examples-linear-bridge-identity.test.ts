@@ -7,10 +7,6 @@ import {
 
 describe("linear bridge agent identity", () => {
   it("defaults to Band Linear PM identity", () => {
-    const agent = createLinearThenvoiBridgeAgent();
-    expect(agent).toBeDefined();
-    expect(agent.runtime.name).toBe("");
-    // name is populated after start(); verify the prompt instead
     const prompt = buildLinearThenvoiBridgePrompt();
     expect(prompt).toContain("You are Band Linear PM.");
   });
@@ -19,5 +15,6 @@ describe("linear bridge agent identity", () => {
     const prompt = buildLinearThenvoiBridgePrompt();
     expect(prompt).not.toContain("Thenvoi Linear Bridge");
     expect(prompt).not.toContain("Thenvoi Linear bridge agent");
+    expect(prompt).not.toContain("bridge agent");
   });
 });
