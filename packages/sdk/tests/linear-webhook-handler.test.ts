@@ -118,6 +118,7 @@ async function startServer(dispatcher?: LinearBridgeDispatcher, permissionCallba
   const store = new MemorySessionRoomStore();
   const linearClient = {
     createAgentActivity: vi.fn(async () => ({ ok: true })),
+    agentSessionUpdateExternalUrl: vi.fn(async () => ({ success: true })),
     issue: vi.fn(async () => ({ id: "issue-1", delegateId: null })),
     updateIssue: vi.fn(async () => ({ success: true })),
   };
@@ -582,6 +583,7 @@ describe("createLinearWebhookHandler", () => {
         .fn()
         .mockRejectedValueOnce(new Error("initial error reporting failed"))
         .mockResolvedValueOnce({ ok: true }),
+      agentSessionUpdateExternalUrl: vi.fn(async () => ({ success: true })),
       issue: vi.fn(async () => ({ id: "issue-1", delegateId: null })),
       updateIssue: vi.fn(async () => ({ success: true })),
     };

@@ -27,6 +27,7 @@ export interface LinearThenvoiBridgeConfig {
   planningAgentHandles?: string[];
   implementationAgentHandles?: string[];
   recoveredRoomRetryBaseDelayMs?: number;
+  thenvoiAppBaseUrl?: string;
 }
 
 export interface SessionRoomRecord {
@@ -80,7 +81,7 @@ export interface HandleAgentSessionEventInput {
   deps: LinearThenvoiBridgeDeps;
 }
 
-export type { LinearActivityClient, PlanStep } from "./activities";
+export type { LinearActivityClient, PlanStep, SelectOption } from "./activities";
 export type { HandleAppUserNotificationInput } from "./notification";
 
 export type LinearSessionStatus =
