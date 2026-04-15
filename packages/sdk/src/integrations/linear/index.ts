@@ -28,6 +28,7 @@ export {
   PROVIDER_MAX_LENGTH,
 } from "./activities";
 export { createLinearTools } from "./tools";
+export { handleAppUserNotification } from "./notification";
 export {
   createInlineLinearBridgeDispatcher,
   createInProcessLinearBridgeDispatcher,
@@ -43,6 +44,7 @@ export type {
   SessionRoomStore,
   LinearThenvoiBridgeDeps,
   HandleAgentSessionEventInput,
+  HandleAppUserNotificationInput,
   CandidateRepositoryInput,
   LinearActivityClient,
   PlanStep,
