@@ -14,13 +14,13 @@ The SQLite session-room mapping uses `node:sqlite`, so this example requires Nod
 ## Files
 
 - `examples/linear-thenvoi/linear-thenvoi-bridge-server.ts`
-  Real webhook server and embedded bridge runtime.
+  Webhook server and embedded Band Linear PM runtime.
 - `examples/linear-thenvoi/linear-thenvoi-bridge-agent.ts`
   Band Linear PM agent using the Codex adapter and Linear tools.
 
 ## Environment
 
-Create a local `.env.local` from `.env.local.example`. The bridge only needs a few real values:
+Create a local `.env.local` from `.env.local.example`. The agent only needs a few real values:
 
 ```bash
 LINEAR_ACCESS_TOKEN=lin_api_xxx
@@ -44,7 +44,7 @@ Recommended agent config key:
 
 - `linear_thenvoi_bridge`
 
-## Run The Bridge
+## Run
 
 ```bash
 pnpm dev:linear
@@ -83,5 +83,5 @@ https://<your-tunnel-host>/linear/webhook
 - `roomStrategy: "session"` creates a new Thenvoi room per Linear session.
 - `writebackMode: "activity_stream"` posts intermediate Linear activity updates.
 - `writebackMode: "final_only"` keeps writeback minimal until completion.
-- The bridge uses peer discovery and room context to pick relevant external specialists at runtime.
+- Band Linear PM uses peer discovery and room context to pick relevant external specialists at runtime.
 - For planning work, Band Linear PM sends the full issue context to the planner, ends its turn, and continues when specialist output appears.
