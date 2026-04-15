@@ -661,8 +661,10 @@ function addSessionCreationTools(input: {
         room_id: z.string().optional().describe("The Thenvoi room ID to persist the session-room mapping. Pass this when creating a session from within a Thenvoi conversation."),
       }),
       handler: async (args: Record<string, unknown>) => {
+        const commentId = args.comment_id as string;
+        assertUuid("linear_create_session_on_comment", commentId);
         const result = await createOnComment({
-          commentId: args.comment_id as string,
+          commentId,
           ...(typeof args.external_link === "string" ? { externalLink: args.external_link } : {}),
         });
         const session = extractCreatedSession(result);

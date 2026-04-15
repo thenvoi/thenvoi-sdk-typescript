@@ -11,6 +11,7 @@ import { customToolToOpenAISchema, executeCustomTool } from "../src/runtime/tool
 
 const TEST_ISSUE_ID = "11111111-1111-4111-8111-111111111111";
 const OTHER_TEST_ISSUE_ID = "22222222-2222-4222-8222-222222222222";
+const TEST_COMMENT_ID = "33333333-3333-4333-8333-333333333333";
 
 class MemorySessionRoomStore implements SessionRoomStore {
   private readonly records = new Map<string, SessionRoomRecord>();
@@ -808,7 +809,7 @@ describe("createLinearTools", () => {
     const tool = tools.find((entry) => entry.name === "linear_create_session_on_comment")!;
 
     const result = await executeCustomTool(tool, {
-      comment_id: "comment-abc",
+      comment_id: TEST_COMMENT_ID,
     });
 
     expect(result).toEqual({
@@ -820,8 +821,18 @@ describe("createLinearTools", () => {
       },
     });
     expect(client.agentSessionCreateOnComment).toHaveBeenCalledWith({
-      commentId: "comment-abc",
+      commentId: TEST_COMMENT_ID,
     });
+  });
+
+  it("linear_create_session_on_comment rejects non-UUID comment_id", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_comment")!;
+
+    await expect(
+      executeCustomTool(tool, { comment_id: "not-a-uuid" }),
+    ).rejects.toThrow(/requires the exact Linear issue UUID/);
   });
 
   it("linear_create_issue creates a new issue via the Linear client", async () => {
@@ -913,7 +924,7 @@ describe("createLinearTools", () => {
     const tool = tools.find((entry) => entry.name === "linear_create_session_on_comment")!;
 
     await executeCustomTool(tool, {
-      comment_id: "comment-abc",
+      comment_id: TEST_COMMENT_ID,
       room_id: "room-xyz",
     });
 
