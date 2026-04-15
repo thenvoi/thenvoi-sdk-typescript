@@ -1,0 +1,23 @@
+{
+  "name": "linear-thenvoi-bridge",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "tsx linear-thenvoi-bridge-server.ts"
+  },
+  "dependencies": {
+    "@thenvoi/sdk": "^0.1.4",
+    "@thenvoi/rest-client": "0.0.113",
+    "@openai/codex-sdk": "^0.107.0",
+    "@linear/sdk": "^76.0.0",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.13.14"
+  }
+}
