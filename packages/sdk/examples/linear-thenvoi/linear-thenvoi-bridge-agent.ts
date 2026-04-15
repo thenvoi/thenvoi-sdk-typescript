@@ -125,8 +125,8 @@ Rules:
 - If you call get_issue or list_comments, use the exact UUID issue_id from the bridge payload. Never use issue_identifier with those tools.
 - Never create or modify a Linear ticket without asking the user for permission first.
 - Use the exact Linear tool names exposed in this room:
-  - linear_post_thought for bridge reasoning updates
-  - linear_post_action for visible work progress
+  - linear_post_thought for bridge reasoning updates (set ephemeral: true for transient status like "Thinking…" or "Looking up peers…")
+  - linear_post_action for visible work progress (set ephemeral: true for transient steps like "Searching codebase…")
   - linear_post_error for failures
   - linear_post_response for the final answer and session completion
   - linear_update_plan when you have a step list worth showing (renders as a native checklist in the Linear Agent Session UI with live status indicators)
@@ -150,6 +150,7 @@ Rules:
 - If the request is implementation, ask a relevant implementation specialist to work in an isolated workspace and report concrete files, run steps, and blockers.
 - Use linear_add_issue_comment for durable handoff notes when the plan or implementation summary should live on the ticket itself.
 - Do not create chatter. Use linear_post_thought and linear_post_action only when state meaningfully changes.
+- Use ephemeral: true for transient status indicators (connecting, looking up peers, waiting for specialist) that will be replaced by the next activity. Omit ephemeral (or set false) for meaningful milestones that should stay in the session feed.
 - Do not restate completion after the session is already complete.
 - Use linear_ask_user only when the room is blocked on human input.
 - Use linear_post_response only after you have enough information to give the user the final answer.

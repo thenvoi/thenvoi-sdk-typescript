@@ -7,6 +7,7 @@ export interface LinearActivityClient {
   createAgentActivity(input: {
     agentSessionId: string;
     content: Record<string, unknown>;
+    ephemeral?: boolean;
   }): Promise<unknown>;
   updateAgentSession?: (
     id: string,
@@ -32,10 +33,12 @@ async function postActivity(
   client: LinearActivityClient,
   sessionId: string,
   content: Record<string, unknown>,
+  options?: { ephemeral?: boolean },
 ): Promise<void> {
   await client.createAgentActivity({
     agentSessionId: sessionId,
     content,
+    ...(options?.ephemeral ? { ephemeral: true } : {}),
   });
 }
 
@@ -52,8 +55,9 @@ export async function postThought(
   client: LinearActivityClient,
   sessionId: string,
   body: string,
+  options?: { ephemeral?: boolean },
 ): Promise<void> {
-  await postBodyActivity(client, sessionId, L.AgentActivityType.Thought, body);
+  await postActivity(client, sessionId, { type: L.AgentActivityType.Thought, body }, options);
 }
 
 export async function postError(
@@ -84,12 +88,13 @@ export async function postAction(
   client: LinearActivityClient,
   sessionId: string,
   body: string,
+  options?: { ephemeral?: boolean },
 ): Promise<void> {
   await postActivity(client, sessionId, {
     type: L.AgentActivityType.Action,
     action: body,
     parameter: "",
-  });
+  }, options);
 }
 
 type LinearPlanStatus = "pending" | "inProgress" | "completed" | "canceled";

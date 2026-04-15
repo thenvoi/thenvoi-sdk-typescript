@@ -43,6 +43,28 @@ describe("linear activities", () => {
     });
   });
 
+  it("postThought passes ephemeral flag as top-level field", async () => {
+    const client = makeMockClient();
+    await postThought(client, "session-1", "Thinking...", { ephemeral: true });
+
+    expect(client.calls).toHaveLength(1);
+    expect(client.createAgentActivity).toHaveBeenCalledWith({
+      agentSessionId: "session-1",
+      content: { type: "thought", body: "Thinking..." },
+      ephemeral: true,
+    });
+  });
+
+  it("postThought omits ephemeral when not set", async () => {
+    const client = makeMockClient();
+    await postThought(client, "session-1", "Important finding");
+
+    expect(client.createAgentActivity).toHaveBeenCalledWith({
+      agentSessionId: "session-1",
+      content: { type: "thought", body: "Important finding" },
+    });
+  });
+
   it("postAction calls createAgentActivity with action type", async () => {
     const client = makeMockClient();
     await postAction(client, "session-2", "Searching codebase");
@@ -51,6 +73,17 @@ describe("linear activities", () => {
     expect(client.calls[0]).toMatchObject({
       agentSessionId: "session-2",
       content: { type: "action", action: "Searching codebase", parameter: "" },
+    });
+  });
+
+  it("postAction passes ephemeral flag as top-level field", async () => {
+    const client = makeMockClient();
+    await postAction(client, "session-2", "Searching...", { ephemeral: true });
+
+    expect(client.createAgentActivity).toHaveBeenCalledWith({
+      agentSessionId: "session-2",
+      content: { type: "action", action: "Searching...", parameter: "" },
+      ephemeral: true,
     });
   });
 

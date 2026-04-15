@@ -50,23 +50,44 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     });
   };
 
-  addSessionBodyTool(
-    "linear_post_thought",
-    "Post a thought to the Linear agent session, visible to the user as internal reasoning.",
-    async (args) => {
-      await postThought(client, args.session_id as string, args.body as string);
-      return { ok: true };
-    },
-  );
+  const ephemeralSessionBodySchema = sessionBodySchema.extend({
+    ephemeral: z.boolean().optional().describe(
+      "If true, this activity is displayed temporarily and replaced when the next activity arrives. " +
+      "Use for transient status indicators like \"Thinking...\", \"Searching...\", or \"Waiting for response...\".",
+    ),
+  });
 
-  addSessionBodyTool(
-    "linear_post_action",
-    "Post an action to the Linear agent session, showing the user what step is being taken.",
-    async (args) => {
-      await postAction(client, args.session_id as string, args.body as string);
+  tools.push({
+    name: "linear_post_thought",
+    description: "Post a thought to the Linear agent session, visible to the user as internal reasoning. " +
+      "Set ephemeral: true for transient status updates that should disappear when the next activity arrives.",
+    schema: ephemeralSessionBodySchema,
+    handler: async (args: Record<string, unknown>) => {
+      await postThought(
+        client,
+        args.session_id as string,
+        args.body as string,
+        args.ephemeral ? { ephemeral: true } : undefined,
+      );
       return { ok: true };
     },
-  );
+  });
+
+  tools.push({
+    name: "linear_post_action",
+    description: "Post an action to the Linear agent session, showing the user what step is being taken. " +
+      "Set ephemeral: true for transient status updates that should disappear when the next activity arrives.",
+    schema: ephemeralSessionBodySchema,
+    handler: async (args: Record<string, unknown>) => {
+      await postAction(
+        client,
+        args.session_id as string,
+        args.body as string,
+        args.ephemeral ? { ephemeral: true } : undefined,
+      );
+      return { ok: true };
+    },
+  });
 
   addSessionBodyTool(
     "linear_post_error",

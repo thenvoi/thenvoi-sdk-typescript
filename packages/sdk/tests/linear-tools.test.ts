@@ -161,6 +161,44 @@ describe("createLinearTools", () => {
     });
   });
 
+  it("linear_post_thought passes ephemeral flag to the activity layer", async () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_post_thought")!;
+
+    const result = await executeCustomTool(tool, {
+      session_id: "sess-1",
+      body: "Thinking...",
+      ephemeral: true,
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(client.createAgentActivity).toHaveBeenCalledWith({
+      agentSessionId: "sess-1",
+      content: { type: "thought", body: "Thinking..." },
+      ephemeral: true,
+    });
+  });
+
+  it("linear_post_action passes ephemeral flag to the activity layer", async () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_post_action")!;
+
+    const result = await executeCustomTool(tool, {
+      session_id: "sess-1",
+      body: "Searching...",
+      ephemeral: true,
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(client.createAgentActivity).toHaveBeenCalledWith({
+      agentSessionId: "sess-1",
+      content: { type: "action", action: "Searching...", parameter: "" },
+      ephemeral: true,
+    });
+  });
+
   it("linear_ask_user validates and calls the activity layer", async () => {
     const client = makeMockClient();
     const tools = createLinearTools({ client });
