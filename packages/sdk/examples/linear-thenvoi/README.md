@@ -56,21 +56,31 @@ This goes into your `.env` as `LINEAR_ACCESS_TOKEN`.
 2. Make sure **Linear Agent** is enabled for your workspace
 3. If you see "Start free trial", you may need a Business or Enterprise plan for full agent functionality
 
-### 3. Create a Webhook
+### 3. Create an OAuth Application
+
+Agent Session events (the events that trigger this bridge) are delivered through an OAuth application, not through regular workspace webhooks. You need to create one.
 
 1. In Settings, go to **Administration > API** in the left sidebar
-2. Under **Webhooks**, click **+ New webhook**
-3. Fill in the form:
-   - **Label**: "Thenvoi Bridge" (or any descriptive name)
-   - **URL**: Your public endpoint, e.g., `https://your-tunnel.trycloudflare.com/linear/webhook`
-   - **Signing secret**: Auto-generated for you (starts with `lin_wh_`). Copy this using the copy button next to it.
-   - **Data change events**: Check **Issues** (pre-checked by default). The bridge primarily responds to Agent Session events, which are delivered through this webhook.
-   - **Team selection**: Choose "All public teams" or select specific teams
-4. Click **Create webhook**
+2. Under **OAuth Applications**, click the **+** button
+3. Fill in the application details:
+   - **Application name**: "Thenvoi Bridge" (or whatever you want users to see)
+   - **Developer name**: Your name or organization
+   - **Developer URL**: Your project's homepage (can be any valid URL)
+   - **Description**: "Thenvoi multi-agent bridge for Linear"
+   - **Callback URLs**: Your bridge's OAuth callback URL (e.g., `https://your-domain.com/linear/oauth/callback`)
+4. Enable the **Webhooks** toggle at the bottom of the form
+5. Fill in the webhook fields that appear:
+   - **Webhook URL**: Your bridge's public endpoint, e.g., `https://your-tunnel.trycloudflare.com/linear/webhook`
+   - **Webhook signing secret**: Auto-generated (`lin_wh_...`). Copy it using the copy button.
+6. Under **App events**, check **Agent session events** -- this is the event type that triggers the bridge when a user starts an agent session on an issue
+7. Optionally check **Inbox notifications** if you want the bridge to handle inbox events too
+8. Click **Create**
 
-The signing secret goes into your `.env` as `LINEAR_WEBHOOK_SECRET`.
+The webhook signing secret goes into your `.env` as `LINEAR_WEBHOOK_SECRET`.
 
-> **Note on Agent Sessions**: Agent Session events are delivered through the webhook you create here. The bridge's webhook handler at `/linear/webhook` processes these events and routes them to the appropriate Thenvoi room.
+After creating the application, you will receive a **Client ID** and **Client Secret**. The OAuth application must be installed in the workspace using the `actor=app` flow so that agent sessions are routed to your bridge.
+
+> **Why an OAuth application?** Regular workspace webhooks only deliver data change events (Issue, Comment, etc.). Agent Session events are app-specific -- they are sent only to the OAuth application that owns the session. The bridge receives these events at the webhook URL you configured in the OAuth app.
 
 ## Setting Up Thenvoi
 
