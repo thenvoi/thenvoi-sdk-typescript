@@ -607,7 +607,7 @@ function addSessionCreationTools(input: {
 
   const sessionCreationSchema = z.object({
     issue_id: z.string().describe("The Linear issue ID (UUID)"),
-    external_link: z.string().optional().describe("Optional URL of an external page associated with this session"),
+    external_link: z.string().url().optional().describe("Optional URL of an external page associated with this session"),
     room_id: z.string().optional().describe("The Thenvoi room ID to persist the session-room mapping. Pass this when creating a session from within a Thenvoi conversation."),
   });
 
@@ -628,7 +628,7 @@ function addSessionCreationTools(input: {
     });
   }
 
-  const createOnIssue = client.agentSessionCreateOnIssue;
+  const createOnIssue = client.agentSessionCreateOnIssue?.bind(client);
   if (typeof createOnIssue === "function") {
     tools.push({
       name: "linear_create_session_on_issue",
@@ -636,8 +636,10 @@ function addSessionCreationTools(input: {
         "Create a new Linear agent session on an existing issue. Use this when the conversation produces work that should be tracked against a known Linear issue and no session exists yet.",
       schema: sessionCreationSchema,
       handler: async (args: Record<string, unknown>) => {
+        const issueId = args.issue_id as string;
+        assertUuid("linear_create_session_on_issue", issueId);
         const result = await createOnIssue({
-          issueId: args.issue_id as string,
+          issueId,
           ...(typeof args.external_link === "string" ? { externalLink: args.external_link } : {}),
         });
         const session = extractCreatedSession(result);
@@ -647,7 +649,7 @@ function addSessionCreationTools(input: {
     });
   }
 
-  const createOnComment = client.agentSessionCreateOnComment;
+  const createOnComment = client.agentSessionCreateOnComment?.bind(client);
   if (typeof createOnComment === "function") {
     tools.push({
       name: "linear_create_session_on_comment",
@@ -655,7 +657,7 @@ function addSessionCreationTools(input: {
         "Create a new Linear agent session on a specific comment thread. Use this to attach agent work to an existing discussion on a Linear issue.",
       schema: z.object({
         comment_id: z.string().describe("The Linear comment ID (UUID)"),
-        external_link: z.string().optional().describe("Optional URL of an external page associated with this session"),
+        external_link: z.string().url().optional().describe("Optional URL of an external page associated with this session"),
         room_id: z.string().optional().describe("The Thenvoi room ID to persist the session-room mapping. Pass this when creating a session from within a Thenvoi conversation."),
       }),
       handler: async (args: Record<string, unknown>) => {
@@ -670,7 +672,7 @@ function addSessionCreationTools(input: {
     });
   }
 
-  const createIssueFn = client.createIssue;
+  const createIssueFn = client.createIssue?.bind(client);
   if (typeof createIssueFn === "function") {
     tools.push({
       name: "linear_create_issue",

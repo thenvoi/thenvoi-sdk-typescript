@@ -54,7 +54,7 @@ export interface LinearActivityClient {
   createIssue?: (
     input: {
       teamId: string;
-      title?: string;
+      title: string;
       description?: string;
       priority?: number;
       assigneeId?: string;
