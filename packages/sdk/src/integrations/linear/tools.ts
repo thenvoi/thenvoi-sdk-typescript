@@ -189,6 +189,9 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     });
   }
 
+  // linear_post_response is registered manually (not via addSessionBodyTool) because
+  // its handler calls completeLinearSession which needs `store` — a different signature
+  // than the postThought/postAction/postError functions that addSessionBodyTool expects.
   tools.push({
     name: "linear_post_response",
     description: "Post the final response to the Linear agent session and mark the session completed when a store is available.",
@@ -273,7 +276,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     });
   }
 
-  addSessionCreationTools({ tools, client });
+  addSessionCreationTools({ tools, client, store });
 
   return tools;
 }
@@ -598,8 +601,32 @@ async function readWorkflowStates(
 function addSessionCreationTools(input: {
   tools: CustomToolDef[];
   client: LinearActivityClient;
+  store?: SessionRoomStore;
 }): void {
-  const { tools, client } = input;
+  const { tools, client, store } = input;
+
+  const sessionCreationSchema = z.object({
+    issue_id: z.string().describe("The Linear issue ID (UUID)"),
+    external_link: z.string().optional().describe("Optional URL of an external page associated with this session"),
+    room_id: z.string().optional().describe("The Thenvoi room ID to persist the session-room mapping. Pass this when creating a session from within a Thenvoi conversation."),
+  });
+
+  async function persistSessionRoom(
+    sessionId: string | null,
+    issueId: string | null,
+    roomId: string | undefined,
+  ): Promise<void> {
+    if (!store || !sessionId || typeof roomId !== "string") return;
+    const now = new Date().toISOString();
+    await store.upsert({
+      linearSessionId: sessionId,
+      linearIssueId: issueId,
+      thenvoiRoomId: roomId,
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
 
   const createOnIssue = client.agentSessionCreateOnIssue;
   if (typeof createOnIssue === "function") {
@@ -607,16 +634,14 @@ function addSessionCreationTools(input: {
       name: "linear_create_session_on_issue",
       description:
         "Create a new Linear agent session on an existing issue. Use this when the conversation produces work that should be tracked against a known Linear issue and no session exists yet.",
-      schema: z.object({
-        issue_id: z.string().describe("The Linear issue ID (UUID) or identifier (e.g. 'LIN-123')"),
-        external_link: z.string().optional().describe("Optional URL of an external page associated with this session"),
-      }),
+      schema: sessionCreationSchema,
       handler: async (args: Record<string, unknown>) => {
         const result = await createOnIssue({
           issueId: args.issue_id as string,
           ...(typeof args.external_link === "string" ? { externalLink: args.external_link } : {}),
         });
         const session = extractCreatedSession(result);
+        await persistSessionRoom(session.id, session.issueId, args.room_id as string | undefined);
         return { ok: true, session };
       },
     });
@@ -631,6 +656,7 @@ function addSessionCreationTools(input: {
       schema: z.object({
         comment_id: z.string().describe("The Linear comment ID (UUID)"),
         external_link: z.string().optional().describe("Optional URL of an external page associated with this session"),
+        room_id: z.string().optional().describe("The Thenvoi room ID to persist the session-room mapping. Pass this when creating a session from within a Thenvoi conversation."),
       }),
       handler: async (args: Record<string, unknown>) => {
         const result = await createOnComment({
@@ -638,6 +664,7 @@ function addSessionCreationTools(input: {
           ...(typeof args.external_link === "string" ? { externalLink: args.external_link } : {}),
         });
         const session = extractCreatedSession(result);
+        await persistSessionRoom(session.id, session.issueId, args.room_id as string | undefined);
         return { ok: true, session };
       },
     });
@@ -651,7 +678,7 @@ function addSessionCreationTools(input: {
         "Create a new Linear issue from scratch. Use this when the Thenvoi conversation produces work that should be tracked as a new Linear issue. Never create issues without explicit human intent or clear delegation.",
       schema: z.object({
         team_id: z.string().describe("The Linear team ID to create the issue in"),
-        title: z.string().describe("Issue title"),
+        title: z.string().min(1).describe("Issue title"),
         description: z.string().optional().describe("Issue description in Markdown"),
         priority: z.number().int().min(0).max(4).optional().describe("Priority 0-4 (0=none, 1=urgent, 2=high, 3=normal, 4=low)"),
         assignee_id: z.string().optional().describe("Assignee user ID"),

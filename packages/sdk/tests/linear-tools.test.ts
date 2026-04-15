@@ -57,7 +57,7 @@ class MemorySessionRoomStore implements SessionRoomStore {
 function makeMockClientWithSessionCreation(): LinearActivityClient {
   return {
     ...makeMockClient(),
-    agentSessionCreateOnIssue: vi.fn(async ({ issueId }: { issueId: string }) => ({
+    agentSessionCreateOnIssue: vi.fn(async ({ issueId }: { issueId: string; externalLink?: string }) => ({
       agentSession: {
         id: "new-session-1",
         issueId,
@@ -770,19 +770,19 @@ describe("createLinearTools", () => {
     const tool = tools.find((entry) => entry.name === "linear_create_session_on_issue")!;
 
     const result = await executeCustomTool(tool, {
-      issue_id: "LIN-123",
+      issue_id: TEST_ISSUE_ID,
     });
 
     expect(result).toEqual({
       ok: true,
       session: {
         id: "new-session-1",
-        issueId: "LIN-123",
+        issueId: TEST_ISSUE_ID,
         status: "active",
       },
     });
     expect(client.agentSessionCreateOnIssue).toHaveBeenCalledWith({
-      issueId: "LIN-123",
+      issueId: TEST_ISSUE_ID,
     });
   });
 
@@ -871,6 +871,66 @@ describe("createLinearTools", () => {
       stateId: "state-0",
       labelIds: ["label-1", "label-2"],
     });
+  });
+
+  it("linear_create_session_on_issue persists session-room mapping when store and room_id are provided", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const store = new MemorySessionRoomStore();
+    const tools = createLinearTools({ client, store });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_issue")!;
+
+    await executeCustomTool(tool, {
+      issue_id: TEST_ISSUE_ID,
+      room_id: "room-abc",
+    });
+
+    const record = await store.getBySessionId("new-session-1");
+    expect(record).not.toBeNull();
+    expect(record!.linearSessionId).toBe("new-session-1");
+    expect(record!.linearIssueId).toBe(TEST_ISSUE_ID);
+    expect(record!.thenvoiRoomId).toBe("room-abc");
+    expect(record!.status).toBe("active");
+  });
+
+  it("linear_create_session_on_issue skips persistence when room_id is not provided", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const store = new MemorySessionRoomStore();
+    const tools = createLinearTools({ client, store });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_issue")!;
+
+    await executeCustomTool(tool, {
+      issue_id: TEST_ISSUE_ID,
+    });
+
+    const record = await store.getBySessionId("new-session-1");
+    expect(record).toBeNull();
+  });
+
+  it("linear_create_session_on_comment persists session-room mapping when store and room_id are provided", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const store = new MemorySessionRoomStore();
+    const tools = createLinearTools({ client, store });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_comment")!;
+
+    await executeCustomTool(tool, {
+      comment_id: "comment-abc",
+      room_id: "room-xyz",
+    });
+
+    const record = await store.getBySessionId("new-session-2");
+    expect(record).not.toBeNull();
+    expect(record!.thenvoiRoomId).toBe("room-xyz");
+    expect(record!.status).toBe("active");
+  });
+
+  it("linear_create_issue rejects empty title", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_issue")!;
+
+    await expect(
+      executeCustomTool(tool, { team_id: "team-1", title: "" }),
+    ).rejects.toThrow();
   });
 
   it("includes linear_suggest_repositories when client supports issueRepositorySuggestions", () => {
