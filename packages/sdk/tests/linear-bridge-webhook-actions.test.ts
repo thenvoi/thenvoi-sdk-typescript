@@ -128,11 +128,13 @@ function makePayload(action: "created" | "updated" | "canceled") {
 
 function makeLinearClient(options?: { delegateId?: string | null }): HandleAgentSessionEventInput["deps"]["linearClient"] & {
   createAgentActivity: ReturnType<typeof vi.fn>;
+  agentSessionUpdateExternalUrl: ReturnType<typeof vi.fn>;
   issue: ReturnType<typeof vi.fn>;
   updateIssue: ReturnType<typeof vi.fn>;
 } {
   return {
     createAgentActivity: vi.fn(async () => ({ ok: true })),
+    agentSessionUpdateExternalUrl: vi.fn(async () => ({ success: true })),
     issue: vi.fn(async () => ({
       id: "issue-1",
       delegateId: options?.delegateId ?? null,
@@ -140,6 +142,7 @@ function makeLinearClient(options?: { delegateId?: string | null }): HandleAgent
     updateIssue: vi.fn(async () => ({ success: true })),
   } as unknown as HandleAgentSessionEventInput["deps"]["linearClient"] & {
     createAgentActivity: ReturnType<typeof vi.fn>;
+    agentSessionUpdateExternalUrl: ReturnType<typeof vi.fn>;
     issue: ReturnType<typeof vi.fn>;
     updateIssue: ReturnType<typeof vi.fn>;
   };
@@ -571,6 +574,44 @@ describe("linear bridge webhook actions", () => {
     ]);
   });
 
+  it("sets external URL on Linear session on created event", async () => {
+    const restApi = new LinearThenvoiExampleRestApi();
+    const store = new MemorySessionRoomStore();
+    const linearClient = makeLinearClient();
+
+    await handleAgentSessionEvent({
+      payload: makePayload("created"),
+      config,
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    expect(linearClient.agentSessionUpdateExternalUrl).toHaveBeenCalledWith(
+      "session-1",
+      {
+        externalUrls: [{ label: "View in Thenvoi", url: expect.stringMatching(/^https:\/\/app\.thenvoi\.com\/rooms\//) }],
+      },
+    );
+  });
+
+  it("uses custom thenvoiAppBaseUrl for external URL", async () => {
+    const restApi = new LinearThenvoiExampleRestApi();
+    const store = new MemorySessionRoomStore();
+    const linearClient = makeLinearClient();
+
+    await handleAgentSessionEvent({
+      payload: makePayload("created"),
+      config: { ...config, thenvoiAppBaseUrl: "https://custom.example.com" },
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    expect(linearClient.agentSessionUpdateExternalUrl).toHaveBeenCalledWith(
+      "session-1",
+      {
+        externalUrls: [{ label: "View in Thenvoi", url: expect.stringContaining("https://custom.example.com/rooms/") }],
+      },
+    );
+  });
+
   it("skips delegate when appUserId is absent", async () => {
     const restApi = new LinearThenvoiExampleRestApi();
     const store = new MemorySessionRoomStore();
@@ -634,7 +675,7 @@ describe("linear bridge webhook actions", () => {
     expect(linearClient.updateIssue).not.toHaveBeenCalled();
   });
 
-  it("does not attempt delegate on updated events", async () => {
+  it("does not set external URL on updated events", async () => {
     const restApi = new LinearThenvoiExampleRestApi();
     const store = new MemorySessionRoomStore();
     const linearClient = makeLinearClient();
@@ -653,9 +694,30 @@ describe("linear bridge webhook actions", () => {
       deps: { thenvoiRest: restApi, linearClient: updatedClient, store },
     });
 
+    expect(updatedClient.agentSessionUpdateExternalUrl).not.toHaveBeenCalled();
     // The updated client should not have fetched the issue for delegate check.
     expect(updatedClient.issue).not.toHaveBeenCalled();
     expect(updatedClient.updateIssue).not.toHaveBeenCalled();
+  });
+
+  it("continues normally when setting external URL fails", async () => {
+    const restApi = new LinearThenvoiExampleRestApi();
+    const store = new MemorySessionRoomStore();
+    const linearClient = makeLinearClient();
+    linearClient.agentSessionUpdateExternalUrl.mockRejectedValueOnce(new Error("API error"));
+
+    await handleAgentSessionEvent({
+      payload: makePayload("created"),
+      config,
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    // Should still forward the message successfully despite external URL failure.
+    expect(restApi.roomEvents).toHaveLength(1);
+    expect(restApi.roomEvents[0]?.metadata).toMatchObject({
+      linear_event_action: "created",
+      linear_session_id: "session-1",
+    });
   });
 
   it("continues normally when auto-delegate fails", async () => {
@@ -676,5 +738,21 @@ describe("linear bridge webhook actions", () => {
       linear_event_action: "created",
       linear_session_id: "session-1",
     });
+  });
+
+  it("skips external URL when agentSessionUpdateExternalUrl is unavailable", async () => {
+    const restApi = new LinearThenvoiExampleRestApi();
+    const store = new MemorySessionRoomStore();
+    const linearClient = makeLinearClient();
+    delete (linearClient as Partial<typeof linearClient>).agentSessionUpdateExternalUrl;
+
+    await handleAgentSessionEvent({
+      payload: makePayload("created"),
+      config,
+      deps: { thenvoiRest: restApi, linearClient, store },
+    });
+
+    // Should still forward the message successfully.
+    expect(restApi.roomEvents).toHaveLength(1);
   });
 });

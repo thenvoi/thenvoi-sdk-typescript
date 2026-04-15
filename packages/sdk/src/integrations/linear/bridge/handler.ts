@@ -31,7 +31,10 @@ interface NormalizedBridgeConfig {
   roomStrategy: "issue" | "session";
   writebackMode: "final_only" | "activity_stream";
   hostAgentHandle: string | null;
+  thenvoiAppBaseUrl: string;
 }
+
+const DEFAULT_THENVOI_APP_BASE_URL = "https://app.thenvoi.com";
 
 const SUPPORTED_ACTIONS = new Set(["created", "updated", "canceled", "prompted"]);
 const MAX_PEER_LOOKUP_PAGES = 25;
@@ -174,6 +177,7 @@ export async function handleAgentSessionEvent(
   }
 
   let roomRecord: SessionRoomRecord | null = null;
+  let externalUrlPromise: Promise<void> | undefined;
   try {
     const hostAgentHandle = await resolveHostAgentHandle({
       thenvoiRest: input.deps.thenvoiRest,
@@ -193,6 +197,22 @@ export async function handleAgentSessionEvent(
       logger,
       runtime,
     });
+    if (action === "created") {
+      const roomId = roomRecord.thenvoiRoomId;
+      externalUrlPromise = trySetSessionExternalUrl({
+        linearClient: input.deps.linearClient,
+        sessionId,
+        roomId,
+        appBaseUrl: config.thenvoiAppBaseUrl,
+        logger,
+      }).catch((urlError) => {
+        logger.warn("linear_thenvoi_bridge.set_external_url_failed", {
+          sessionId,
+          roomId,
+          error: urlError instanceof Error ? urlError.message : String(urlError),
+        });
+      });
+    }
 
     const sessionIntent = detectSessionIntent({
       issueStateType: extractIssueStateField(input.payload.agentSession.issue, "type"),
@@ -332,6 +352,9 @@ export async function handleAgentSessionEvent(
       updatedAt: now,
     });
 
+    // Ensure external URL has been set before returning (already has .catch, won't throw).
+    await externalUrlPromise;
+
     logger.info("linear_thenvoi_bridge.message_forwarded", {
       sessionId,
       issueId,
@@ -339,8 +362,9 @@ export async function handleAgentSessionEvent(
       action,
     });
   } catch (error) {
-    // Ensure auto-delegate has settled so we don't leave a fire-and-forget side-effect running
-    // after the handler returns an error (the promise already has .catch, so this won't throw).
+    // Ensure background operations have settled before re-throwing
+    // (promises already have .catch, so these won't throw).
+    await externalUrlPromise;
     await delegatePromise;
 
     // Report errors back to Linear before re-throwing.
@@ -419,11 +443,39 @@ export async function completeLinearSession(input: {
   });
 }
 
+async function trySetSessionExternalUrl(input: {
+  linearClient: HandleAgentSessionEventInput["deps"]["linearClient"];
+  sessionId: string;
+  roomId: string;
+  appBaseUrl: string;
+  logger: Logger;
+}): Promise<void> {
+  if (typeof input.linearClient.agentSessionUpdateExternalUrl !== "function") {
+    input.logger.info("linear_thenvoi_bridge.set_external_url_skipped_no_api", {
+      sessionId: input.sessionId,
+    });
+    return;
+  }
+
+  const base = input.appBaseUrl.replace(/\/+$/, "");
+  const roomUrl = `${base}/rooms/${input.roomId}`;
+  await input.linearClient.agentSessionUpdateExternalUrl(input.sessionId, {
+    externalUrls: [{ label: "View in Thenvoi", url: roomUrl }],
+  });
+
+  input.logger.info("linear_thenvoi_bridge.external_url_set", {
+    sessionId: input.sessionId,
+    roomId: input.roomId,
+    url: roomUrl,
+  });
+}
+
 function normalizeConfig(config: LinearThenvoiBridgeConfig): NormalizedBridgeConfig {
   return {
     roomStrategy: config.roomStrategy ?? "issue",
     writebackMode: config.writebackMode ?? "final_only",
     hostAgentHandle: normalizeOptionalHandle(config.hostAgentHandle),
+    thenvoiAppBaseUrl: config.thenvoiAppBaseUrl ?? DEFAULT_THENVOI_APP_BASE_URL,
   };
 }
 

@@ -16,6 +16,7 @@ export {
   handleAgentSessionEvent,
   isSessionStale,
   postAction,
+  postAuthElicitation,
   postElicitation,
   postError,
   postResponse,
@@ -25,6 +26,9 @@ export {
   sendRecoveryActivityIfStale,
   stripHandlePrefix,
   updatePlan,
+  ELICITATION_BODY_MAX_LENGTH,
+  SELECT_OPTION_MAX_LENGTH,
+  PROVIDER_MAX_LENGTH,
 } from "../integrations/linear";
 export type {
   CreateLinearWebhookHandlerOptions,

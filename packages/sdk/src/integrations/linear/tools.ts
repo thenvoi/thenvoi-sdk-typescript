@@ -3,15 +3,32 @@ import { z } from "zod";
 import type { CustomToolDef } from "../../runtime/tools/customTools";
 import type { CandidateRepositoryInput, LinearActivityClient, PlanStep, RepositorySuggestion, SelectOption } from "./activities";
 import {
+  ELICITATION_BODY_MAX_LENGTH,
+  SELECT_OPTION_MAX_LENGTH,
+  PROVIDER_MAX_LENGTH,
   postThought,
   postAction,
   postError,
   postElicitation,
   postSelectElicitation,
+  postAuthElicitation,
   updatePlan,
 } from "./activities";
 import { completeLinearSession } from "./bridge";
 import type { SessionRoomStore } from "./types";
+
+const LOCALHOST_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/** Zod refine predicate: allow https for any host, http only for localhost. */
+function isAllowedAuthUrl(u: string): boolean {
+  try {
+    const parsed = new URL(u);
+    if (parsed.protocol === "https:") return true;
+    return LOCALHOST_HOSTNAMES.has(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
 
 interface CreateLinearToolsOptions {
   client: LinearActivityClient;
@@ -79,14 +96,30 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
   );
 
   if (enableElicitation) {
-    addSessionBodyTool(
-      "linear_ask_user",
-      "Ask the Linear user a question via an elicitation activity.",
-      async (args) => {
-        await postElicitation(client, args.session_id as string, args.body as string);
+    tools.push({
+      name: "linear_ask_user",
+      description: "Ask the Linear user a question. When options are provided, Linear renders them as a clickable picker (select signal); otherwise the user sees a free-text prompt.",
+      schema: z.object({
+        session_id: z.string().describe("The Linear agent session ID"),
+        body: z.string().max(ELICITATION_BODY_MAX_LENGTH).describe("The question to ask, in Markdown format"),
+        options: z.array(z.object({
+          label: z.string().max(SELECT_OPTION_MAX_LENGTH).describe("Display text for the option"),
+          value: z.string().max(SELECT_OPTION_MAX_LENGTH).describe("Value returned when the option is selected"),
+        })).min(2).max(20).optional().describe("Clickable options for a select picker (2–20 items). Omit for free-text input."),
+      }),
+      handler: async (args: Record<string, unknown>) => {
+        const sessionId = args.session_id as string;
+        const body = args.body as string;
+        // Zod .min(2) guarantees options is either undefined or has ≥2 items
+        const options = args.options as SelectOption[] | undefined;
+        if (options) {
+          await postSelectElicitation(client, sessionId, body, options);
+        } else {
+          await postElicitation(client, sessionId, body);
+        }
         return { ok: true };
       },
-    );
+    });
 
     tools.push({
       name: "linear_select",
@@ -113,6 +146,30 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
           args.session_id as string,
           args.body as string,
           args.options as SelectOption[],
+        );
+        return { ok: true };
+      },
+    });
+
+    tools.push({
+      name: "linear_request_auth",
+      description: "Ask the Linear user to link an external account by presenting an authentication button. The user sees a 'Link account' UI that opens the provided URL.",
+      schema: z.object({
+        session_id: z.string().describe("The Linear agent session ID"),
+        body: z.string().max(ELICITATION_BODY_MAX_LENGTH).describe("Explanation of why authentication is needed, in Markdown format"),
+        url: z.string().url().refine(
+          isAllowedAuthUrl,
+          { message: "URL must use https (http allowed only for localhost)" },
+        ).describe("The authentication URL to open when the user clicks the link button"),
+        provider: z.string().min(1).max(PROVIDER_MAX_LENGTH).optional().describe("Name of the external service (e.g. 'GitHub', 'Slack')"),
+      }),
+      handler: async (args: Record<string, unknown>) => {
+        await postAuthElicitation(
+          client,
+          args.session_id as string,
+          args.body as string,
+          args.url as string,
+          args.provider as string | undefined,
         );
         return { ok: true };
       },

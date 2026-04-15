@@ -18,8 +18,6 @@ export interface LinearActivityClient {
   createAgentActivity(input: {
     agentSessionId: string;
     content: Record<string, unknown>;
-    signal?: L.AgentActivitySignal | null;
-    signalMetadata?: Record<string, unknown>;
   }): Promise<unknown>;
   updateAgentSession?: (
     id: string,
@@ -39,6 +37,10 @@ export interface LinearActivityClient {
     issueId: string,
     variables?: { agentSessionId?: string | null },
   ) => Promise<unknown>;
+  agentSessionUpdateExternalUrl?: (
+    id: string,
+    input: Record<string, unknown>,
+  ) => Promise<unknown>;
 }
 
 export interface PlanStep {
@@ -51,17 +53,23 @@ export interface SelectOption {
   value: string;
 }
 
+/** Longest body string allowed in an elicitation activity. */
+export const ELICITATION_BODY_MAX_LENGTH = 10_000;
+
+/** Longest label or value string allowed in a select option. */
+export const SELECT_OPTION_MAX_LENGTH = 200;
+
+/** Longest provider name string allowed in an auth elicitation. */
+export const PROVIDER_MAX_LENGTH = 100;
+
 async function postActivity(
   client: LinearActivityClient,
   sessionId: string,
   content: Record<string, unknown>,
-  options?: { signal?: L.AgentActivitySignal | null; signalMetadata?: Record<string, unknown> },
 ): Promise<void> {
   await client.createAgentActivity({
     agentSessionId: sessionId,
     content,
-    ...(options?.signal ? { signal: options.signal } : {}),
-    ...(options?.signalMetadata ? { signalMetadata: options.signalMetadata } : {}),
   });
 }
 
@@ -110,14 +118,32 @@ export async function postSelectElicitation(
   client: LinearActivityClient,
   sessionId: string,
   body: string,
-  selectOptions: SelectOption[],
+  options: SelectOption[],
 ): Promise<void> {
-  await postActivity(
-    client,
-    sessionId,
-    { type: L.AgentActivityType.Elicitation, body },
-    { signal: L.AgentActivitySignal.Select, signalMetadata: { options: selectOptions } },
-  );
+  await postActivity(client, sessionId, {
+    type: L.AgentActivityType.Elicitation,
+    body,
+    signal: L.AgentActivitySignal.Select,
+    signalMetadata: { options },
+  });
+}
+
+export async function postAuthElicitation(
+  client: LinearActivityClient,
+  sessionId: string,
+  body: string,
+  url: string,
+  provider?: string,
+): Promise<void> {
+  await postActivity(client, sessionId, {
+    type: L.AgentActivityType.Elicitation,
+    body,
+    signal: L.AgentActivitySignal.Auth,
+    signalMetadata: {
+      url,
+      ...(provider ? { provider } : {}),
+    },
+  });
 }
 
 export async function postAction(
