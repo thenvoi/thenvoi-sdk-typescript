@@ -17,6 +17,7 @@ import {
   buildBridgeMessage,
   detectSessionIntent,
   extractIssueAssigneeField,
+  extractIssueDelegateField,
   extractIssueStateField,
   extractIssueTeamId,
   extractIssueTeamKey,
@@ -136,6 +137,28 @@ export async function handleAgentSessionEvent(
     }
   }
 
+  // Auto-delegate: fire in background, runs concurrently with room resolution (best-effort).
+  let delegatePromise: Promise<{ set: boolean; delegateName: string | null }> | undefined;
+  if (action === "created" && issueId) {
+    const appUserId = input.payload.appUserId;
+    if (appUserId) {
+      delegatePromise = trySetAgentAsDelegate({
+        linearClient: input.deps.linearClient,
+        issueId,
+        appUserId,
+        logger,
+      }).catch((delegateError) => {
+        logger.warn("linear_thenvoi_bridge.auto_delegate_failed", {
+          sessionId,
+          issueId,
+          appUserId,
+          error: delegateError instanceof Error ? delegateError.message : String(delegateError),
+        });
+        return { set: false, delegateName: null };
+      });
+    }
+  }
+
   let roomRecord: SessionRoomRecord | null = null;
   try {
     const hostAgentHandle = await resolveHostAgentHandle({
@@ -181,6 +204,19 @@ export async function handleAgentSessionEvent(
       logger,
     });
 
+    // Await auto-delegate before building the message so delegate info is up-to-date.
+    // The promise already has a .catch() at creation that converts errors to { set: false, delegateName: null }.
+    const delegateResult = await delegatePromise;
+
+    let issueDelegateId = extractIssueDelegateField(input.payload.agentSession.issue, "id");
+    let issueDelegateName: string | null =
+      extractIssueDelegateField(input.payload.agentSession.issue, "displayName")
+      ?? extractIssueDelegateField(input.payload.agentSession.issue, "name");
+    if (delegateResult?.set && input.payload.appUserId) {
+      issueDelegateId = input.payload.appUserId;
+      issueDelegateName = delegateResult.delegateName ?? input.payload.appUserId;
+    }
+
     const message = buildBridgeMessage({
       sessionId,
       issueId,
@@ -205,6 +241,8 @@ export async function handleAgentSessionEvent(
       issueAssigneeName:
         extractIssueAssigneeField(input.payload.agentSession.issue, "displayName")
         ?? extractIssueAssigneeField(input.payload.agentSession.issue, "name"),
+      issueDelegateId,
+      issueDelegateName,
       commentBody: input.payload.agentSession.comment?.body,
       commentId: input.payload.agentSession.comment?.id,
       sessionIntent,
@@ -285,6 +323,10 @@ export async function handleAgentSessionEvent(
       action,
     });
   } catch (error) {
+    // Ensure auto-delegate has settled so we don't leave a fire-and-forget side-effect running
+    // after the handler returns an error (the promise already has .catch, so this won't throw).
+    await delegatePromise;
+
     // Report errors back to Linear before re-throwing.
     try {
       await postError(
@@ -374,6 +416,43 @@ function normalizeOptionalHandle(handle: string | null | undefined): string | nu
 
   const normalized = stripHandlePrefix(handle);
   return normalized.length > 0 ? normalized : null;
+}
+
+async function trySetAgentAsDelegate(input: {
+  linearClient: HandleAgentSessionEventInput["deps"]["linearClient"];
+  issueId: string;
+  appUserId: string;
+  logger: Logger;
+}): Promise<{ set: boolean; delegateName: string | null }> {
+  const issue = await input.linearClient.issue(input.issueId);
+  const existingDelegateId = issue.delegateId;
+  if (existingDelegateId) {
+    input.logger.info("linear_thenvoi_bridge.delegate_already_set", {
+      issueId: input.issueId,
+      existingDelegateId,
+    });
+    return { set: false, delegateName: null };
+  }
+
+  await input.linearClient.updateIssue(input.issueId, {
+    delegateId: input.appUserId,
+  });
+
+  // Re-fetch the issue to get the delegate's display name for the bridge message.
+  let delegateName: string | null = null;
+  try {
+    const updated = await input.linearClient.issue(input.issueId);
+    const delegate = await updated.delegate;
+    delegateName = delegate?.displayName ?? delegate?.name ?? null;
+  } catch {
+    // Best-effort: if re-fetch fails, the caller falls back to appUserId.
+  }
+
+  input.logger.info("linear_thenvoi_bridge.delegate_set", {
+    issueId: input.issueId,
+    delegateId: input.appUserId,
+  });
+  return { set: true, delegateName };
 }
 
 async function resolveHostAgentHandle(input: {
