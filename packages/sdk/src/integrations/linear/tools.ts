@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { CustomToolDef } from "../../runtime/tools/customTools";
-import type { LinearActivityClient, PlanStep, SelectOption } from "./activities";
+import type { CandidateRepositoryInput, LinearActivityClient, PlanStep, RepositorySuggestion, SelectOption } from "./activities";
 import {
   ELICITATION_BODY_MAX_LENGTH,
   SELECT_OPTION_MAX_LENGTH,
@@ -122,6 +122,36 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     });
 
     tools.push({
+      name: "linear_select",
+      description:
+        "Present the Linear user with a set of clickable options via a select elicitation. " +
+        "Use this instead of linear_ask_user when the user should pick from a known list of choices.",
+      schema: z.object({
+        session_id: z.string().describe("The Linear agent session ID"),
+        body: z.string().describe("The question or prompt shown above the options (Markdown)"),
+        options: z
+          .array(
+            z.object({
+              label: z.string().describe("Display label for this option"),
+              value: z.string().describe("Value returned when this option is selected"),
+            }),
+          )
+          .min(1)
+          .max(25)
+          .describe("The selectable options"),
+      }),
+      handler: async (args: Record<string, unknown>) => {
+        await postSelectElicitation(
+          client,
+          args.session_id as string,
+          args.body as string,
+          args.options as SelectOption[],
+        );
+        return { ok: true };
+      },
+    });
+
+    tools.push({
       name: "linear_request_auth",
       description: "Ask the Linear user to link an external account by presenting an authentication button. The user sees a 'Link account' UI that opens the provided URL.",
       schema: z.object({
@@ -189,6 +219,45 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     optionalIssueIdSchema,
     issueCommentLimitSchema,
   });
+
+  if (typeof client.issueRepositorySuggestions === "function") {
+    const suggestRepositories = client.issueRepositorySuggestions.bind(client);
+    tools.push({
+      name: "linear_suggest_repositories",
+      description:
+        "Ask Linear to rank candidate repositories by relevance for the current issue. " +
+        "Returns ranked suggestions with confidence scores. Use this before asking the user " +
+        "which repository to work in — if a suggestion has high confidence, auto-select it; " +
+        "otherwise present the top options via the select elicitation signal.",
+      schema: requiredIssueIdSchema.extend({
+        session_id: z.string().describe("The Linear agent session ID"),
+        repositories: z
+          .array(
+            z.object({
+              hostname: z.string().describe("Hostname of the Git service (e.g. 'github.com')"),
+              repositoryFullName: z.string().describe("Full name in owner/name format (e.g. 'acme/backend')"),
+            }),
+          )
+          .min(1)
+          .max(50)
+          .describe("Candidate repositories the agent has access to"),
+      }),
+      handler: async (args: Record<string, unknown>) => {
+        const issueId = resolveIssueId("linear_suggest_repositories", args);
+        const sessionId = args.session_id as string;
+        const candidates = args.repositories as CandidateRepositoryInput[];
+
+        const response = await suggestRepositories(
+          candidates,
+          issueId,
+          { agentSessionId: sessionId },
+        );
+
+        const suggestions = extractRepositorySuggestions(response);
+        return { suggestions };
+      },
+    });
+  }
 
   return tools;
 }
@@ -508,4 +577,28 @@ async function readWorkflowStates(
     .sort((left, right) => (left.position ?? Number.MAX_SAFE_INTEGER) - (right.position ?? Number.MAX_SAFE_INTEGER));
 
   return { team_id: teamId, states };
+}
+
+function extractRepositorySuggestions(response: unknown): RepositorySuggestion[] {
+  if (response == null || typeof response !== "object") {
+    return [];
+  }
+
+  const payload = response as { suggestions?: unknown };
+  if (!Array.isArray(payload.suggestions)) {
+    return [];
+  }
+
+  return payload.suggestions
+    .filter((entry): entry is Record<string, unknown> =>
+      entry != null &&
+      typeof entry === "object" &&
+      typeof (entry as Record<string, unknown>).repositoryFullName === "string",
+    )
+    .map((entry) => ({
+      repositoryFullName: entry.repositoryFullName as string,
+      hostname: typeof entry.hostname === "string" ? entry.hostname : null,
+      confidence: typeof entry.confidence === "number" ? entry.confidence : 0,
+    }))
+    .sort((a, b) => b.confidence - a.confidence);
 }
