@@ -832,7 +832,7 @@ describe("createLinearTools", () => {
 
     await expect(
       executeCustomTool(tool, { comment_id: "not-a-uuid" }),
-    ).rejects.toThrow(/requires the exact Linear issue UUID/);
+    ).rejects.toThrow(/requires a valid Linear UUID/);
   });
 
   it("linear_create_issue creates a new issue via the Linear client", async () => {
@@ -999,7 +999,7 @@ describe("createLinearTools", () => {
         issue_id: "SOF-1",
         repositories: [{ hostname: "github.com", repositoryFullName: "org/repo" }],
       }),
-    ).rejects.toThrow("requires the exact Linear issue UUID");
+    ).rejects.toThrow("requires a valid Linear UUID");
   });
 
   it("linear_suggest_repositories rejects empty repositories array", async () => {
