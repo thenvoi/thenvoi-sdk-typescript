@@ -18,6 +18,21 @@ interface CreateLinearToolsOptions {
   enableElicitation?: boolean;
 }
 
+async function touchSessionActivity(
+  store: SessionRoomStore | undefined,
+  sessionId: string,
+): Promise<void> {
+  if (!store) return;
+  try {
+    const session = await store.getBySessionId(sessionId);
+    if (!session) return;
+    const now = new Date().toISOString();
+    await store.upsert({ ...session, lastLinearActivityAt: now, updatedAt: now });
+  } catch {
+    // Best-effort — don't fail the tool if the timestamp update fails.
+  }
+}
+
 /**
  * Create Linear activity tools usable by any adapter via `customTools`.
  */
@@ -55,6 +70,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     "Post a thought to the Linear agent session, visible to the user as internal reasoning.",
     async (args) => {
       await postThought(client, args.session_id as string, args.body as string);
+      await touchSessionActivity(store, args.session_id as string);
       return { ok: true };
     },
   );
@@ -64,6 +80,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     "Post an action to the Linear agent session, showing the user what step is being taken.",
     async (args) => {
       await postAction(client, args.session_id as string, args.body as string);
+      await touchSessionActivity(store, args.session_id as string);
       return { ok: true };
     },
   );
@@ -73,6 +90,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     "Post an error to the Linear agent session to notify the user of a failure.",
     async (args) => {
       await postError(client, args.session_id as string, args.body as string);
+      await touchSessionActivity(store, args.session_id as string);
       return { ok: true };
     },
   );
@@ -83,6 +101,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
       "Ask the Linear user a question via an elicitation activity.",
       async (args) => {
         await postElicitation(client, args.session_id as string, args.body as string);
+        await touchSessionActivity(store, args.session_id as string);
         return { ok: true };
       },
     );
@@ -119,6 +138,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
           args.session_id as string,
           args.steps as PlanStep[],
         );
+        await touchSessionActivity(store, args.session_id as string);
         return { ok: true };
       },
     },

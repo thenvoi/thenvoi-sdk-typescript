@@ -315,19 +315,22 @@ export async function handleAgentSessionEvent(
       });
     }
 
+    const errorNow = new Date().toISOString();
     if (roomRecord) {
       await saveSessionRecord(input.deps.store, {
         ...roomRecord,
         status: "errored",
         lastEventKey: eventKey,
-        updatedAt: new Date().toISOString(),
+        lastLinearActivityAt: errorNow,
+        updatedAt: errorNow,
       });
     } else if (existingBySession) {
       await saveSessionRecord(input.deps.store, {
         ...existingBySession,
         status: "errored",
         lastEventKey: eventKey,
-        updatedAt: new Date().toISOString(),
+        lastLinearActivityAt: errorNow,
+        updatedAt: errorNow,
       });
     }
 

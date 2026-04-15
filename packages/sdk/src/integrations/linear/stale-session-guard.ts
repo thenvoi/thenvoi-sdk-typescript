@@ -163,33 +163,38 @@ export async function sendRecoveryActivityIfStale(input: {
 }): Promise<boolean> {
   const thresholdMs = input.staleThresholdMs ?? STALE_SESSION_THRESHOLD_MS;
 
-  if (!isSessionStale(input.session, Date.now(), thresholdMs)) {
+  // Re-read from the store to pick up any recent timestamp updates from
+  // concurrent handlers, reducing the window for duplicate recovery activities.
+  const freshSession =
+    await input.store.getBySessionId(input.session.linearSessionId) ?? input.session;
+
+  if (!isSessionStale(freshSession, Date.now(), thresholdMs)) {
     return false;
   }
 
   try {
     await postThought(
       input.linearClient,
-      input.session.linearSessionId,
+      freshSession.linearSessionId,
       "Resuming session — reconnecting after extended specialist work.",
     );
 
     const now = new Date().toISOString();
     await input.store.upsert({
-      ...input.session,
+      ...freshSession,
       lastLinearActivityAt: now,
       updatedAt: now,
     });
 
     input.logger.info("stale_session_guard.recovery_activity_sent", {
-      sessionId: input.session.linearSessionId,
-      lastLinearActivityAt: input.session.lastLinearActivityAt,
+      sessionId: freshSession.linearSessionId,
+      lastLinearActivityAt: freshSession.lastLinearActivityAt,
     });
 
     return true;
   } catch (error) {
     input.logger.warn("stale_session_guard.recovery_activity_failed", {
-      sessionId: input.session.linearSessionId,
+      sessionId: freshSession.linearSessionId,
       error: error instanceof Error ? error.message : String(error),
     });
     return false;
