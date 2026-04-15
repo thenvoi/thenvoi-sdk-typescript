@@ -84,6 +84,52 @@ export async function postElicitation(
   await postBodyActivity(client, sessionId, L.AgentActivityType.Elicitation, body);
 }
 
+export interface SelectOption {
+  label: string;
+  value: string;
+}
+
+/** Longest body string allowed in an elicitation activity. */
+export const ELICITATION_BODY_MAX_LENGTH = 10_000;
+
+/** Longest label or value string allowed in a select option. */
+export const SELECT_OPTION_MAX_LENGTH = 200;
+
+/** Longest provider name string allowed in an auth elicitation. */
+export const PROVIDER_MAX_LENGTH = 100;
+
+export async function postSelectElicitation(
+  client: LinearActivityClient,
+  sessionId: string,
+  body: string,
+  options: SelectOption[],
+): Promise<void> {
+  await postActivity(client, sessionId, {
+    type: L.AgentActivityType.Elicitation,
+    body,
+    signal: L.AgentActivitySignal.Select,
+    signalMetadata: { options },
+  });
+}
+
+export async function postAuthElicitation(
+  client: LinearActivityClient,
+  sessionId: string,
+  body: string,
+  url: string,
+  provider?: string,
+): Promise<void> {
+  await postActivity(client, sessionId, {
+    type: L.AgentActivityType.Elicitation,
+    body,
+    signal: L.AgentActivitySignal.Auth,
+    signalMetadata: {
+      url,
+      ...(provider ? { provider } : {}),
+    },
+  });
+}
+
 export async function postAction(
   client: LinearActivityClient,
   sessionId: string,

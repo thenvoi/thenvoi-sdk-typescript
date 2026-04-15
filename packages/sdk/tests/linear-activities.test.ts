@@ -6,6 +6,8 @@ import {
   postError,
   postResponse,
   postElicitation,
+  postSelectElicitation,
+  postAuthElicitation,
   updatePlan,
   type LinearActivityClient,
   type PlanStep,
@@ -152,5 +154,65 @@ describe("linear activities", () => {
     expect(body).toContain("\u23f3 Search codebase");
     expect(body).toContain("\u2b1c Write fix");
     expect(body).toContain("\u274c Old approach");
+  });
+
+  it("postSelectElicitation sends elicitation with select signal and options", async () => {
+    const client = makeMockClient();
+    const options = [
+      { label: "Repo A", value: "repo-a" },
+      { label: "Repo B", value: "repo-b" },
+    ];
+    await postSelectElicitation(client, "session-7", "Which repository?", options);
+
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0]).toMatchObject({
+      agentSessionId: "session-7",
+      content: {
+        type: "elicitation",
+        body: "Which repository?",
+        signal: "select",
+        signalMetadata: { options },
+      },
+    });
+  });
+
+  it("postAuthElicitation sends elicitation with auth signal and url", async () => {
+    const client = makeMockClient();
+    await postAuthElicitation(
+      client,
+      "session-8",
+      "Please link your GitHub account",
+      "https://github.com/login/oauth/authorize?client_id=abc",
+      "GitHub",
+    );
+
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0]).toMatchObject({
+      agentSessionId: "session-8",
+      content: {
+        type: "elicitation",
+        body: "Please link your GitHub account",
+        signal: "auth",
+        signalMetadata: {
+          url: "https://github.com/login/oauth/authorize?client_id=abc",
+          provider: "GitHub",
+        },
+      },
+    });
+  });
+
+  it("postAuthElicitation omits provider when not given", async () => {
+    const client = makeMockClient();
+    await postAuthElicitation(
+      client,
+      "session-9",
+      "Please authenticate",
+      "https://example.com/auth",
+    );
+
+    expect(client.calls).toHaveLength(1);
+    const metadata = client.calls[0]?.content.signalMetadata as Record<string, unknown>;
+    expect(metadata).toEqual({ url: "https://example.com/auth" });
+    expect(metadata).not.toHaveProperty("provider");
   });
 });

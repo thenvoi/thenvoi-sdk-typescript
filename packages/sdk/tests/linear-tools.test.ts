@@ -102,7 +102,7 @@ function makeMockClient(): LinearActivityClient {
 describe("createLinearTools", () => {
   it("returns the canonical v1 linear tool contract", () => {
     const tools = createLinearTools({ client: makeMockClient() });
-    expect(tools).toHaveLength(11);
+    expect(tools).toHaveLength(12);
 
     const names = tools.map((tool) => tool.name).sort();
     expect(names).toEqual([
@@ -115,6 +115,7 @@ describe("createLinearTools", () => {
       "linear_post_error",
       "linear_post_response",
       "linear_post_thought",
+      "linear_request_auth",
       "linear_update_issue",
       "linear_update_plan",
     ]);
@@ -176,6 +177,212 @@ describe("createLinearTools", () => {
       agentSessionId: "sess-1",
       content: { type: "elicitation", body: "Which approach do you prefer?" },
     });
+  });
+
+  it("linear_ask_user sends select signal when options are provided", async () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_ask_user")!;
+
+    const result = await executeCustomTool(tool, {
+      session_id: "sess-1",
+      body: "Which repository?",
+      options: [
+        { label: "Repo A", value: "repo-a" },
+        { label: "Repo B", value: "repo-b" },
+      ],
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(client.createAgentActivity).toHaveBeenCalledWith({
+      agentSessionId: "sess-1",
+      content: {
+        type: "elicitation",
+        body: "Which repository?",
+        signal: "select",
+        signalMetadata: {
+          options: [
+            { label: "Repo A", value: "repo-a" },
+            { label: "Repo B", value: "repo-b" },
+          ],
+        },
+      },
+    });
+  });
+
+  it("linear_ask_user falls back to plain elicitation when options is omitted", async () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_ask_user")!;
+
+    await executeCustomTool(tool, {
+      session_id: "sess-1",
+      body: "What do you think?",
+    });
+
+    expect(client.createAgentActivity).toHaveBeenCalledWith({
+      agentSessionId: "sess-1",
+      content: { type: "elicitation", body: "What do you think?" },
+    });
+  });
+
+  it("linear_request_auth sends auth signal with url and provider", async () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_request_auth")!;
+
+    const result = await executeCustomTool(tool, {
+      session_id: "sess-1",
+      body: "Please link your GitHub account to continue.",
+      url: "https://github.com/login/oauth/authorize?client_id=abc",
+      provider: "GitHub",
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(client.createAgentActivity).toHaveBeenCalledWith({
+      agentSessionId: "sess-1",
+      content: {
+        type: "elicitation",
+        body: "Please link your GitHub account to continue.",
+        signal: "auth",
+        signalMetadata: {
+          url: "https://github.com/login/oauth/authorize?client_id=abc",
+          provider: "GitHub",
+        },
+      },
+    });
+  });
+
+  it("linear_request_auth omits provider when not specified", async () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_request_auth")!;
+
+    await executeCustomTool(tool, {
+      session_id: "sess-1",
+      body: "Please authenticate.",
+      url: "https://example.com/auth",
+    });
+
+    expect(client.createAgentActivity).toHaveBeenCalledWith({
+      agentSessionId: "sess-1",
+      content: {
+        type: "elicitation",
+        body: "Please authenticate.",
+        signal: "auth",
+        signalMetadata: { url: "https://example.com/auth" },
+      },
+    });
+  });
+
+  it("linear_request_auth rejects invalid url", async () => {
+    const tools = createLinearTools({ client: makeMockClient() });
+    const tool = tools.find((entry) => entry.name === "linear_request_auth")!;
+
+    await expect(
+      executeCustomTool(tool, {
+        session_id: "sess-1",
+        body: "Please authenticate.",
+        url: "not-a-url",
+      }),
+    ).rejects.toThrow("Invalid arguments");
+  });
+
+  it("linear_request_auth rejects non-https url for remote hosts", async () => {
+    const tools = createLinearTools({ client: makeMockClient() });
+    const tool = tools.find((entry) => entry.name === "linear_request_auth")!;
+
+    await expect(
+      executeCustomTool(tool, {
+        session_id: "sess-1",
+        body: "Please authenticate.",
+        url: "ftp://example.com/auth",
+      }),
+    ).rejects.toThrow("Invalid arguments");
+
+    await expect(
+      executeCustomTool(tool, {
+        session_id: "sess-1",
+        body: "Please authenticate.",
+        url: "http://example.com/auth",
+      }),
+    ).rejects.toThrow("Invalid arguments");
+  });
+
+  it("linear_request_auth allows http for localhost", async () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_request_auth")!;
+
+    const result = await executeCustomTool(tool, {
+      session_id: "sess-1",
+      body: "Please authenticate locally.",
+      url: "http://localhost:3000/auth/callback",
+    });
+
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("linear_request_auth allows http for IPv6 localhost", async () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_request_auth")!;
+
+    const result = await executeCustomTool(tool, {
+      session_id: "sess-1",
+      body: "Please authenticate locally.",
+      url: "http://[::1]:3000/auth/callback",
+    });
+
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("linear_request_auth rejects overly long provider name", async () => {
+    const tools = createLinearTools({ client: makeMockClient() });
+    const tool = tools.find((entry) => entry.name === "linear_request_auth")!;
+
+    await expect(
+      executeCustomTool(tool, {
+        session_id: "sess-1",
+        body: "Please authenticate.",
+        url: "https://example.com/auth",
+        provider: "A".repeat(101),
+      }),
+    ).rejects.toThrow("Invalid arguments");
+  });
+
+  it("linear_ask_user rejects options with fewer than 2 items", async () => {
+    const tools = createLinearTools({ client: makeMockClient() });
+    const tool = tools.find((entry) => entry.name === "linear_ask_user")!;
+
+    await expect(
+      executeCustomTool(tool, {
+        session_id: "sess-1",
+        body: "Pick one",
+        options: [{ label: "Only", value: "only" }],
+      }),
+    ).rejects.toThrow("Invalid arguments");
+  });
+
+  it("linear_request_auth rejects empty provider string", async () => {
+    const tools = createLinearTools({ client: makeMockClient() });
+    const tool = tools.find((entry) => entry.name === "linear_request_auth")!;
+
+    await expect(
+      executeCustomTool(tool, {
+        session_id: "sess-1",
+        body: "Please authenticate.",
+        url: "https://example.com/auth",
+        provider: "",
+      }),
+    ).rejects.toThrow("Invalid arguments");
+  });
+
+  it("linear_request_auth and linear_ask_user are excluded when enableElicitation is false", () => {
+    const tools = createLinearTools({ client: makeMockClient(), enableElicitation: false });
+    const names = tools.map((t) => t.name);
+    expect(names).not.toContain("linear_ask_user");
+    expect(names).not.toContain("linear_request_auth");
   });
 
   it("linear_post_response posts the final response and marks the session completed", async () => {
