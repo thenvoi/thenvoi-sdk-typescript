@@ -1,6 +1,6 @@
 # Linear Bridge Agent
 #
-# Build context: repository root
+# Build context: repository root (pnpm workspace)
 #
 #   docker build -f packages/sdk/examples/linear-thenvoi/Dockerfile -t thenvoi-linear-bridge .
 #   docker run --env-file .env -p 8787:8787 thenvoi-linear-bridge
@@ -37,4 +37,6 @@ EXPOSE 8787
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:8787/healthz || exit 1
 
-CMD ["pnpm", "--filter", "@thenvoi/sdk", "dev:linear"]
+# tsx is required because the example imports TypeScript source (../../src/*) directly.
+# devDependencies (including tsx) are installed before NODE_ENV=production is set.
+CMD ["pnpm", "--filter", "@thenvoi/sdk", "start:linear"]

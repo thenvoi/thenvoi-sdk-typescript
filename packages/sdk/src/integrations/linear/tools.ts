@@ -633,6 +633,7 @@ function addSessionCreationTools(input: {
       });
       return null;
     } catch (err) {
+      // TODO: route through a structured logger instead of console.warn for production observability.
       console.warn("Failed to persist session-room mapping, session was still created in Linear", err);
       return "session-room mapping not persisted";
     }
@@ -685,7 +686,9 @@ function addSessionCreationTools(input: {
     tools.push({
       name: "linear_create_issue",
       description:
-        "Create a new Linear issue from scratch. Use this when the Thenvoi conversation produces work that should be tracked as a new Linear issue. Never create issues without explicit human intent or clear delegation.",
+        "Create a new Linear issue from scratch. Use this when the Thenvoi conversation produces work that should be tracked as a new Linear issue. " +
+        "After creating the issue, call linear_create_session_on_issue to attach an agent session. " +
+        "Never create issues without explicit human intent or clear delegation.",
       schema: z.object({
         team_id: z.string().uuid().describe("The Linear team ID to create the issue in"),
         title: z.string().min(1).describe("Issue title"),
@@ -713,6 +716,11 @@ function addSessionCreationTools(input: {
   }
 }
 
+/**
+ * Defensively extract session fields from an untyped Linear API response.
+ * The Linear SDK may return a typed object, but we cast to Record<string, unknown>
+ * intentionally so the extraction is resilient to SDK version changes.
+ */
 function extractCreatedSession(result: unknown): {
   id: string;
   issueId: string | null;
@@ -735,6 +743,10 @@ function extractCreatedSession(result: unknown): {
   };
 }
 
+/**
+ * Defensively extract issue fields from an untyped Linear API response.
+ * See {@link extractCreatedSession} for rationale on the casting approach.
+ */
 function extractCreatedIssue(result: unknown): {
   id: string;
   identifier: string | null;
