@@ -47,8 +47,9 @@ async function postBodyActivity(
   sessionId: string,
   type: L.AgentActivityType,
   body: string,
+  options?: { ephemeral?: boolean },
 ): Promise<void> {
-  await postActivity(client, sessionId, { type, body });
+  await postActivity(client, sessionId, { type, body }, options);
 }
 
 export async function postThought(
@@ -57,7 +58,7 @@ export async function postThought(
   body: string,
   options?: { ephemeral?: boolean },
 ): Promise<void> {
-  await postActivity(client, sessionId, { type: L.AgentActivityType.Thought, body }, options);
+  await postBodyActivity(client, sessionId, L.AgentActivityType.Thought, body, options);
 }
 
 export async function postError(

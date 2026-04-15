@@ -67,7 +67,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
         client,
         args.session_id as string,
         args.body as string,
-        args.ephemeral ? { ephemeral: true } : undefined,
+        args.ephemeral === true ? { ephemeral: true } : undefined,
       );
       return { ok: true };
     },
@@ -83,7 +83,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
         client,
         args.session_id as string,
         args.body as string,
-        args.ephemeral ? { ephemeral: true } : undefined,
+        args.ephemeral === true ? { ephemeral: true } : undefined,
       );
       return { ok: true };
     },
