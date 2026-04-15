@@ -70,7 +70,7 @@ function createLinearThenvoiBridgeAgentWithStore(
     logger: options?.logger,
     sessionConfig: options?.sessionConfig,
     config: {
-      agentId: options?.agentId ?? "agent-linear-thenvoi-bridge",
+      agentId: options?.agentId ?? "agent-band-linear-pm",
       apiKey: options?.apiKey ?? "api-key",
     },
     agentConfig: {
