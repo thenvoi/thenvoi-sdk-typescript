@@ -55,18 +55,6 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
   const optionalIssueIdSchema = issueIdInputSchema;
 
   const tools: CustomToolDef[] = [];
-  const addSessionBodyTool = (
-    name: string,
-    description: string,
-    handler: (args: Record<string, unknown>) => Promise<unknown>,
-  ): void => {
-    tools.push({
-      name,
-      description,
-      schema: sessionBodySchema,
-      handler,
-    });
-  };
 
   const ephemeralSessionBodySchema = sessionBodySchema.extend({
     ephemeral: z.boolean().optional().describe(
@@ -75,46 +63,49 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     ),
   });
 
-  const addEphemeralSessionBodyTool = (
+  const addSessionBodyTool = (
     name: string,
     description: string,
     activityFn: typeof postThought,
+    options?: { supportsEphemeral?: boolean },
   ): void => {
+    const supportsEphemeral = options?.supportsEphemeral ?? false;
     tools.push({
       name,
-      description: description + " Set ephemeral: true for transient status updates that should disappear when the next activity arrives.",
-      schema: ephemeralSessionBodySchema,
+      description: supportsEphemeral
+        ? description + " Set ephemeral: true for transient status updates that should disappear when the next activity arrives."
+        : description,
+      schema: supportsEphemeral ? ephemeralSessionBodySchema : sessionBodySchema,
       handler: async (args: Record<string, unknown>) => {
         await activityFn(
           client,
           args.session_id as string,
           args.body as string,
-          args.ephemeral === true ? { ephemeral: true } : undefined,
+          supportsEphemeral && args.ephemeral === true ? { ephemeral: true } : undefined,
         );
         return { ok: true };
       },
     });
   };
 
-  addEphemeralSessionBodyTool(
+  addSessionBodyTool(
     "linear_post_thought",
     "Post a thought to the Linear agent session, visible to the user as internal reasoning.",
     postThought,
+    { supportsEphemeral: true },
   );
 
-  addEphemeralSessionBodyTool(
+  addSessionBodyTool(
     "linear_post_action",
     "Post an action to the Linear agent session, showing the user what step is being taken.",
     postAction,
+    { supportsEphemeral: true },
   );
 
   addSessionBodyTool(
     "linear_post_error",
     "Post an error to the Linear agent session to notify the user of a failure.",
-    async (args) => {
-      await postError(client, args.session_id as string, args.body as string);
-      return { ok: true };
-    },
+    postError,
   );
 
   if (enableElicitation) {
@@ -198,10 +189,11 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     });
   }
 
-  addSessionBodyTool(
-    "linear_post_response",
-    "Post the final response to the Linear agent session and mark the session completed when a store is available.",
-    async (args) => {
+  tools.push({
+    name: "linear_post_response",
+    description: "Post the final response to the Linear agent session and mark the session completed when a store is available.",
+    schema: sessionBodySchema,
+    handler: async (args: Record<string, unknown>) => {
       await completeLinearSession({
         linearClient: client,
         agentSessionId: args.session_id as string,
@@ -210,7 +202,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
       });
       return { ok: true };
     },
-  );
+  });
 
   tools.push(
     {
@@ -281,7 +273,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     });
   }
 
-  addSessionCreationTools({ tools, client, store });
+  addSessionCreationTools({ tools, client });
 
   return tools;
 }
@@ -606,11 +598,11 @@ async function readWorkflowStates(
 function addSessionCreationTools(input: {
   tools: CustomToolDef[];
   client: LinearActivityClient;
-  store?: SessionRoomStore;
 }): void {
-  const { tools, client, store } = input;
+  const { tools, client } = input;
 
-  if (typeof client.agentSessionCreateOnIssue === "function") {
+  const createOnIssue = client.agentSessionCreateOnIssue;
+  if (typeof createOnIssue === "function") {
     tools.push({
       name: "linear_create_session_on_issue",
       description:
@@ -620,32 +612,18 @@ function addSessionCreationTools(input: {
         external_link: z.string().optional().describe("Optional URL of an external page associated with this session"),
       }),
       handler: async (args: Record<string, unknown>) => {
-        const result = await client.agentSessionCreateOnIssue!({
+        const result = await createOnIssue({
           issueId: args.issue_id as string,
           ...(typeof args.external_link === "string" ? { externalLink: args.external_link } : {}),
         });
         const session = extractCreatedSession(result);
-
-        if (store && session.id) {
-          const now = new Date().toISOString();
-          await store.upsert({
-            linearSessionId: session.id,
-            linearIssueId: session.issueId ?? (args.issue_id as string),
-            thenvoiRoomId: "",
-            status: "active",
-            lastEventKey: null,
-            lastLinearActivityAt: now,
-            createdAt: now,
-            updatedAt: now,
-          });
-        }
-
         return { ok: true, session };
       },
     });
   }
 
-  if (typeof client.agentSessionCreateOnComment === "function") {
+  const createOnComment = client.agentSessionCreateOnComment;
+  if (typeof createOnComment === "function") {
     tools.push({
       name: "linear_create_session_on_comment",
       description:
@@ -655,32 +633,18 @@ function addSessionCreationTools(input: {
         external_link: z.string().optional().describe("Optional URL of an external page associated with this session"),
       }),
       handler: async (args: Record<string, unknown>) => {
-        const result = await client.agentSessionCreateOnComment!({
+        const result = await createOnComment({
           commentId: args.comment_id as string,
           ...(typeof args.external_link === "string" ? { externalLink: args.external_link } : {}),
         });
         const session = extractCreatedSession(result);
-
-        if (store && session.id) {
-          const now = new Date().toISOString();
-          await store.upsert({
-            linearSessionId: session.id,
-            linearIssueId: session.issueId ?? null,
-            thenvoiRoomId: "",
-            status: "active",
-            lastEventKey: null,
-            lastLinearActivityAt: now,
-            createdAt: now,
-            updatedAt: now,
-          });
-        }
-
         return { ok: true, session };
       },
     });
   }
 
-  if (typeof client.createIssue === "function") {
+  const createIssueFn = client.createIssue;
+  if (typeof createIssueFn === "function") {
     tools.push({
       name: "linear_create_issue",
       description:
@@ -695,9 +659,9 @@ function addSessionCreationTools(input: {
         label_ids: z.array(z.string()).optional().describe("Label IDs to attach"),
       }),
       handler: async (args: Record<string, unknown>) => {
-        const result = await client.createIssue!({
+        const result = await createIssueFn({
           teamId: args.team_id as string,
-          ...(typeof args.title === "string" ? { title: args.title } : {}),
+          title: args.title as string,
           ...(typeof args.description === "string" ? { description: args.description } : {}),
           ...(typeof args.priority === "number" ? { priority: args.priority } : {}),
           ...(typeof args.assignee_id === "string" ? { assigneeId: args.assignee_id } : {}),

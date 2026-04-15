@@ -764,10 +764,9 @@ describe("createLinearTools", () => {
     });
   });
 
-  it("linear_create_session_on_issue creates a session and persists to store", async () => {
+  it("linear_create_session_on_issue creates a session and returns session info", async () => {
     const client = makeMockClientWithSessionCreation();
-    const store = new MemorySessionRoomStore();
-    const tools = createLinearTools({ client, store });
+    const tools = createLinearTools({ client });
     const tool = tools.find((entry) => entry.name === "linear_create_session_on_issue")!;
 
     const result = await executeCustomTool(tool, {
@@ -784,12 +783,6 @@ describe("createLinearTools", () => {
     });
     expect(client.agentSessionCreateOnIssue).toHaveBeenCalledWith({
       issueId: "LIN-123",
-    });
-    const record = await store.getBySessionId("new-session-1");
-    expect(record).toMatchObject({
-      linearSessionId: "new-session-1",
-      linearIssueId: "LIN-123",
-      status: "active",
     });
   });
 
@@ -811,8 +804,7 @@ describe("createLinearTools", () => {
 
   it("linear_create_session_on_comment creates a session on a comment thread", async () => {
     const client = makeMockClientWithSessionCreation();
-    const store = new MemorySessionRoomStore();
-    const tools = createLinearTools({ client, store });
+    const tools = createLinearTools({ client });
     const tool = tools.find((entry) => entry.name === "linear_create_session_on_comment")!;
 
     const result = await executeCustomTool(tool, {
@@ -829,11 +821,6 @@ describe("createLinearTools", () => {
     });
     expect(client.agentSessionCreateOnComment).toHaveBeenCalledWith({
       commentId: "comment-abc",
-    });
-    const record = await store.getBySessionId("new-session-2");
-    expect(record).toMatchObject({
-      linearSessionId: "new-session-2",
-      status: "active",
     });
   });
 
