@@ -8,6 +8,10 @@ export interface LinearActivityClient {
     agentSessionId: string;
     content: Record<string, unknown>;
   }): Promise<unknown>;
+  updateAgentSession?: (
+    id: string,
+    input: Record<string, unknown>,
+  ) => Promise<unknown>;
   updateIssue?: (
     issueId: string,
     input: Record<string, unknown>,
@@ -91,11 +95,37 @@ export async function postAction(
     parameter: "",
   });
 }
+
+type LinearPlanStatus = "pending" | "inProgress" | "completed" | "canceled";
+
+const PLAN_STATUS_MAP: Record<PlanStep["status"], LinearPlanStatus> = {
+  pending: "pending",
+  in_progress: "inProgress",
+  completed: "completed",
+  failed: "canceled",
+};
+
 export async function updatePlan(
   client: LinearActivityClient,
   sessionId: string,
   steps: PlanStep[],
 ): Promise<void> {
+  if (typeof client.updateAgentSession === "function") {
+    const plan = {
+      steps: steps.map((step) => ({
+        content: step.title,
+        status: PLAN_STATUS_MAP[step.status],
+      })),
+    };
+
+    try {
+      await client.updateAgentSession(sessionId, { plan });
+      return;
+    } catch (err) {
+      console.warn("updateAgentSession failed, falling back to legacy plan", err);
+    }
+  }
+
   const planSummary = steps
     .map((step) => {
       const icon =
