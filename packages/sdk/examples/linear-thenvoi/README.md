@@ -1,13 +1,13 @@
-# Linear + Thenvoi Example
+# Band Linear PM
 
-This example is the real Linear bridge path:
+This example runs the Band Linear PM agent — the Linear-facing coordinator that:
 
 1. Linear sends an `AgentSessionEvent` webhook to `/linear/webhook`
 2. the bridge resolves or reuses a Thenvoi room for that issue
-3. the embedded bridge agent coordinates real Thenvoi specialists in that room
+3. Band Linear PM coordinates real Thenvoi specialists in that room
 4. the bridge writes progress and the final response back to Linear
 
-The bridge is the only Linear-aware participant. Planner, reviewer, and coder agents stay Linear-agnostic and communicate only through Thenvoi room messages.
+Band Linear PM is the only Linear-aware participant. Planner, reviewer, and coder agents stay Linear-agnostic and communicate only through Thenvoi room messages.
 
 The SQLite session-room mapping uses `node:sqlite`, so this example requires Node.js 22+.
 
@@ -16,7 +16,7 @@ The SQLite session-room mapping uses `node:sqlite`, so this example requires Nod
 - `examples/linear-thenvoi/linear-thenvoi-bridge-server.ts`
   Real webhook server and embedded bridge runtime.
 - `examples/linear-thenvoi/linear-thenvoi-bridge-agent.ts`
-  Real bridge agent using the Codex adapter and Linear tools.
+  Band Linear PM agent using the Codex adapter and Linear tools.
 
 ## Environment
 
@@ -50,7 +50,7 @@ Recommended agent config key:
 pnpm dev:linear
 ```
 
-That starts the webhook server and the embedded bridge agent in one process.
+That starts the webhook server and the embedded Band Linear PM agent in one process.
 
 Health check:
 
@@ -84,4 +84,4 @@ https://<your-tunnel-host>/linear/webhook
 - `writebackMode: "activity_stream"` posts intermediate Linear activity updates.
 - `writebackMode: "final_only"` keeps writeback minimal until completion.
 - The bridge uses peer discovery and room context to pick relevant external specialists at runtime.
-- For planning work, the bridge should send the full issue context to the planner, end its turn, and continue when specialist output appears.
+- For planning work, Band Linear PM sends the full issue context to the planner, ends its turn, and continues when specialist output appears.

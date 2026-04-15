@@ -77,8 +77,8 @@ function createLinearThenvoiBridgeAgentWithStore(
       autoSubscribeExistingRooms: false,
     },
     identity: {
-      name: options?.name ?? "Thenvoi Linear Bridge",
-      description: options?.description ?? "Linear bridge agent coordinating Thenvoi specialists",
+      name: options?.name ?? "Band Linear PM",
+      description: options?.description ?? "Band's Linear PM agent — coordinates specialists for issue planning, implementation, and review",
     },
   });
 }
@@ -90,7 +90,7 @@ function createLinearThenvoiBridgeStore(stateDbPath?: string): SessionRoomStore 
 }
 
 export function buildLinearThenvoiBridgePrompt(): string {
-  return `You are the Thenvoi Linear bridge agent.
+  return `You are Band Linear PM.
 
 You are the only Linear-facing coordinator in the room.
 
