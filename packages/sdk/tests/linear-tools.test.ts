@@ -969,8 +969,9 @@ describe("createLinearTools", () => {
   it("linear_create_session_on_issue surfaces warning when store persistence fails", async () => {
     const client = makeMockClientWithSessionCreation();
     const store = new MemorySessionRoomStore();
+    const mockLogger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     vi.spyOn(store, "upsert").mockRejectedValueOnce(new Error("db write failed"));
-    const tools = createLinearTools({ client, store });
+    const tools = createLinearTools({ client, store, logger: mockLogger });
     const tool = tools.find((entry) => entry.name === "linear_create_session_on_issue")!;
 
     const result = await executeCustomTool(tool, {
@@ -983,6 +984,14 @@ describe("createLinearTools", () => {
       session: { id: "new-session-1", issueId: TEST_ISSUE_ID, status: "active" },
       warning: "session-room mapping not persisted",
     });
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      "linear_tools.session_room_persist_failed",
+      expect.objectContaining({
+        sessionId: "new-session-1",
+        roomId: "room-abc",
+        error: "db write failed",
+      }),
+    );
   });
 
   it("linear_create_session_on_comment persists session-room mapping when store and room_id are provided", async () => {
@@ -1000,6 +1009,11 @@ describe("createLinearTools", () => {
     expect(record).not.toBeNull();
     expect(record!.thenvoiRoomId).toBe("room-xyz");
     expect(record!.status).toBe("active");
+    // Comment sessions have null linearIssueId — verify it is persisted as null
+    // and that getByIssueId does not accidentally match it.
+    expect(record!.linearIssueId).toBeNull();
+    const byIssue = await store.getByIssueId(TEST_ISSUE_ID);
+    expect(byIssue).toBeNull();
   });
 
   it("linear_create_issue rejects empty title", async () => {

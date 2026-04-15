@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { Logger } from "../../core/logger";
 import type { CustomToolDef } from "../../runtime/tools/customTools";
 import type { CandidateRepositoryInput, LinearActivityClient, PlanStep, RepositorySuggestion, SelectOption } from "./activities";
 import {
@@ -34,13 +35,14 @@ interface CreateLinearToolsOptions {
   client: LinearActivityClient;
   store?: SessionRoomStore;
   enableElicitation?: boolean;
+  logger?: Logger;
 }
 
 /**
  * Create Linear activity tools usable by any adapter via `customTools`.
  */
 export function createLinearTools(options: CreateLinearToolsOptions): CustomToolDef[] {
-  const { client, store, enableElicitation = true } = options;
+  const { client, store, enableElicitation = true, logger } = options;
 
   const sessionBodySchema = z.object({
     session_id: z.string().describe("The Linear agent session ID"),
@@ -276,7 +278,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     });
   }
 
-  addSessionCreationTools({ tools, client, store });
+  addSessionCreationTools({ tools, client, store, logger });
 
   return tools;
 }
@@ -602,8 +604,9 @@ function addSessionCreationTools(input: {
   tools: CustomToolDef[];
   client: LinearActivityClient;
   store?: SessionRoomStore;
+  logger?: Logger;
 }): void {
-  const { tools, client, store } = input;
+  const { tools, client, store, logger } = input;
 
   const sessionCreationBaseSchema = z.object({
     external_link: z.string().url().optional().describe("Optional URL of an external page associated with this session"),
@@ -633,8 +636,12 @@ function addSessionCreationTools(input: {
       });
       return null;
     } catch (err) {
-      // TODO: route through a structured logger instead of console.warn for production observability.
-      console.warn("Failed to persist session-room mapping, session was still created in Linear", err);
+      logger?.warn("linear_tools.session_room_persist_failed", {
+        sessionId,
+        issueId,
+        roomId,
+        error: err instanceof Error ? err.message : String(err),
+      });
       return "session-room mapping not persisted";
     }
   }

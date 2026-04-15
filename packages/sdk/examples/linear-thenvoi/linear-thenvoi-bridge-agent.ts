@@ -67,6 +67,7 @@ function createLinearThenvoiBridgeAgentWithStore(
       client: linearClient,
       store: options.store,
       enableElicitation: false,
+      logger: options?.logger,
     }),
   });
 
