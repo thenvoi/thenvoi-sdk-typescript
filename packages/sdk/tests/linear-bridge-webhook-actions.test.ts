@@ -1026,7 +1026,7 @@ describe("linear bridge webhook actions", () => {
     expect(restApi.roomEvents[0]?.content).toContain("inferred_session_intent: planning");
   });
 
-  it("moves issue to started when issue state type is missing from payload", async () => {
+  it("skips auto-start when issue state type is missing from payload", async () => {
     const restApi = new LinearThenvoiExampleRestApi();
     const store = new MemorySessionRoomStore();
     const linearClient = makeLinearClient();
@@ -1040,9 +1040,7 @@ describe("linear bridge webhook actions", () => {
       deps: { thenvoiRest: restApi, linearClient, store },
     });
 
-    expect(linearClient.workflowStates).toHaveBeenCalled();
-    expect(linearClient.updateIssue).toHaveBeenCalledWith("issue-1", {
-      stateId: "state-started-1",
-    });
+    expect(linearClient.workflowStates).not.toHaveBeenCalled();
+    expect(restApi.roomEvents).toHaveLength(1);
   });
 });

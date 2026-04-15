@@ -42,8 +42,8 @@ const PEER_PAGE_SIZE = 100;
 const RECOVERED_ROOM_EVENT_RETRY_LIMIT = 2;
 const RECOVERED_ROOM_EVENT_RETRY_BASE_DELAY_MS = 1_000;
 
-// Issue state types eligible for auto-start. `null` covers payloads where state type is missing.
-const AUTO_START_ELIGIBLE_TYPES: Set<string | null> = new Set([null, "backlog", "unstarted", "triage"]);
+// Issue state types eligible for auto-start.
+const AUTO_START_ELIGIBLE_TYPES: Set<string> = new Set(["backlog", "unstarted", "triage"]);
 
 export interface LinearBridgeRuntime {
   roomResolutionLocks: Map<string, Promise<SessionRoomRecord>>;
@@ -184,7 +184,7 @@ export async function handleAgentSessionEvent(
   if (action === "created" && issueId) {
     const originalStateType = extractIssueStateField(input.payload.agentSession.issue, "type");
     const teamId = extractIssueTeamId(input.payload.agentSession.issue);
-    if (teamId && AUTO_START_ELIGIBLE_TYPES.has(originalStateType)) {
+    if (teamId && originalStateType && AUTO_START_ELIGIBLE_TYPES.has(originalStateType)) {
       autoStartPromise = tryMoveIssueToStarted({
         linearClient: input.deps.linearClient,
         issueId,
@@ -240,6 +240,8 @@ export async function handleAgentSessionEvent(
       });
     }
 
+    // Intent is computed from the *original* state type (before auto-start) so it reflects
+    // why the session was created (e.g. "planning" for backlog issues), not the state we moved it to.
     const sessionIntent = detectSessionIntent({
       issueStateType: extractIssueStateField(input.payload.agentSession.issue, "type"),
       promptContext: input.payload.promptContext,
@@ -601,7 +603,7 @@ async function tryMoveIssueToStarted(input: {
   const nodes = Array.isArray(response.nodes) ? response.nodes : [];
 
   // Linear paginates at 50 nodes by default — safe for workflow states (teams rarely exceed this).
-  const startedStates = nodes.sort((a, b) => a.position - b.position);
+  const startedStates = [...nodes].sort((a, b) => a.position - b.position);
 
   const targetState = startedStates[0];
   if (!targetState?.id) {
