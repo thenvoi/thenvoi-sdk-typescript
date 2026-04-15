@@ -119,8 +119,9 @@ export async function postError(
   client: LinearActivityClient,
   sessionId: string,
   body: string,
+  options?: { ephemeral?: boolean },
 ): Promise<void> {
-  await postBodyActivity(client, sessionId, L.AgentActivityType.Error, body);
+  await postBodyActivity(client, sessionId, L.AgentActivityType.Error, body, options);
 }
 
 export async function postResponse(

@@ -33,7 +33,7 @@ interface LinearThenvoiBridgeAgentOptions {
   /**
    * When true, the bridge agent subscribes to rooms it is added to directly
    * (Thenvoi-initiated), not just rooms created via Linear webhooks.
-   * Defaults to true for bidirectional operation.
+   * Defaults to false. Set to true to enable bidirectional (Thenvoi-initiated) operation.
    */
   autoSubscribeExistingRooms?: boolean;
 }
@@ -52,7 +52,7 @@ function createLinearThenvoiBridgeAgentWithStore(
     options?.linearAccessToken ?? process.env.LINEAR_ACCESS_TOKEN ?? "linear-api-key",
   );
 
-  const autoSubscribe = options?.autoSubscribeExistingRooms ?? true;
+  const autoSubscribe = options?.autoSubscribeExistingRooms ?? false;
 
   const adapter = new CodexAdapter({
     config: {

@@ -605,10 +605,13 @@ function addSessionCreationTools(input: {
 }): void {
   const { tools, client, store } = input;
 
-  const sessionCreationSchema = z.object({
-    issue_id: z.string().uuid().describe("The Linear issue ID (UUID)"),
+  const sessionCreationBaseSchema = z.object({
     external_link: z.string().url().optional().describe("Optional URL of an external page associated with this session"),
     room_id: z.string().optional().describe("The Thenvoi room ID to persist the session-room mapping. Pass this when creating a session from within a Thenvoi conversation."),
+  });
+
+  const sessionCreationSchema = sessionCreationBaseSchema.extend({
+    issue_id: z.string().uuid().describe("The Linear issue ID (UUID)"),
   });
 
   async function persistSessionRoom(
@@ -617,15 +620,20 @@ function addSessionCreationTools(input: {
     roomId: string | undefined,
   ): Promise<void> {
     if (!store || typeof roomId !== "string") return;
-    const now = new Date().toISOString();
-    await store.upsert({
-      linearSessionId: sessionId,
-      linearIssueId: issueId,
-      thenvoiRoomId: roomId,
-      status: "active",
-      createdAt: now,
-      updatedAt: now,
-    });
+    try {
+      // Timestamps reflect the SDK host clock, not Linear's server clock.
+      const now = new Date().toISOString();
+      await store.upsert({
+        linearSessionId: sessionId,
+        linearIssueId: issueId,
+        thenvoiRoomId: roomId,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+    } catch (err) {
+      console.warn("Failed to persist session-room mapping, session was still created in Linear", err);
+    }
   }
 
   const createOnIssue = client.agentSessionCreateOnIssue?.bind(client);
@@ -654,10 +662,8 @@ function addSessionCreationTools(input: {
       name: "linear_create_session_on_comment",
       description:
         "Create a new Linear agent session on a specific comment thread. Use this to attach agent work to an existing discussion on a Linear issue.",
-      schema: z.object({
+      schema: sessionCreationBaseSchema.extend({
         comment_id: z.string().uuid().describe("The Linear comment ID (UUID)"),
-        external_link: z.string().url().optional().describe("Optional URL of an external page associated with this session"),
-        room_id: z.string().optional().describe("The Thenvoi room ID to persist the session-room mapping. Pass this when creating a session from within a Thenvoi conversation."),
       }),
       handler: async (args: Record<string, unknown>) => {
         const commentId = args.comment_id as string;
