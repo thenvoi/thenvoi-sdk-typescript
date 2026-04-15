@@ -46,6 +46,7 @@ export type {
   CreateLinearWebhookHandlerOptions,
   LinearBridgeDispatchJob,
   LinearBridgeDispatcher,
+  PermissionChangeCallbacks,
 } from "./webhook";
 export { DEFAULT_STATUS_MAPPING } from "./constants";
 export { STALE_SESSION_CHECK_INTERVAL_MS, STALE_SESSION_THRESHOLD_MS } from "./types";

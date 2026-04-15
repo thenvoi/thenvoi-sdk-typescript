@@ -5,6 +5,8 @@ import {
   LINEAR_WEBHOOK_SIGNATURE_HEADER,
   LINEAR_WEBHOOK_TS_HEADER,
   type AgentSessionEventWebhookPayload,
+  type AppUserTeamAccessChangedWebhookPayload,
+  type OAuthAppWebhookPayload,
 } from "@linear/sdk/webhooks";
 
 import { NoopLogger, type Logger } from "../../core/logger";
@@ -33,10 +35,16 @@ export interface LinearBridgeDispatcher {
   waitForIdle?(): Promise<void>;
 }
 
+export interface PermissionChangeCallbacks {
+  onTeamAccessChanged?: (payload: AppUserTeamAccessChangedWebhookPayload) => void | Promise<void>;
+  onOAuthAppRevoked?: (payload: OAuthAppWebhookPayload) => void | Promise<void>;
+}
+
 export interface CreateLinearWebhookHandlerOptions {
   config: LinearThenvoiBridgeConfig;
   deps: LinearThenvoiBridgeDeps;
   dispatcher?: LinearBridgeDispatcher;
+  permissionCallbacks?: PermissionChangeCallbacks;
 }
 
 type NodeRequestWithBody = IncomingMessage & {
@@ -231,13 +239,13 @@ export function createLinearWebhookHandler(
     }
 
     const rawBody = await readRawBody(request as NodeRequestWithBody);
-    let payload: AgentSessionEventWebhookPayload;
+    let parsed: { type: string };
     try {
-      payload = webhookClient.parseData(
+      parsed = webhookClient.parseData(
         rawBody,
         signature,
         timestamp,
-      ) as AgentSessionEventWebhookPayload;
+      ) as { type: string };
     } catch (error) {
       logger.warn("linear_thenvoi_bridge.webhook_invalid_signature", {
         error: error instanceof Error ? error.message : String(error),
@@ -246,13 +254,69 @@ export function createLinearWebhookHandler(
       return;
     }
 
-    if (payload.type !== "AgentSessionEvent") {
+    if (parsed.type === "PermissionChange") {
+      const action = (parsed as { action?: string }).action;
+      if (normalizeAction(action) === "teamaccesschanged") {
+        const permPayload = parsed as unknown as AppUserTeamAccessChangedWebhookPayload;
+        logger.info("linear_thenvoi_bridge.team_access_changed", {
+          action: permPayload.action,
+          addedTeamIds: permPayload.addedTeamIds,
+          removedTeamIds: permPayload.removedTeamIds,
+          canAccessAllPublicTeams: permPayload.canAccessAllPublicTeams,
+          organizationId: permPayload.organizationId,
+        });
+
+        try {
+          await options.permissionCallbacks?.onTeamAccessChanged?.(permPayload);
+        } catch (error) {
+          logger.error("linear_thenvoi_bridge.team_access_changed_callback_failed", {
+            error: serializeError(error),
+          });
+        }
+      } else {
+        logger.info("linear_thenvoi_bridge.permission_change_event_ignored", {
+          action,
+        });
+      }
+
+      sendText(response, 200, "OK");
+      return;
+    }
+
+    if (parsed.type === "OAuthApp") {
+      const oauthPayload = parsed as unknown as OAuthAppWebhookPayload;
+      if (normalizeAction(oauthPayload.action) === "revoked") {
+        logger.warn("linear_thenvoi_bridge.oauth_app_revoked", {
+          oauthClientId: oauthPayload.oauthClientId,
+          organizationId: oauthPayload.organizationId,
+        });
+
+        try {
+          await options.permissionCallbacks?.onOAuthAppRevoked?.(oauthPayload);
+        } catch (error) {
+          logger.error("linear_thenvoi_bridge.oauth_app_revoked_callback_failed", {
+            error: serializeError(error),
+          });
+        }
+      } else {
+        logger.info("linear_thenvoi_bridge.oauth_app_event_ignored", {
+          action: oauthPayload.action,
+        });
+      }
+
+      sendText(response, 200, "OK");
+      return;
+    }
+
+    if (parsed.type !== "AgentSessionEvent") {
       logger.info("linear_thenvoi_bridge.webhook_ignored_event", {
-        type: payload.type,
+        type: parsed.type,
       });
       sendText(response, 200, "OK");
       return;
     }
+
+    const payload = parsed as unknown as AgentSessionEventWebhookPayload;
 
     const eventKey = getAgentSessionEventKey(payload);
     logger.info("linear_thenvoi_bridge.webhook_received", {
