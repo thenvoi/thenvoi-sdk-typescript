@@ -154,6 +154,8 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     issueCommentLimitSchema,
   });
 
+  addSessionCreationTools({ tools, client, store });
+
   return tools;
 }
 
@@ -472,4 +474,149 @@ async function readWorkflowStates(
     .sort((left, right) => (left.position ?? Number.MAX_SAFE_INTEGER) - (right.position ?? Number.MAX_SAFE_INTEGER));
 
   return { team_id: teamId, states };
+}
+
+function addSessionCreationTools(input: {
+  tools: CustomToolDef[];
+  client: LinearActivityClient;
+  store?: SessionRoomStore;
+}): void {
+  const { tools, client, store } = input;
+
+  if (typeof client.agentSessionCreateOnIssue === "function") {
+    tools.push({
+      name: "linear_create_session_on_issue",
+      description:
+        "Create a new Linear agent session on an existing issue. Use this when the conversation produces work that should be tracked against a known Linear issue and no session exists yet.",
+      schema: z.object({
+        issue_id: z.string().describe("The Linear issue ID (UUID) or identifier (e.g. 'LIN-123')"),
+        external_link: z.string().optional().describe("Optional URL of an external page associated with this session"),
+      }),
+      handler: async (args: Record<string, unknown>) => {
+        const result = await client.agentSessionCreateOnIssue!({
+          issueId: args.issue_id as string,
+          ...(typeof args.external_link === "string" ? { externalLink: args.external_link } : {}),
+        });
+        const session = extractCreatedSession(result);
+
+        if (store && session.id) {
+          const now = new Date().toISOString();
+          await store.upsert({
+            linearSessionId: session.id,
+            linearIssueId: session.issueId ?? (args.issue_id as string),
+            thenvoiRoomId: "",
+            status: "active",
+            lastEventKey: null,
+            lastLinearActivityAt: now,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+
+        return { ok: true, session };
+      },
+    });
+  }
+
+  if (typeof client.agentSessionCreateOnComment === "function") {
+    tools.push({
+      name: "linear_create_session_on_comment",
+      description:
+        "Create a new Linear agent session on a specific comment thread. Use this to attach agent work to an existing discussion on a Linear issue.",
+      schema: z.object({
+        comment_id: z.string().describe("The Linear comment ID (UUID)"),
+        external_link: z.string().optional().describe("Optional URL of an external page associated with this session"),
+      }),
+      handler: async (args: Record<string, unknown>) => {
+        const result = await client.agentSessionCreateOnComment!({
+          commentId: args.comment_id as string,
+          ...(typeof args.external_link === "string" ? { externalLink: args.external_link } : {}),
+        });
+        const session = extractCreatedSession(result);
+
+        if (store && session.id) {
+          const now = new Date().toISOString();
+          await store.upsert({
+            linearSessionId: session.id,
+            linearIssueId: session.issueId ?? null,
+            thenvoiRoomId: "",
+            status: "active",
+            lastEventKey: null,
+            lastLinearActivityAt: now,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+
+        return { ok: true, session };
+      },
+    });
+  }
+
+  if (typeof client.createIssue === "function") {
+    tools.push({
+      name: "linear_create_issue",
+      description:
+        "Create a new Linear issue from scratch. Use this when the Thenvoi conversation produces work that should be tracked as a new Linear issue. Never create issues without explicit human intent or clear delegation.",
+      schema: z.object({
+        team_id: z.string().describe("The Linear team ID to create the issue in"),
+        title: z.string().describe("Issue title"),
+        description: z.string().optional().describe("Issue description in Markdown"),
+        priority: z.number().int().min(0).max(4).optional().describe("Priority 0-4 (0=none, 1=urgent, 2=high, 3=normal, 4=low)"),
+        assignee_id: z.string().optional().describe("Assignee user ID"),
+        state_id: z.string().optional().describe("Workflow state ID"),
+        label_ids: z.array(z.string()).optional().describe("Label IDs to attach"),
+      }),
+      handler: async (args: Record<string, unknown>) => {
+        const result = await client.createIssue!({
+          teamId: args.team_id as string,
+          ...(typeof args.title === "string" ? { title: args.title } : {}),
+          ...(typeof args.description === "string" ? { description: args.description } : {}),
+          ...(typeof args.priority === "number" ? { priority: args.priority } : {}),
+          ...(typeof args.assignee_id === "string" ? { assigneeId: args.assignee_id } : {}),
+          ...(typeof args.state_id === "string" ? { stateId: args.state_id } : {}),
+          ...(Array.isArray(args.label_ids) ? { labelIds: args.label_ids as string[] } : {}),
+        });
+
+        const issue = extractCreatedIssue(result);
+        return { ok: true, issue };
+      },
+    });
+  }
+}
+
+function extractCreatedSession(result: unknown): {
+  id: string | null;
+  issueId: string | null;
+  status: string | null;
+} {
+  const payload = typeof result === "object" && result !== null ? result as Record<string, unknown> : {};
+  const session = typeof payload.agentSession === "object" && payload.agentSession !== null
+    ? payload.agentSession as Record<string, unknown>
+    : payload;
+
+  return {
+    id: typeof session.id === "string" ? session.id : null,
+    issueId: typeof session.issueId === "string" ? session.issueId : null,
+    status: typeof session.status === "string" ? session.status : null,
+  };
+}
+
+function extractCreatedIssue(result: unknown): {
+  id: string | null;
+  identifier: string | null;
+  url: string | null;
+  title: string | null;
+} {
+  const payload = typeof result === "object" && result !== null ? result as Record<string, unknown> : {};
+  const issue = typeof payload.issue === "object" && payload.issue !== null
+    ? payload.issue as Record<string, unknown>
+    : payload;
+
+  return {
+    id: typeof issue.id === "string" ? issue.id : null,
+    identifier: typeof issue.identifier === "string" ? issue.identifier : null,
+    url: typeof issue.url === "string" ? issue.url : null,
+    title: typeof issue.title === "string" ? issue.title : null,
+  };
 }

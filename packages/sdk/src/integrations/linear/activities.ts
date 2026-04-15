@@ -22,6 +22,26 @@ export interface LinearActivityClient {
   ) => Promise<unknown>;
   issue?: (issueId: string) => Promise<unknown>;
   workflowStates?: (variables?: Record<string, unknown>) => Promise<unknown>;
+  /** Create an agent session on an existing Linear issue (proactive initiation). */
+  agentSessionCreateOnIssue?: (
+    input: { issueId: string; externalLink?: string },
+  ) => Promise<unknown>;
+  /** Create an agent session on a specific comment thread (proactive initiation). */
+  agentSessionCreateOnComment?: (
+    input: { commentId: string; externalLink?: string },
+  ) => Promise<unknown>;
+  /** Create a new Linear issue from scratch. */
+  createIssue?: (
+    input: {
+      teamId: string;
+      title?: string;
+      description?: string;
+      priority?: number;
+      assigneeId?: string;
+      stateId?: string;
+      labelIds?: string[];
+    },
+  ) => Promise<unknown>;
 }
 
 export interface PlanStep {

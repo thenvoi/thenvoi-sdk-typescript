@@ -30,6 +30,12 @@ interface LinearThenvoiBridgeAgentOptions {
   logger?: Logger;
   linkOptions?: AgentCreateOptions["linkOptions"];
   sessionConfig?: SessionConfig;
+  /**
+   * When true, the bridge agent subscribes to rooms it is added to directly
+   * (Thenvoi-initiated), not just rooms created via Linear webhooks.
+   * Defaults to true for bidirectional operation.
+   */
+  autoSubscribeExistingRooms?: boolean;
 }
 
 export function createLinearThenvoiBridgeAgent(
@@ -45,6 +51,8 @@ function createLinearThenvoiBridgeAgentWithStore(
   const linearClient = options?.linearClient ?? createLinearClient(
     options?.linearAccessToken ?? process.env.LINEAR_ACCESS_TOKEN ?? "linear-api-key",
   );
+
+  const autoSubscribe = options?.autoSubscribeExistingRooms ?? true;
 
   const adapter = new CodexAdapter({
     config: {
@@ -74,7 +82,7 @@ function createLinearThenvoiBridgeAgentWithStore(
       apiKey: options?.apiKey ?? "api-key",
     },
     agentConfig: {
-      autoSubscribeExistingRooms: false,
+      autoSubscribeExistingRooms: autoSubscribe,
     },
     identity: {
       name: options?.name ?? "Thenvoi Linear Bridge",
@@ -94,6 +102,23 @@ export function buildLinearThenvoiBridgePrompt(): string {
 
 You are the only Linear-facing coordinator in the room.
 
+You operate in two modes depending on how the conversation starts:
+
+## Mode detection
+- **Linear-initiated**: The room contains a bridge payload with a Linear session context (session_id, issue_id, etc.). Proceed with the standard webhook-driven flow.
+- **Thenvoi-initiated**: The room has no Linear session context. You were added to the room directly or joined via autoSubscribe. Start in discovery mode.
+
+## Thenvoi-initiated mode (no Linear session context)
+When you are added to a room without any Linear session payload:
+- Introduce yourself briefly: you are the Linear bridge agent and can help create, track, or link Linear issues.
+- Listen to the conversation and understand what the participants need.
+- You may use linear_create_issue to create a new Linear issue when a participant explicitly asks for it or clearly delegates issue creation to you. Never create issues without explicit human intent or clear delegation from another agent.
+- After creating an issue, use linear_create_session_on_issue to attach an agent session to it so you can post activities, plans, and updates.
+- You may use linear_create_session_on_issue to attach to an existing issue if a participant provides an issue ID or identifier.
+- Once a session is created, store the session-room mapping and proceed with normal activity posting (thoughts, plans, responses).
+- If no Linear work is needed, simply participate as a coordinator and help route work to the right specialists.
+
+## Linear-initiated mode (session context present)
 Your job is to:
 - read the Linear session payload
 - decide whether the current request is ticket enrichment, implementation kickoff, or finalization
@@ -104,7 +129,7 @@ Your job is to:
 - update the Linear issue when the work product changes the ticket itself
 - complete the Linear session when the current request is actually done
 
-Rules:
+## Rules (both modes)
 - You alone own the Linear tools. Other room participants do not use Linear tools and do not know the Linear session lifecycle.
 - Treat the bridge-provided session context as the source of truth for ticket identity, issue state, assignee, and latest user intent.
 - Treat the current room payload as private bridge context. Specialists will only see what you actually send into the room after you invite them.
@@ -130,6 +155,9 @@ Rules:
   - linear_post_error for failures
   - linear_post_response for the final answer and session completion
   - linear_update_plan when you have a step list worth showing (renders as a native checklist in the Linear Agent Session UI with live status indicators)
+  - linear_create_issue to create a new Linear issue from a Thenvoi conversation (requires explicit intent)
+  - linear_create_session_on_issue to proactively create an agent session on an existing issue
+  - linear_create_session_on_comment to create an agent session on a specific comment thread
 - Start alone, but inspect available peers before deciding whether the bridge should handle the work itself.
 - Only use thenvoi_lookup_peers when the room does not already contain a clearly relevant collaborator or when you need to replace/expand the current set of specialists. Choose collaborators based on the actual request and the visible peer identity you observe, not from a fixed handoff graph.
 - If you choose a specialist who is not already present, add them to the room before you ask for work.

@@ -54,6 +54,37 @@ class MemorySessionRoomStore implements SessionRoomStore {
   }
 }
 
+function makeMockClientWithSessionCreation(): LinearActivityClient {
+  return {
+    ...makeMockClient(),
+    agentSessionCreateOnIssue: vi.fn(async ({ issueId }: { issueId: string }) => ({
+      agentSession: {
+        id: "new-session-1",
+        issueId,
+        status: "active",
+      },
+      success: true,
+    })),
+    agentSessionCreateOnComment: vi.fn(async () => ({
+      agentSession: {
+        id: "new-session-2",
+        issueId: null,
+        status: "active",
+      },
+      success: true,
+    })),
+    createIssue: vi.fn(async () => ({
+      issue: {
+        id: "new-issue-1",
+        identifier: "SOF-42",
+        url: "https://linear.app/example/issue/SOF-42",
+        title: "New issue from Thenvoi",
+      },
+      success: true,
+    })),
+  };
+}
+
 function makeMockClient(): LinearActivityClient {
   return {
     createAgentActivity: vi.fn(async () => ({ ok: true })),
@@ -118,6 +149,25 @@ describe("createLinearTools", () => {
       "linear_update_issue",
       "linear_update_plan",
     ]);
+  });
+
+  it("includes session creation tools when client supports them", () => {
+    const client = makeMockClientWithSessionCreation();
+    const tools = createLinearTools({ client });
+    expect(tools).toHaveLength(14);
+
+    const names = tools.map((tool) => tool.name).sort();
+    expect(names).toContain("linear_create_session_on_issue");
+    expect(names).toContain("linear_create_session_on_comment");
+    expect(names).toContain("linear_create_issue");
+  });
+
+  it("omits session creation tools when client lacks methods", () => {
+    const tools = createLinearTools({ client: makeMockClient() });
+    const names = tools.map((tool) => tool.name);
+    expect(names).not.toContain("linear_create_session_on_issue");
+    expect(names).not.toContain("linear_create_session_on_comment");
+    expect(names).not.toContain("linear_create_issue");
   });
 
   it("each tool has a description", () => {
@@ -440,6 +490,128 @@ describe("createLinearTools", () => {
     expect(client.createComment).toHaveBeenCalledWith({
       issueId: TEST_ISSUE_ID,
       body: "Implemented and verified.",
+    });
+  });
+
+  it("linear_create_session_on_issue creates a session and persists to store", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const store = new MemorySessionRoomStore();
+    const tools = createLinearTools({ client, store });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_issue")!;
+
+    const result = await executeCustomTool(tool, {
+      issue_id: "LIN-123",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      session: {
+        id: "new-session-1",
+        issueId: "LIN-123",
+        status: "active",
+      },
+    });
+    expect(client.agentSessionCreateOnIssue).toHaveBeenCalledWith({
+      issueId: "LIN-123",
+    });
+    const record = await store.getBySessionId("new-session-1");
+    expect(record).toMatchObject({
+      linearSessionId: "new-session-1",
+      linearIssueId: "LIN-123",
+      status: "active",
+    });
+  });
+
+  it("linear_create_session_on_issue passes external_link when provided", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_issue")!;
+
+    await executeCustomTool(tool, {
+      issue_id: TEST_ISSUE_ID,
+      external_link: "https://example.com/session",
+    });
+
+    expect(client.agentSessionCreateOnIssue).toHaveBeenCalledWith({
+      issueId: TEST_ISSUE_ID,
+      externalLink: "https://example.com/session",
+    });
+  });
+
+  it("linear_create_session_on_comment creates a session on a comment thread", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const store = new MemorySessionRoomStore();
+    const tools = createLinearTools({ client, store });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_comment")!;
+
+    const result = await executeCustomTool(tool, {
+      comment_id: "comment-abc",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      session: {
+        id: "new-session-2",
+        issueId: null,
+        status: "active",
+      },
+    });
+    expect(client.agentSessionCreateOnComment).toHaveBeenCalledWith({
+      commentId: "comment-abc",
+    });
+    const record = await store.getBySessionId("new-session-2");
+    expect(record).toMatchObject({
+      linearSessionId: "new-session-2",
+      status: "active",
+    });
+  });
+
+  it("linear_create_issue creates a new issue via the Linear client", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_issue")!;
+
+    const result = await executeCustomTool(tool, {
+      team_id: "team-1",
+      title: "New issue from Thenvoi",
+      description: "Created during collaboration",
+      priority: 2,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      issue: {
+        id: "new-issue-1",
+        identifier: "SOF-42",
+        url: "https://linear.app/example/issue/SOF-42",
+        title: "New issue from Thenvoi",
+      },
+    });
+    expect(client.createIssue).toHaveBeenCalledWith({
+      teamId: "team-1",
+      title: "New issue from Thenvoi",
+      description: "Created during collaboration",
+      priority: 2,
+    });
+  });
+
+  it("linear_create_issue passes label_ids and state_id", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_issue")!;
+
+    await executeCustomTool(tool, {
+      team_id: "team-1",
+      title: "Bug report",
+      state_id: "state-0",
+      label_ids: ["label-1", "label-2"],
+    });
+
+    expect(client.createIssue).toHaveBeenCalledWith({
+      teamId: "team-1",
+      title: "Bug report",
+      stateId: "state-0",
+      labelIds: ["label-1", "label-2"],
     });
   });
 });
