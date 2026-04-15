@@ -13,6 +13,9 @@ const TEST_ISSUE_ID = "11111111-1111-4111-8111-111111111111";
 const OTHER_TEST_ISSUE_ID = "22222222-2222-4222-8222-222222222222";
 const TEST_COMMENT_ID = "33333333-3333-4333-8333-333333333333";
 const TEST_TEAM_ID = "44444444-4444-4444-8444-444444444444";
+const TEST_STATE_ID = "55555555-5555-4555-8555-555555555555";
+const TEST_LABEL_ID_1 = "66666666-6666-4666-8666-666666666666";
+const TEST_LABEL_ID_2 = "77777777-7777-4777-8777-777777777777";
 
 class MemorySessionRoomStore implements SessionRoomStore {
   private readonly records = new Map<string, SessionRoomRecord>();
@@ -873,15 +876,15 @@ describe("createLinearTools", () => {
     await executeCustomTool(tool, {
       team_id: TEST_TEAM_ID,
       title: "Bug report",
-      state_id: "state-0",
-      label_ids: ["label-1", "label-2"],
+      state_id: TEST_STATE_ID,
+      label_ids: [TEST_LABEL_ID_1, TEST_LABEL_ID_2],
     });
 
     expect(client.createIssue).toHaveBeenCalledWith({
       teamId: TEST_TEAM_ID,
       title: "Bug report",
-      stateId: "state-0",
-      labelIds: ["label-1", "label-2"],
+      stateId: TEST_STATE_ID,
+      labelIds: [TEST_LABEL_ID_1, TEST_LABEL_ID_2],
     });
   });
 

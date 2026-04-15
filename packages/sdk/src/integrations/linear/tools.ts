@@ -683,9 +683,9 @@ function addSessionCreationTools(input: {
         title: z.string().min(1).describe("Issue title"),
         description: z.string().optional().describe("Issue description in Markdown"),
         priority: z.number().int().min(0).max(4).optional().describe("Priority 0-4 (0=none, 1=urgent, 2=high, 3=normal, 4=low)"),
-        assignee_id: z.string().optional().describe("Assignee user ID"),
-        state_id: z.string().optional().describe("Workflow state ID"),
-        label_ids: z.array(z.string()).optional().describe("Label IDs to attach"),
+        assignee_id: z.string().uuid().optional().describe("Assignee user ID (UUID)"),
+        state_id: z.string().uuid().optional().describe("Workflow state ID (UUID)"),
+        label_ids: z.array(z.string().uuid()).optional().describe("Label IDs to attach (UUIDs)"),
       }),
       handler: async (args: Record<string, unknown>) => {
         const result = await createIssueFn({
