@@ -2,8 +2,11 @@ export {
   createLinearBridgeRuntime,
   completeLinearSession,
   handleAgentSessionEvent,
+  StaleSessionGuard,
+  isSessionStale,
+  sendRecoveryActivityIfStale,
 } from "./bridge";
-export type { LinearBridgeRuntime } from "./bridge";
+export type { LinearBridgeRuntime, StaleSessionGuardOptions } from "./bridge";
 export {
   buildLinearAuthorizationHeader,
   createLinearClient,
@@ -45,5 +48,7 @@ export type {
   CreateLinearWebhookHandlerOptions,
   LinearBridgeDispatchJob,
   LinearBridgeDispatcher,
+  PermissionChangeCallbacks,
 } from "./webhook";
 export { DEFAULT_STATUS_MAPPING } from "./constants";
+export { STALE_SESSION_CHECK_INTERVAL_MS, STALE_SESSION_THRESHOLD_MS } from "./types";

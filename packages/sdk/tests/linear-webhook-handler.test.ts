@@ -9,6 +9,7 @@ import {
   type LinearBridgeDispatcher,
   type LinearThenvoiBridgeConfig,
   type PendingBootstrapRequest,
+  type PermissionChangeCallbacks,
   type SessionRoomRecord,
   type SessionRoomStore,
 } from "../src/linear";
@@ -113,14 +114,17 @@ function sign(secret: string, rawBody: string): string {
   return createHmac("sha256", secret).update(rawBody).digest("hex");
 }
 
-async function startServer(dispatcher?: LinearBridgeDispatcher) {
+async function startServer(dispatcher?: LinearBridgeDispatcher, permissionCallbacks?: PermissionChangeCallbacks) {
   const store = new MemorySessionRoomStore();
   const linearClient = {
     createAgentActivity: vi.fn(async () => ({ ok: true })),
+    issue: vi.fn(async () => ({ id: "issue-1", delegateId: null })),
+    updateIssue: vi.fn(async () => ({ success: true })),
   };
   const handler = createLinearWebhookHandler({
     config,
     dispatcher,
+    permissionCallbacks,
     deps: {
       thenvoiRest: new LinearThenvoiExampleRestApi(),
       linearClient: linearClient as never,
@@ -182,6 +186,38 @@ async function startServerWithDeps(deps: {
 
   return {
     url: `http://127.0.0.1:${address.port}/linear/webhook`,
+  };
+}
+
+function makeTeamAccessChangedPayload(overrides?: {
+  addedTeamIds?: string[];
+  removedTeamIds?: string[];
+  canAccessAllPublicTeams?: boolean;
+}) {
+  return {
+    type: "PermissionChange",
+    action: "teamAccessChanged",
+    appUserId: "app-user",
+    createdAt: new Date(),
+    oauthClientId: "oauth-client",
+    organizationId: "org-1",
+    webhookId: "webhook-1",
+    webhookTimestamp: Date.now(),
+    addedTeamIds: overrides?.addedTeamIds ?? ["team-new"],
+    removedTeamIds: overrides?.removedTeamIds ?? ["team-old"],
+    canAccessAllPublicTeams: overrides?.canAccessAllPublicTeams ?? false,
+  };
+}
+
+function makeOAuthAppRevokedPayload() {
+  return {
+    type: "OAuthApp",
+    action: "revoked",
+    createdAt: new Date(),
+    oauthClientId: "oauth-client",
+    organizationId: "org-1",
+    webhookId: "webhook-1",
+    webhookTimestamp: Date.now(),
   };
 }
 
@@ -345,6 +381,194 @@ describe("createLinearWebhookHandler", () => {
     expect(linearClient.createAgentActivity).toHaveBeenCalledOnce();
   });
 
+  it("processes PermissionChange webhook and invokes onTeamAccessChanged callback", async () => {
+    const onTeamAccessChanged = vi.fn();
+    const { url } = await startServer(undefined, { onTeamAccessChanged });
+    const payload = makeTeamAccessChangedPayload({
+      addedTeamIds: ["team-3", "team-4"],
+      removedTeamIds: ["team-1"],
+      canAccessAllPublicTeams: true,
+    });
+    const rawBody = JSON.stringify(payload);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "linear-signature": sign(config.linearWebhookSecret, rawBody),
+        "linear-timestamp": String(payload.webhookTimestamp),
+      },
+      body: rawBody,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("OK");
+    expect(onTeamAccessChanged).toHaveBeenCalledOnce();
+    expect(onTeamAccessChanged).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "PermissionChange",
+        action: "teamAccessChanged",
+        addedTeamIds: ["team-3", "team-4"],
+        removedTeamIds: ["team-1"],
+        canAccessAllPublicTeams: true,
+      }),
+    );
+  });
+
+  it("returns 200 for PermissionChange webhook even without a callback", async () => {
+    const { url } = await startServer();
+    const payload = makeTeamAccessChangedPayload();
+    const rawBody = JSON.stringify(payload);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "linear-signature": sign(config.linearWebhookSecret, rawBody),
+        "linear-timestamp": String(payload.webhookTimestamp),
+      },
+      body: rawBody,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("OK");
+  });
+
+  it("returns 200 for PermissionChange webhook even when callback throws", async () => {
+    const onTeamAccessChanged = vi.fn(async () => {
+      throw new Error("callback boom");
+    });
+    const { url } = await startServer(undefined, { onTeamAccessChanged });
+    const payload = makeTeamAccessChangedPayload();
+    const rawBody = JSON.stringify(payload);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "linear-signature": sign(config.linearWebhookSecret, rawBody),
+        "linear-timestamp": String(payload.webhookTimestamp),
+      },
+      body: rawBody,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("OK");
+    expect(onTeamAccessChanged).toHaveBeenCalledOnce();
+  });
+
+  it("ignores non-teamAccessChanged PermissionChange events without invoking callback", async () => {
+    const onTeamAccessChanged = vi.fn();
+    const { url } = await startServer(undefined, { onTeamAccessChanged });
+    const payload = { ...makeTeamAccessChangedPayload(), action: "somethingElse" };
+    const rawBody = JSON.stringify(payload);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "linear-signature": sign(config.linearWebhookSecret, rawBody),
+        "linear-timestamp": String(payload.webhookTimestamp),
+      },
+      body: rawBody,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("OK");
+    expect(onTeamAccessChanged).not.toHaveBeenCalled();
+  });
+
+  it("processes OAuthApp revoked webhook and invokes onOAuthAppRevoked callback", async () => {
+    const onOAuthAppRevoked = vi.fn();
+    const { url } = await startServer(undefined, { onOAuthAppRevoked });
+    const payload = makeOAuthAppRevokedPayload();
+    const rawBody = JSON.stringify(payload);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "linear-signature": sign(config.linearWebhookSecret, rawBody),
+        "linear-timestamp": String(payload.webhookTimestamp),
+      },
+      body: rawBody,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("OK");
+    expect(onOAuthAppRevoked).toHaveBeenCalledOnce();
+    expect(onOAuthAppRevoked).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "OAuthApp",
+        action: "revoked",
+        oauthClientId: "oauth-client",
+      }),
+    );
+  });
+
+  it("returns 200 for OAuthApp revoked webhook even without a callback", async () => {
+    const { url } = await startServer();
+    const payload = makeOAuthAppRevokedPayload();
+    const rawBody = JSON.stringify(payload);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "linear-signature": sign(config.linearWebhookSecret, rawBody),
+        "linear-timestamp": String(payload.webhookTimestamp),
+      },
+      body: rawBody,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("OK");
+  });
+
+  it("returns 200 for OAuthApp revoked webhook even when callback throws", async () => {
+    const onOAuthAppRevoked = vi.fn(async () => {
+      throw new Error("callback boom");
+    });
+    const { url } = await startServer(undefined, { onOAuthAppRevoked });
+    const payload = makeOAuthAppRevokedPayload();
+    const rawBody = JSON.stringify(payload);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "linear-signature": sign(config.linearWebhookSecret, rawBody),
+        "linear-timestamp": String(payload.webhookTimestamp),
+      },
+      body: rawBody,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("OK");
+    expect(onOAuthAppRevoked).toHaveBeenCalledOnce();
+  });
+
+  it("ignores non-revoked OAuthApp events without invoking callback", async () => {
+    const onOAuthAppRevoked = vi.fn();
+    const { url } = await startServer(undefined, { onOAuthAppRevoked });
+    const payload = { ...makeOAuthAppRevokedPayload(), action: "authorized" };
+    const rawBody = JSON.stringify(payload);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "linear-signature": sign(config.linearWebhookSecret, rawBody),
+        "linear-timestamp": String(payload.webhookTimestamp),
+      },
+      body: rawBody,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("OK");
+    expect(onOAuthAppRevoked).not.toHaveBeenCalled();
+  });
+
   it("signals terminal async dispatch failures and surfaces them via waitForIdle", async () => {
     const store = new MemorySessionRoomStore();
     const logger = {
@@ -358,6 +582,8 @@ describe("createLinearWebhookHandler", () => {
         .fn()
         .mockRejectedValueOnce(new Error("initial error reporting failed"))
         .mockResolvedValueOnce({ ok: true }),
+      issue: vi.fn(async () => ({ id: "issue-1", delegateId: null })),
+      updateIssue: vi.fn(async () => ({ success: true })),
     };
     const thenvoiRest = {
       getAgentMe: vi.fn(async () => ({ id: "agent-1", handle: "linear-host" })),
