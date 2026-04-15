@@ -209,6 +209,7 @@ function makeLinearClient(): HandleAgentSessionEventInput["deps"]["linearClient"
     createAgentActivity: async () => ({ ok: true }),
     agentSessionUpdateExternalUrl: async () => ({ success: true }),
     issue: async () => ({ id: "issue-1", delegateId: null }),
+    workflowStates: async () => ({ nodes: [] }),
     updateIssue: async () => ({ success: true }),
   } as unknown as HandleAgentSessionEventInput["deps"]["linearClient"];
 }

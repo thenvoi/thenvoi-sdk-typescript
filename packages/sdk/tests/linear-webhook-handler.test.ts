@@ -120,6 +120,7 @@ async function startServer(dispatcher?: LinearBridgeDispatcher, permissionCallba
     createAgentActivity: vi.fn(async () => ({ ok: true })),
     agentSessionUpdateExternalUrl: vi.fn(async () => ({ success: true })),
     issue: vi.fn(async () => ({ id: "issue-1", delegateId: null })),
+    workflowStates: vi.fn(async () => ({ nodes: [] })),
     updateIssue: vi.fn(async () => ({ success: true })),
   };
   const handler = createLinearWebhookHandler({
@@ -585,6 +586,7 @@ describe("createLinearWebhookHandler", () => {
         .mockResolvedValueOnce({ ok: true }),
       agentSessionUpdateExternalUrl: vi.fn(async () => ({ success: true })),
       issue: vi.fn(async () => ({ id: "issue-1", delegateId: null })),
+      workflowStates: vi.fn(async () => ({ nodes: [] })),
       updateIssue: vi.fn(async () => ({ success: true })),
     };
     const thenvoiRest = {
