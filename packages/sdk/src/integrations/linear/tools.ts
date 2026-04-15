@@ -57,37 +57,38 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     ),
   });
 
-  tools.push({
-    name: "linear_post_thought",
-    description: "Post a thought to the Linear agent session, visible to the user as internal reasoning. " +
-      "Set ephemeral: true for transient status updates that should disappear when the next activity arrives.",
-    schema: ephemeralSessionBodySchema,
-    handler: async (args: Record<string, unknown>) => {
-      await postThought(
-        client,
-        args.session_id as string,
-        args.body as string,
-        args.ephemeral === true ? { ephemeral: true } : undefined,
-      );
-      return { ok: true };
-    },
-  });
+  const addEphemeralSessionBodyTool = (
+    name: string,
+    description: string,
+    activityFn: typeof postThought,
+  ): void => {
+    tools.push({
+      name,
+      description: description + " Set ephemeral: true for transient status updates that should disappear when the next activity arrives.",
+      schema: ephemeralSessionBodySchema,
+      handler: async (args: Record<string, unknown>) => {
+        await activityFn(
+          client,
+          args.session_id as string,
+          args.body as string,
+          args.ephemeral === true ? { ephemeral: true } : undefined,
+        );
+        return { ok: true };
+      },
+    });
+  };
 
-  tools.push({
-    name: "linear_post_action",
-    description: "Post an action to the Linear agent session, showing the user what step is being taken. " +
-      "Set ephemeral: true for transient status updates that should disappear when the next activity arrives.",
-    schema: ephemeralSessionBodySchema,
-    handler: async (args: Record<string, unknown>) => {
-      await postAction(
-        client,
-        args.session_id as string,
-        args.body as string,
-        args.ephemeral === true ? { ephemeral: true } : undefined,
-      );
-      return { ok: true };
-    },
-  });
+  addEphemeralSessionBodyTool(
+    "linear_post_thought",
+    "Post a thought to the Linear agent session, visible to the user as internal reasoning.",
+    postThought,
+  );
+
+  addEphemeralSessionBodyTool(
+    "linear_post_action",
+    "Post an action to the Linear agent session, showing the user what step is being taken.",
+    postAction,
+  );
 
   addSessionBodyTool(
     "linear_post_error",
