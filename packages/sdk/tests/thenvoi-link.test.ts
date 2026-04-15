@@ -3,11 +3,13 @@ import { describe, expect, it } from "vitest";
 import { ThenvoiLink } from "../src/platform/ThenvoiLink";
 import type { PlatformEvent } from "../src/platform/events";
 import type { StreamingTransport } from "../src/platform/streaming/transport";
+import type { DisconnectHandler, DisconnectInfo } from "../src/platform/streaming/disconnect";
 import { UnsupportedFeatureError } from "../src/core/errors";
 import { FakeRestApi } from "./testUtils";
 
 class FakeTransport implements StreamingTransport {
   public readonly joinedTopics: string[] = [];
+  private disconnectHandler?: DisconnectHandler;
 
   public async connect() {}
   public async disconnect() {}
@@ -18,6 +20,12 @@ class FakeTransport implements StreamingTransport {
   public async runForever() {}
   public isConnected() {
     return true;
+  }
+  public setDisconnectHandler(handler: DisconnectHandler) {
+    this.disconnectHandler = handler;
+  }
+  public emitDisconnect(info: DisconnectInfo) {
+    this.disconnectHandler?.(info);
   }
 }
 
@@ -181,5 +189,46 @@ describe("ThenvoiLink event waiting", () => {
       { page: 1, pageSize: 2 },
       { page: 2, pageSize: 2 },
     ]);
+  });
+
+  it("propagates disconnect events from transport to onDisconnect callback", () => {
+    const received: DisconnectInfo[] = [];
+    const transport = new FakeTransport();
+    new ThenvoiLink({
+      agentId: "agent-1",
+      apiKey: "key",
+      restApi: new FakeRestApi(),
+      transport,
+      onDisconnect: (info) => {
+        received.push(info);
+      },
+    });
+
+    transport.emitDisconnect({
+      code: 1000,
+      reason: "Another instance of this agent connected -- only one connection per agent_id is allowed",
+      rawReason: "duplicate_agent",
+    });
+
+    expect(received).toHaveLength(1);
+    expect(received[0]?.rawReason).toBe("duplicate_agent");
+  });
+
+  it("does not throw when no onDisconnect callback is provided", () => {
+    const transport = new FakeTransport();
+    new ThenvoiLink({
+      agentId: "agent-1",
+      apiKey: "key",
+      restApi: new FakeRestApi(),
+      transport,
+    });
+
+    expect(() => {
+      transport.emitDisconnect({
+        code: 1006,
+        reason: "Abnormal closure",
+        rawReason: null,
+      });
+    }).not.toThrow();
   });
 });

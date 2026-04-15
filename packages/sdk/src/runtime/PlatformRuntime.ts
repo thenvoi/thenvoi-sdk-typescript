@@ -1,5 +1,6 @@
 import type { FrameworkAdapter, Preprocessor } from "../contracts/protocols";
 import type { ContactEvent, PlatformEvent } from "../platform/events";
+import type { DisconnectHandler } from "../platform/streaming/disconnect";
 import { ThenvoiLink, type ThenvoiLinkOptions } from "../platform/ThenvoiLink";
 import { AgentRuntime } from "./rooms/AgentRuntime";
 import type { AgentConfig, ContactEventConfig, SessionConfig } from "./types";
@@ -29,6 +30,7 @@ export interface PlatformRuntimeOptions {
   onParticipantRemoved?: (roomId: string, participantId: string) => Promise<void> | void;
   roomFilter?: (room: MetadataMap) => boolean;
   contextFactory?: (roomId: string, defaults: ExecutionContextOptions) => ExecutionContext;
+  onDisconnect?: DisconnectHandler;
   identity?: {
     name: string;
     description?: string | null;
@@ -50,6 +52,7 @@ export class PlatformRuntime {
     description?: string | null;
   };
   private readonly logger: Logger;
+  private readonly _onDisconnect?: DisconnectHandler;
   private readonly _onParticipantAdded?: (roomId: string, participant: ParticipantRecord) => Promise<void> | void;
   private readonly _onParticipantRemoved?: (roomId: string, participantId: string) => Promise<void> | void;
   private readonly _roomFilter?: (room: MetadataMap) => boolean;
@@ -90,6 +93,7 @@ export class PlatformRuntime {
     this.agentConfig = options.agentConfig;
     this.logger = options.logger ?? new NoopLogger();
     this.configuredIdentity = options.identity;
+    this._onDisconnect = options.onDisconnect;
     this._onParticipantAdded = options.onParticipantAdded;
     this._onParticipantRemoved = options.onParticipantRemoved;
     this._roomFilter = options.roomFilter;
@@ -146,6 +150,7 @@ export class PlatformRuntime {
         apiKey: this._apiKey,
         wsUrl: this._wsUrl,
         restUrl: this._restUrl,
+        onDisconnect: this._onDisconnect,
       });
     }
 

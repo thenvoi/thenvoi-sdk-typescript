@@ -3,6 +3,7 @@ import { WebSocket as NodeWebSocket } from "ws";
 import { TransportError } from "../../core/errors";
 import type { Logger } from "../../core/logger";
 import { NoopLogger } from "../../core/logger";
+import { parseDisconnectReason, type DisconnectHandler } from "./disconnect";
 import type { StreamingTransport, TopicHandlers } from "./transport";
 
 interface PhoenixChannelsTransportOptions {
@@ -22,7 +23,10 @@ export class PhoenixChannelsTransport implements StreamingTransport {
   private readonly pendingJoins = new Map<string, Promise<void>>();
   private readonly logger: Logger;
   private onHandlerError?: (error: unknown) => void;
+  private disconnectHandler?: DisconnectHandler;
   private connected = false;
+  private intentionalDisconnect = false;
+  private disconnectNotified = false;
   private connectPromise: Promise<void> | null = null;
   private connectResolve: (() => void) | null = null;
 
@@ -49,6 +53,7 @@ export class PhoenixChannelsTransport implements StreamingTransport {
 
     this.socket.onOpen(() => {
       this.connected = true;
+      this.disconnectNotified = false;
       this.connectResolve?.();
       this.connectResolve = null;
       this.logger.info("Phoenix socket opened", {
@@ -59,16 +64,31 @@ export class PhoenixChannelsTransport implements StreamingTransport {
     this.socket.onClose((event?: { code?: number; reason?: string }) => {
       this.connected = false;
 
+      const info = parseDisconnectReason(event?.code, event?.reason);
+      // Log at "warn" when the server sent an explicit reason (always
+      // actionable) or the close code signals an abnormal closure.
+      const level = info.rawReason || (info.code !== null && info.code !== 1000) ? "warn" : "info";
+      this.logger[level](`Phoenix socket disconnected: ${info.reason}`, {
+        code: info.code,
+        rawReason: info.rawReason,
+      });
+
+      // Notify once per logical disconnect.  The guard must run before the
+      // no-channels disconnect() below, which can re-enter this handler.
+      if (!this.intentionalDisconnect && !this.disconnectNotified) {
+        this.disconnectNotified = true;
+        try {
+          this.disconnectHandler?.(info);
+        } catch (handlerError) {
+          this.logger.error("Disconnect handler threw", { error: handlerError });
+        }
+      }
+
       // If there are no active channels, stop reconnecting — the socket has
       // nothing to rejoin and would just churn connections.
       if (getSocketChannelCount(this.socket) === 0) {
         this.socket.disconnect();
       }
-
-      this.logger.info("Phoenix socket closed", {
-        code: event?.code ?? null,
-        reason: event?.reason ?? null,
-      });
     });
 
     this.socket.onError((event) => {
@@ -80,6 +100,8 @@ export class PhoenixChannelsTransport implements StreamingTransport {
     if (this.connected) {
       return;
     }
+
+    this.intentionalDisconnect = false;
 
     if (!this.connectPromise) {
       this.socket.connect();
@@ -103,12 +125,16 @@ export class PhoenixChannelsTransport implements StreamingTransport {
   }
 
   public async disconnect(): Promise<void> {
-    for (const topic of this.channels.keys()) {
-      await this.leave(topic);
-    }
+    this.intentionalDisconnect = true;
 
-    this.socket.disconnect();
-    this.connected = false;
+    try {
+      for (const topic of this.channels.keys()) {
+        await this.leave(topic);
+      }
+    } finally {
+      this.socket.disconnect();
+      this.connected = false;
+    }
   }
 
   public isConnected(): boolean {
@@ -151,6 +177,28 @@ export class PhoenixChannelsTransport implements StreamingTransport {
       refs.push([event, ref]);
     }
 
+    // Listen for Phoenix phx_close / phx_error pushed by the server so
+    // channel-level disconnects are visible in logs.  These are intentionally
+    // NOT propagated to the disconnectHandler -- that callback represents a
+    // socket-level disconnect affecting all channels.  Channel-level kicks
+    // (e.g. a single room being closed) are a different concern and are
+    // surfaced only via logging for now.
+    //
+    // Registered via channel.on() (rather than channel.onClose/onError) so
+    // the returned refs are tracked and cleaned up on leave().
+    refs.push([
+      "phx_close",
+      channel.on("phx_close", () => {
+        this.logger.debug("Channel closed by server", { topic });
+      }),
+    ]);
+    refs.push([
+      "phx_error",
+      channel.on("phx_error", () => {
+        this.logger.debug("Channel error from server", { topic });
+      }),
+    ]);
+
     try {
       await new Promise<void>((resolve, reject) => {
         channel
@@ -174,6 +222,10 @@ export class PhoenixChannelsTransport implements StreamingTransport {
     this.channels.set(topic, channel);
     this.channelRefs.set(topic, refs);
     this.logger.debug("Joined topic", { topic });
+  }
+
+  public setDisconnectHandler(handler: DisconnectHandler): void {
+    this.disconnectHandler = handler;
   }
 
   public async leave(topic: string): Promise<void> {

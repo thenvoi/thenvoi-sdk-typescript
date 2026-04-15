@@ -11,6 +11,11 @@ declare module "phoenix" {
     off(event: string, ref?: number): void;
     join(): Push;
     leave(): Push;
+    // Note: some Phoenix.js versions pass arguments to these callbacks, but we
+    // don't rely on them yet.  Update the signatures here if channel-level
+    // close reasons are needed in the future.
+    onClose(callback: () => void): void;
+    onError(callback: (reason?: unknown) => void): void;
   }
 
   export interface SocketOptions {
@@ -26,7 +31,7 @@ declare module "phoenix" {
     connect(): void;
     disconnect(): void;
     onOpen(callback: () => void): number;
-    onClose(callback: () => void): number;
+    onClose(callback: (event?: { code?: number; reason?: string }) => void): number;
     onError(callback: (event: unknown) => void): number;
   }
 }
