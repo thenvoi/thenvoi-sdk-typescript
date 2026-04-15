@@ -118,6 +118,7 @@ async function startServer(dispatcher?: LinearBridgeDispatcher, permissionCallba
   const store = new MemorySessionRoomStore();
   const linearClient = {
     createAgentActivity: vi.fn(async () => ({ ok: true })),
+    agentSessionUpdateExternalUrl: vi.fn(async () => ({ success: true })),
     issue: vi.fn(async () => ({ id: "issue-1", delegateId: null })),
     updateIssue: vi.fn(async () => ({ success: true })),
   };
@@ -149,6 +150,42 @@ async function startServer(dispatcher?: LinearBridgeDispatcher, permissionCallba
   return {
     linearClient,
     store,
+    url: `http://127.0.0.1:${address.port}/linear/webhook`,
+  };
+}
+
+async function startServerWithDeps(deps: {
+  thenvoiRest: unknown;
+  store: SessionRoomStore;
+  linearClient?: unknown;
+}) {
+  const linearClient = deps.linearClient ?? {
+    createAgentActivity: vi.fn(async () => ({ ok: true })),
+  };
+  const handler = createLinearWebhookHandler({
+    config,
+    deps: {
+      thenvoiRest: deps.thenvoiRest as never,
+      linearClient: linearClient as never,
+      store: deps.store,
+    },
+  });
+
+  const server = createServer((request, response) => {
+    void handler(request, response);
+  });
+  servers.add(server);
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Expected TCP server address");
+  }
+
+  return {
     url: `http://127.0.0.1:${address.port}/linear/webhook`,
   };
 }
@@ -546,6 +583,7 @@ describe("createLinearWebhookHandler", () => {
         .fn()
         .mockRejectedValueOnce(new Error("initial error reporting failed"))
         .mockResolvedValueOnce({ ok: true }),
+      agentSessionUpdateExternalUrl: vi.fn(async () => ({ success: true })),
       issue: vi.fn(async () => ({ id: "issue-1", delegateId: null })),
       updateIssue: vi.fn(async () => ({ success: true })),
     };
@@ -596,5 +634,319 @@ describe("createLinearWebhookHandler", () => {
         signal: "linear_activity_error",
       }),
     );
+  });
+
+  it("returns 200 for AppUserNotification webhook payloads", async () => {
+    const dispatcher = {
+      dispatch: vi.fn(),
+    } satisfies LinearBridgeDispatcher;
+    const { url } = await startServer(dispatcher);
+
+    const payload = {
+      type: "AppUserNotification",
+      action: "create",
+      appUserId: "app-user",
+      createdAt: new Date().toISOString(),
+      oauthClientId: "oauth-client",
+      organizationId: "org-1",
+      webhookId: "webhook-1",
+      webhookTimestamp: Date.now(),
+      notification: {
+        __typename: "IssueUnassignedFromYouNotificationWebhookPayload",
+        id: "notif-1",
+        issueId: "issue-1",
+        actorId: "user-1",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        userId: "app-user",
+        issue: { id: "issue-1", title: "Test issue" },
+      },
+    };
+    const rawBody = JSON.stringify(payload);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "linear-signature": sign(config.linearWebhookSecret, rawBody),
+        "linear-timestamp": String(payload.webhookTimestamp),
+      },
+      body: rawBody,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("OK");
+    expect(dispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates notification webhooks with the same notification id", async () => {
+    const store = new MemorySessionRoomStore();
+    const session: SessionRoomRecord = {
+      linearSessionId: "session-dedup",
+      linearIssueId: "issue-dedup",
+      thenvoiRoomId: "room-dedup",
+      status: "active",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await store.upsert(session);
+
+    const thenvoiRest = new LinearThenvoiExampleRestApi();
+    const { url } = await startServerWithDeps({
+      thenvoiRest,
+      store,
+    });
+
+    const payload = {
+      type: "AppUserNotification",
+      action: "create",
+      appUserId: "app-user",
+      createdAt: new Date().toISOString(),
+      oauthClientId: "oauth-client",
+      organizationId: "org-1",
+      webhookId: "webhook-1",
+      webhookTimestamp: Date.now(),
+      notification: {
+        __typename: "IssueUnassignedFromYouNotificationWebhookPayload",
+        id: "notif-dedup",
+        issueId: "issue-dedup",
+        actorId: "user-1",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        userId: "app-user",
+        issue: { id: "issue-dedup", title: "Dedup test" },
+      },
+    };
+    const rawBody = JSON.stringify(payload);
+    const headers = {
+      "content-type": "application/json",
+      "linear-signature": sign(config.linearWebhookSecret, rawBody),
+      "linear-timestamp": String(payload.webhookTimestamp),
+    };
+
+    const first = await fetch(url, { method: "POST", headers, body: rawBody });
+    expect(first.status).toBe(200);
+
+    const second = await fetch(url, { method: "POST", headers, body: rawBody });
+    expect(second.status).toBe(200);
+
+    // Only one disengagement message should have been sent
+    expect(thenvoiRest.roomEvents).toHaveLength(1);
+  });
+
+  it("returns 200 even when notification handling throws", async () => {
+    const store = new MemorySessionRoomStore();
+    const thenvoiRest = {
+      getAgentMe: vi.fn(async () => ({ id: "agent-1", handle: "linear-host" })),
+      createChatEvent: vi.fn(async () => {
+        throw new Error("room write failed");
+      }),
+    };
+
+    const { url } = await startServerWithDeps({
+      thenvoiRest: thenvoiRest as never,
+      store,
+    });
+
+    const session: SessionRoomRecord = {
+      linearSessionId: "session-fail",
+      linearIssueId: "issue-fail",
+      thenvoiRoomId: "room-fail",
+      status: "active",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await store.upsert(session);
+
+    const payload = {
+      type: "AppUserNotification",
+      action: "create",
+      appUserId: "app-user",
+      createdAt: new Date().toISOString(),
+      oauthClientId: "oauth-client",
+      organizationId: "org-1",
+      webhookId: "webhook-1",
+      webhookTimestamp: Date.now(),
+      notification: {
+        __typename: "IssueUnassignedFromYouNotificationWebhookPayload",
+        id: "notif-fail",
+        issueId: "issue-fail",
+        actorId: "user-1",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        userId: "app-user",
+        issue: { id: "issue-fail", title: "Fail test" },
+      },
+    };
+    const rawBody = JSON.stringify(payload);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "linear-signature": sign(config.linearWebhookSecret, rawBody),
+        "linear-timestamp": String(payload.webhookTimestamp),
+      },
+      body: rawBody,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("OK");
+  });
+
+  it("does not dedup a notification whose handler previously failed", async () => {
+    const store = new MemorySessionRoomStore();
+    const session: SessionRoomRecord = {
+      linearSessionId: "session-retry",
+      linearIssueId: "issue-retry",
+      thenvoiRoomId: "room-retry",
+      status: "active",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await store.upsert(session);
+
+    const thenvoiRest = {
+      getAgentMe: vi.fn(async () => ({ id: "agent-1", handle: "linear-host" })),
+      createChatEvent: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("transient failure"))
+        .mockResolvedValueOnce(undefined),
+    };
+
+    const { url } = await startServerWithDeps({
+      thenvoiRest: thenvoiRest as never,
+      store,
+    });
+
+    const payload = {
+      type: "AppUserNotification",
+      action: "create",
+      appUserId: "app-user",
+      createdAt: new Date().toISOString(),
+      oauthClientId: "oauth-client",
+      organizationId: "org-1",
+      webhookId: "webhook-1",
+      webhookTimestamp: Date.now(),
+      notification: {
+        __typename: "IssueUnassignedFromYouNotificationWebhookPayload",
+        id: "notif-retry",
+        issueId: "issue-retry",
+        actorId: "user-1",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        userId: "app-user",
+        issue: { id: "issue-retry", title: "Retry test" },
+      },
+    };
+    const rawBody = JSON.stringify(payload);
+    const headers = {
+      "content-type": "application/json",
+      "linear-signature": sign(config.linearWebhookSecret, rawBody),
+      "linear-timestamp": String(payload.webhookTimestamp),
+    };
+
+    // First attempt — handler throws (createChatEvent rejects)
+    const first = await fetch(url, { method: "POST", headers, body: rawBody });
+    expect(first.status).toBe(200);
+
+    // Second attempt (retry) — same notification id, should NOT be deduped
+    const second = await fetch(url, { method: "POST", headers, body: rawBody });
+    expect(second.status).toBe(200);
+
+    // createChatEvent should have been called twice (once failed, once succeeded)
+    expect(thenvoiRest.createChatEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns 200 when notification payload is missing the notification field", async () => {
+    const dispatcher = {
+      dispatch: vi.fn(),
+    } satisfies LinearBridgeDispatcher;
+    const { url } = await startServer(dispatcher);
+
+    const payload = {
+      type: "AppUserNotification",
+      action: "create",
+      appUserId: "app-user",
+      createdAt: new Date().toISOString(),
+      oauthClientId: "oauth-client",
+      organizationId: "org-1",
+      webhookId: "webhook-1",
+      webhookTimestamp: Date.now(),
+      // notification field intentionally omitted
+    };
+    const rawBody = JSON.stringify(payload);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "linear-signature": sign(config.linearWebhookSecret, rawBody),
+        "linear-timestamp": String(payload.webhookTimestamp),
+      },
+      body: rawBody,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("OK");
+    expect(dispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("skips self-notification comments at the webhook level", async () => {
+    const store = new MemorySessionRoomStore();
+    const session: SessionRoomRecord = {
+      linearSessionId: "session-self",
+      linearIssueId: "issue-self",
+      thenvoiRoomId: "room-self",
+      status: "active",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await store.upsert(session);
+
+    const thenvoiRest = new LinearThenvoiExampleRestApi();
+    const { url } = await startServerWithDeps({
+      thenvoiRest,
+      store,
+    });
+
+    const payload = {
+      type: "AppUserNotification",
+      action: "create",
+      appUserId: "app-user-bot",
+      createdAt: new Date().toISOString(),
+      oauthClientId: "oauth-client",
+      organizationId: "org-1",
+      webhookId: "webhook-1",
+      webhookTimestamp: Date.now(),
+      notification: {
+        __typename: "IssueNewCommentNotificationWebhookPayload",
+        id: "notif-self-wh",
+        issueId: "issue-self",
+        commentId: "comment-self-wh",
+        comment: { body: "Bot wrote this" },
+        actor: { name: "Bot" },
+        actorId: "app-user-bot",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        userId: "app-user-bot",
+        issue: { id: "issue-self", title: "Self test" },
+      },
+    };
+    const rawBody = JSON.stringify(payload);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "linear-signature": sign(config.linearWebhookSecret, rawBody),
+        "linear-timestamp": String(payload.webhookTimestamp),
+      },
+      body: rawBody,
+    });
+
+    expect(response.status).toBe(200);
+    // No message should have been sent to the room
+    expect(thenvoiRest.roomEvents).toHaveLength(0);
   });
 });

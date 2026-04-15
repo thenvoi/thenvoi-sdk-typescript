@@ -20,9 +20,15 @@ export {
   postError,
   postResponse,
   postElicitation,
+  postSelectElicitation,
+  postAuthElicitation,
   updatePlan,
+  ELICITATION_BODY_MAX_LENGTH,
+  SELECT_OPTION_MAX_LENGTH,
+  PROVIDER_MAX_LENGTH,
 } from "./activities";
 export { createLinearTools } from "./tools";
+export { handleAppUserNotification } from "./notification";
 export {
   createInlineLinearBridgeDispatcher,
   createInProcessLinearBridgeDispatcher,
@@ -38,8 +44,12 @@ export type {
   SessionRoomStore,
   LinearThenvoiBridgeDeps,
   HandleAgentSessionEventInput,
+  HandleAppUserNotificationInput,
+  CandidateRepositoryInput,
   LinearActivityClient,
   PlanStep,
+  RepositorySuggestion,
+  SelectOption,
   LinearSessionStatus,
 } from "./types";
 export type {
