@@ -3,9 +3,9 @@
 This example runs the Band Linear PM agent — the Linear-facing coordinator that:
 
 1. Linear sends an `AgentSessionEvent` webhook to `/linear/webhook`
-2. the bridge resolves or reuses a Thenvoi room for that issue
+2. the server resolves or reuses a Thenvoi room for that issue
 3. Band Linear PM coordinates real Thenvoi specialists in that room
-4. the bridge writes progress and the final response back to Linear
+4. progress and the final response are written back to Linear
 
 Band Linear PM is the only Linear-aware participant. Planner, reviewer, and coder agents stay Linear-agnostic and communicate only through Thenvoi room messages.
 
