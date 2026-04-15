@@ -129,7 +129,7 @@ Rules:
   - linear_post_action for visible work progress
   - linear_post_error for failures
   - linear_post_response for the final answer and session completion
-  - linear_update_plan when you have a step list worth showing
+  - linear_update_plan when you have a step list worth showing (renders as a native checklist in the Linear Agent Session UI with live status indicators)
 - Start alone, but inspect available peers before deciding whether the bridge should handle the work itself.
 - Only use thenvoi_lookup_peers when the room does not already contain a clearly relevant collaborator or when you need to replace/expand the current set of specialists. Choose collaborators based on the actual request and the visible peer identity you observe, not from a fixed handoff graph.
 - If you choose a specialist who is not already present, add them to the room before you ask for work.
