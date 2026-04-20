@@ -1,13 +1,13 @@
-# Linear + Thenvoi Bridge
+# Linear + Band Bridge
 
-A webhook server that connects Linear Agent Sessions to Thenvoi multi-agent rooms. When a user starts an agent session on a Linear issue, this bridge receives the webhook, creates a Thenvoi room for the work, coordinates specialist agents (planner, reviewer, coder), and writes progress back to Linear.
+A webhook server that connects Linear Agent Sessions to Band multi-agent rooms. When a user starts an agent session on a Linear issue, this bridge receives the webhook, creates a Band room for the work, coordinates specialist agents (planner, reviewer, coder), and writes progress back to Linear.
 
-The bridge agent is the only participant that talks to Linear. All other specialists communicate through the Thenvoi room and never need to know about Linear.
+The bridge agent is the only participant that talks to Linear. All other specialists communicate through the Band room and never need to know about Linear.
 
 ## Architecture
 
 ```
-Linear Issue                                    Thenvoi Room
+Linear Issue                                    Band Room
     |                                               |
     |  AgentSessionEvent webhook                     |
     v                                               |
@@ -25,7 +25,7 @@ Linear Issue                                    Thenvoi Room
 ```
 
 1. Linear sends an `AgentSessionEvent` webhook to `/linear/webhook`
-2. The bridge resolves (or creates) a Thenvoi room for that issue
+2. The bridge resolves (or creates) a Band room for that issue
 3. The embedded bridge agent reads the session payload, decides what kind of work is needed, and invites the right specialists
 4. Specialists do the work in the room -- planning, reviewing, or coding
 5. The bridge synthesizes the output and writes it back to Linear
@@ -34,7 +34,7 @@ Linear Issue                                    Thenvoi Room
 
 - Node.js 22+ (required for the built-in `node:sqlite` module)
 - A Linear workspace with API access
-- A Thenvoi account with at least one agent configured
+- A Band account with at least one agent configured
 - An OpenAI API key (the bridge defaults to the Codex adapter with `gpt-5.4-mini`, but you can pass any `FrameworkAdapter` via the `adapter` option)
 - A tunnel tool for local development (e.g., `cloudflared`, `ngrok`) so Linear can reach your local server
 
@@ -47,10 +47,10 @@ Agent Session events (the events that trigger this bridge) are delivered through
 1. In Settings, go to **Administration > API** in the left sidebar
 2. Under **OAuth Applications**, click the **+** button
 3. Fill in the application details:
-   - **Application name**: "Thenvoi Bridge" (or whatever you want users to see)
+   - **Application name**: "Band Bridge" (or whatever you want users to see)
    - **Developer name**: Your name or organization
    - **Developer URL**: Your project's homepage (can be any valid URL)
-   - **Description**: "Thenvoi multi-agent bridge for Linear"
+   - **Description**: "Band multi-agent bridge for Linear"
    - **Callback URLs**: Your bridge's OAuth callback URL (e.g., `https://your-domain.com/linear/oauth/callback`)
 4. Enable the **Webhooks** toggle at the bottom of the form
 5. Fill in the webhook fields that appear:
@@ -75,7 +75,7 @@ The OAuth application must be installed in the workspace using the `actor=app` f
 
 > **Why an OAuth application?** Regular workspace webhooks only deliver data change events (Issue, Comment, etc.). Agent Session events are app-specific -- they are sent only to the OAuth application that owns the session. The bridge receives these events at the webhook URL you configured in the OAuth app.
 
-## Setting Up Thenvoi
+## Setting Up Band
 
 ### 1. Create an Agent
 
@@ -97,7 +97,7 @@ The config key `linear_thenvoi_bridge` is the default. You can change it with th
 
 ### 3. Set Up Specialist Agents (Optional)
 
-The bridge works best when it can delegate to specialist agents already registered in Thenvoi:
+The bridge works best when it can delegate to specialist agents already registered in Band:
 
 - A **planner** agent for breaking down issues into implementation plans
 - A **reviewer** agent for tightening plans and reviewing work
@@ -115,14 +115,14 @@ The bridge discovers these by inspecting peer names, handles, and descriptions a
 | `LINEAR_OAUTH_CLIENT_ID` | OAuth application client ID |
 | `LINEAR_OAUTH_CLIENT_SECRET` | OAuth application client secret |
 | `LINEAR_WEBHOOK_SECRET` | Linear webhook signing secret (`lin_wh_...`) |
-| `THENVOI_API_KEY` | Thenvoi API key (also configurable via `agent_config.yaml`) |
+| `THENVOI_API_KEY` | Band API key (also configurable via `agent_config.yaml`) |
 | `OPENAI_API_KEY` | OpenAI key used by the Codex adapter (stored in `~/.codex/auth.json` on first container start) |
 
 ### Optional
 
 | Variable | Default | Description |
 |---|---|---|
-| `THENVOI_REST_URL` | `https://app.thenvoi.com` | Thenvoi REST API endpoint |
+| `THENVOI_REST_URL` | `https://app.thenvoi.com` | Band REST API endpoint |
 | `THENVOI_HOST_AGENT_HANDLE` | -- | Bridge agent handle (`your-org/agent-name`) |
 | `LINEAR_THENVOI_ROOM_STRATEGY` | `issue` | `issue` = one room per issue, `session` = new room each time |
 | `LINEAR_THENVOI_WRITEBACK_MODE` | `activity_stream` | `activity_stream` = intermediate updates, `final_only` = minimal |
@@ -157,7 +157,7 @@ LINEAR_WEBHOOK_SECRET=lin_wh_your_secret_here
 THENVOI_API_KEY=thnv_a_your_key_here
 ```
 
-Create `agent_config.yaml` with your Thenvoi agent credentials (see Thenvoi setup above).
+Create `agent_config.yaml` with your Band agent credentials (see Band setup above).
 
 ### 3. Start a Tunnel
 
@@ -212,7 +212,7 @@ cp .env.example .env
 # Edit .env with your credentials
 ```
 
-Create `agent_config.yaml` with your Thenvoi agent credentials (see Thenvoi setup above).
+Create `agent_config.yaml` with your Band agent credentials (see Band setup above).
 
 ### 2. Build and Run
 
@@ -259,9 +259,9 @@ When running with Docker, the `docker-compose.yml` mounts `prompt.md` into the c
 
 ## Room Strategies
 
-**`issue` (default):** One Thenvoi room per Linear issue. Subsequent agent sessions on the same issue reuse the existing room, preserving context from previous conversations.
+**`issue` (default):** One Band room per Linear issue. Subsequent agent sessions on the same issue reuse the existing room, preserving context from previous conversations.
 
-**`session`:** A new Thenvoi room for each Linear agent session. Each session starts fresh. Use this when different sessions on the same issue are unrelated.
+**`session`:** A new Band room for each Linear agent session. Each session starts fresh. Use this when different sessions on the same issue are unrelated.
 
 Set via `LINEAR_THENVOI_ROOM_STRATEGY` in your `.env`.
 
@@ -291,7 +291,7 @@ Set via `LINEAR_THENVOI_WRITEBACK_MODE` in your `.env`.
 - Check your version: `node --version`
 
 **Rate limiting (429 errors in logs):**
-- The bridge has built-in rate limiting and retry logic for Thenvoi REST API calls
+- The bridge has built-in rate limiting and retry logic for Band REST API calls
 - Default minimum interval between requests: 2 seconds
 - Persistent 429s usually resolve on their own after backoff
 
@@ -305,9 +305,9 @@ Set via `LINEAR_THENVOI_WRITEBACK_MODE` in your `.env`.
 |---|---|
 | `linear-thenvoi-bridge-server.ts` | Express webhook server and embedded bridge runtime |
 | `linear-thenvoi-bridge-agent.ts` | Bridge agent factory using the Codex adapter with Linear tools |
-| `linear-thenvoi-rest-stub.ts` | Mock Thenvoi REST API for testing |
+| `linear-thenvoi-rest-stub.ts` | Mock Band REST API for testing |
 | `prompt.md` | Agent behavioral instructions (edit this to customize the agent) |
-| `agent_config.yaml` | Thenvoi agent credentials (you create this, gitignored) |
+| `agent_config.yaml` | Band agent credentials (you create this, gitignored) |
 | `.env` | Environment variables (copy from `.env.example`, gitignored) |
 | `Dockerfile` | Container build definition |
 | `docker-compose.yml` | One-command deployment with volumes |
