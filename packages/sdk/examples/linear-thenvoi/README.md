@@ -305,7 +305,6 @@ Set via `LINEAR_THENVOI_WRITEBACK_MODE` in your `.env`.
 |---|---|
 | `linear-thenvoi-bridge-server.ts` | Express webhook server and embedded bridge runtime |
 | `linear-thenvoi-bridge-agent.ts` | Bridge agent factory using the Codex adapter with Linear tools |
-| `linear-thenvoi-rest-stub.ts` | Mock Band REST API for testing |
 | `prompt.md` | Agent behavioral instructions (edit this to customize the agent) |
 | `agent_config.yaml` | Band agent credentials (you create this, gitignored) |
 | `.env` | Environment variables (copy from `.env.example`, gitignored) |
