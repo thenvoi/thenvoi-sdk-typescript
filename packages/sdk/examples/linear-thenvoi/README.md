@@ -40,13 +40,7 @@ Linear Issue                                    Thenvoi Room
 
 ## Setting Up Linear
 
-### 1. Enable Linear Agent
-
-1. In Settings, go to **Features > AI & Agents** in the left sidebar
-2. Make sure **Linear Agent** is enabled for your workspace
-3. If you see "Start free trial", you may need a Business or Enterprise plan for full agent functionality
-
-### 2. Create an OAuth Application
+### 1. Create an OAuth Application
 
 Agent Session events (the events that trigger this bridge) are delivered through an OAuth application, not through regular workspace webhooks. The OAuth application also provides the credentials the bridge uses to call the Linear API -- there is no separate personal API key to create.
 
