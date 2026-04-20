@@ -40,25 +40,15 @@ Linear Issue                                    Thenvoi Room
 
 ## Setting Up Linear
 
-### 1. Create a Personal API Key
-
-1. Open Linear and go to **Settings** (gear icon in the sidebar)
-2. In the left panel under your account settings, click **Security & access**
-3. Scroll to **Personal API keys** and click **New API key**
-4. Give it a label (e.g., "Thenvoi Bridge") and create it
-5. Copy the key -- it starts with `lin_api_`
-
-This goes into your `.env` as `LINEAR_ACCESS_TOKEN`.
-
-### 2. Enable Linear Agent
+### 1. Enable Linear Agent
 
 1. In Settings, go to **Features > AI & Agents** in the left sidebar
 2. Make sure **Linear Agent** is enabled for your workspace
 3. If you see "Start free trial", you may need a Business or Enterprise plan for full agent functionality
 
-### 3. Create an OAuth Application
+### 2. Create an OAuth Application
 
-Agent Session events (the events that trigger this bridge) are delivered through an OAuth application, not through regular workspace webhooks. You need to create one.
+Agent Session events (the events that trigger this bridge) are delivered through an OAuth application, not through regular workspace webhooks. The OAuth application also provides the credentials the bridge uses to call the Linear API -- there is no separate personal API key to create.
 
 1. In Settings, go to **Administration > API** in the left sidebar
 2. Under **OAuth Applications**, click the **+** button
@@ -76,9 +66,18 @@ Agent Session events (the events that trigger this bridge) are delivered through
 7. Optionally check **Inbox notifications** if you want the bridge to handle inbox events too
 8. Click **Create**
 
-The webhook signing secret goes into your `.env` as `LINEAR_WEBHOOK_SECRET`.
+After creating the application, copy these four values into your `.env`:
 
-After creating the application, you will receive a **Client ID** and **Client Secret**. The OAuth application must be installed in the workspace using the `actor=app` flow so that agent sessions are routed to your bridge.
+| OAuth app field | `.env` variable |
+|---|---|
+| Client ID | `LINEAR_OAUTH_CLIENT_ID` |
+| Client secret | `LINEAR_OAUTH_CLIENT_SECRET` |
+| Webhook signing secret | `LINEAR_WEBHOOK_SECRET` |
+| Developer token (`lin_oauth_...`) | `LINEAR_ACCESS_TOKEN` |
+
+The **developer token** is shown on the OAuth application's detail page and is what the bridge uses to call the Linear API on behalf of the app. It takes the place of a personal API key.
+
+The OAuth application must be installed in the workspace using the `actor=app` flow so that agent sessions are routed to your bridge.
 
 > **Why an OAuth application?** Regular workspace webhooks only deliver data change events (Issue, Comment, etc.). Agent Session events are app-specific -- they are sent only to the OAuth application that owns the session. The bridge receives these events at the webhook URL you configured in the OAuth app.
 
@@ -118,9 +117,12 @@ The bridge discovers these by inspecting peer names, handles, and descriptions a
 
 | Variable | Description |
 |---|---|
-| `LINEAR_ACCESS_TOKEN` | Linear personal API key (`lin_api_...`) |
+| `LINEAR_ACCESS_TOKEN` | OAuth application developer token (`lin_oauth_...`) |
+| `LINEAR_OAUTH_CLIENT_ID` | OAuth application client ID |
+| `LINEAR_OAUTH_CLIENT_SECRET` | OAuth application client secret |
 | `LINEAR_WEBHOOK_SECRET` | Linear webhook signing secret (`lin_wh_...`) |
 | `THENVOI_API_KEY` | Thenvoi API key (also configurable via `agent_config.yaml`) |
+| `OPENAI_API_KEY` | OpenAI key used by the Codex adapter (stored in `~/.codex/auth.json` on first container start) |
 
 ### Optional
 
@@ -156,7 +158,7 @@ cp .env.example .env
 Edit `.env` and fill in at minimum:
 
 ```
-LINEAR_ACCESS_TOKEN=lin_api_your_key_here
+LINEAR_ACCESS_TOKEN=lin_oauth_your_token_here
 LINEAR_WEBHOOK_SECRET=lin_wh_your_secret_here
 THENVOI_API_KEY=thnv_a_your_key_here
 ```
