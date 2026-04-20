@@ -10,9 +10,11 @@ services:
       - LINEAR_THENVOI_PROMPT_PATH=/app/config/prompt.md
     volumes:
       - bridge-data:/app/data
+      - codex-home:/root/.codex
       - ./prompt.md:/app/config/prompt.md:ro
       - ./agent_config.yaml:/app/agent_config.yaml:ro
     restart: unless-stopped
 
 volumes:
   bridge-data:
+  codex-home:
