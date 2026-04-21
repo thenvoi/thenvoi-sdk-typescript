@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { Logger } from "../../core/logger";
 import type { CustomToolDef } from "../../runtime/tools/customTools";
 import type { CandidateRepositoryInput, LinearActivityClient, PlanStep, RepositorySuggestion, SelectOption } from "./activities";
 import {
@@ -34,13 +35,14 @@ interface CreateLinearToolsOptions {
   client: LinearActivityClient;
   store?: SessionRoomStore;
   enableElicitation?: boolean;
+  logger?: Logger;
 }
 
 /**
  * Create Linear activity tools usable by any adapter via `customTools`.
  */
 export function createLinearTools(options: CreateLinearToolsOptions): CustomToolDef[] {
-  const { client, store, enableElicitation = true } = options;
+  const { client, store, enableElicitation = true, logger } = options;
 
   const sessionBodySchema = z.object({
     session_id: z.string().describe("The Linear agent session ID"),
@@ -276,7 +278,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     });
   }
 
-  addSessionCreationTools({ tools, client, store });
+  addSessionCreationTools({ tools, client, store, logger });
 
   return tools;
 }
@@ -602,8 +604,9 @@ function addSessionCreationTools(input: {
   tools: CustomToolDef[];
   client: LinearActivityClient;
   store?: SessionRoomStore;
+  logger?: Logger;
 }): void {
-  const { tools, client, store } = input;
+  const { tools, client, store, logger } = input;
 
   const sessionCreationBaseSchema = z.object({
     external_link: z.string().url().optional().describe("Optional URL of an external page associated with this session"),
@@ -633,7 +636,12 @@ function addSessionCreationTools(input: {
       });
       return null;
     } catch (err) {
-      console.warn("Failed to persist session-room mapping, session was still created in Linear", err);
+      logger?.warn("linear_tools.session_room_persist_failed", {
+        sessionId,
+        issueId,
+        roomId,
+        error: err instanceof Error ? err.message : String(err),
+      });
       return "session-room mapping not persisted";
     }
   }
@@ -651,7 +659,7 @@ function addSessionCreationTools(input: {
           issueId,
           ...(typeof args.external_link === "string" ? { externalLink: args.external_link } : {}),
         });
-        const session = extractCreatedSession(result);
+        const session = extractCreatedSession(result, logger);
         const warning = await persistSessionRoom(session.id, session.issueId, args.room_id as string | undefined);
         return { ok: true, session, ...(warning ? { warning } : {}) };
       },
@@ -673,7 +681,7 @@ function addSessionCreationTools(input: {
           commentId,
           ...(typeof args.external_link === "string" ? { externalLink: args.external_link } : {}),
         });
-        const session = extractCreatedSession(result);
+        const session = extractCreatedSession(result, logger);
         const warning = await persistSessionRoom(session.id, session.issueId, args.room_id as string | undefined);
         return { ok: true, session, ...(warning ? { warning } : {}) };
       },
@@ -706,14 +714,14 @@ function addSessionCreationTools(input: {
           ...(Array.isArray(args.label_ids) ? { labelIds: args.label_ids as string[] } : {}),
         });
 
-        const issue = extractCreatedIssue(result);
+        const issue = extractCreatedIssue(result, logger);
         return { ok: true, issue };
       },
     });
   }
 }
 
-function extractCreatedSession(result: unknown): {
+function extractCreatedSession(result: unknown, logger?: Logger): {
   id: string;
   issueId: string | null;
   status: string | null;
@@ -725,6 +733,9 @@ function extractCreatedSession(result: unknown): {
 
   const id = typeof session.id === "string" ? session.id : null;
   if (!id) {
+    logger?.error("linear_tools.orphan_session_created", {
+      raw: safeStringify(result),
+    });
     throw new Error("Linear API returned a session without an ID.");
   }
 
@@ -735,7 +746,7 @@ function extractCreatedSession(result: unknown): {
   };
 }
 
-function extractCreatedIssue(result: unknown): {
+function extractCreatedIssue(result: unknown, logger?: Logger): {
   id: string;
   identifier: string | null;
   url: string | null;
@@ -748,6 +759,9 @@ function extractCreatedIssue(result: unknown): {
 
   const id = typeof issue.id === "string" ? issue.id : null;
   if (!id) {
+    logger?.error("linear_tools.orphan_issue_created", {
+      raw: safeStringify(result),
+    });
     throw new Error("Linear API returned an issue without an ID.");
   }
 
@@ -757,6 +771,14 @@ function extractCreatedIssue(result: unknown): {
     url: typeof issue.url === "string" ? issue.url : null,
     title: typeof issue.title === "string" ? issue.title : null,
   };
+}
+
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function extractRepositorySuggestions(response: unknown): RepositorySuggestion[] {

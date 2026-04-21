@@ -52,8 +52,6 @@ function createLinearThenvoiBridgeAgentWithStore(
     options?.linearAccessToken ?? process.env.LINEAR_ACCESS_TOKEN ?? "linear-api-key",
   );
 
-  const autoSubscribe = options?.autoSubscribeExistingRooms ?? false;
-
   const adapter = new CodexAdapter({
     config: {
       model: options?.codexModel ?? process.env.CODEX_MODEL ?? "gpt-5.3-codex",
@@ -67,6 +65,7 @@ function createLinearThenvoiBridgeAgentWithStore(
       client: linearClient,
       store: options.store,
       enableElicitation: false,
+      logger: options?.logger,
     }),
   });
 
@@ -82,7 +81,7 @@ function createLinearThenvoiBridgeAgentWithStore(
       apiKey: options?.apiKey ?? "api-key",
     },
     agentConfig: {
-      autoSubscribeExistingRooms: autoSubscribe,
+      autoSubscribeExistingRooms: options?.autoSubscribeExistingRooms,
     },
     identity: {
       name: options?.name ?? "Thenvoi Linear Bridge",
