@@ -5,10 +5,8 @@ import { createThenvoiSdkMcpServer } from "../src/mcp/sdk";
 import { FakeRestApi } from "./testUtils";
 
 describe("createThenvoiSdkMcpServer", () => {
-  it("builds thenvoi MCP tools and routes calls to room-scoped tool execution", async () => {
-    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
-
-    const roomTools: AgentToolsProtocol = {
+  function makeTools(calls: Array<{ name: string; args: Record<string, unknown> }>): AgentToolsProtocol {
+    return {
       capabilities: { peers: false, contacts: false, memory: false },
       sendMessage: async () => ({ ok: true }),
       sendEvent: async () => ({ ok: true }),
@@ -35,6 +33,12 @@ describe("createThenvoiSdkMcpServer", () => {
         return { ok: true };
       },
     };
+  }
+
+  it("builds thenvoi MCP tools and routes calls to room-scoped tool execution", async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+
+    const roomTools = makeTools(calls);
 
     const bridge = createThenvoiSdkMcpServer({
       enableMemoryTools: false,
@@ -211,5 +215,36 @@ describe("createThenvoiSdkMcpServer", () => {
     expect(markdown).toContain("### Warnings");
     expect(contextData.roomTitle).toBe("Paged Room");
     expect(contextData.warnings).toContain("Unable to resolve agent identity: identity offline");
+  });
+
+  it("builds thenvoi MCP tools without room_id when multiRoom is false", async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const bridge = createThenvoiSdkMcpServer({
+      multiRoom: false,
+      enableMemoryTools: false,
+      getToolsForRoom: () => makeTools(calls),
+    });
+
+    const sendMessageTool = bridge.toolDefinitions.find((entry) => entry.name === "thenvoi_send_message");
+    expect(sendMessageTool).toBeDefined();
+    if (!sendMessageTool) {
+      throw new Error("thenvoi_send_message tool definition missing");
+    }
+
+    const result = await sendMessageTool.handler({
+      content: "hello",
+      mentions: ["@b"],
+    }, {});
+
+    expect(calls).toEqual([
+      {
+        name: "thenvoi_send_message",
+        args: {
+          content: "hello",
+          mentions: ["@b"],
+        },
+      },
+    ]);
+    expect(result.isError).toBeUndefined();
   });
 });

@@ -55,7 +55,7 @@ custom_adapter_agent:
   api_key: "your-api-key"
 
 linear_thenvoi_bridge:
-  agent_id: "your-linear-bridge-agent-id"
+  agent_id: "your-band-linear-pm-agent-id"
   api_key: "your-api-key"
 
 planner_agent:
