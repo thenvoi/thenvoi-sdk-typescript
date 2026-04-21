@@ -20,6 +20,11 @@ describe("renderSystemPrompt", () => {
     expect(result).toContain(BASE_INSTRUCTIONS);
   });
 
+  it("warns that exact names can become visible mentions", () => {
+    expect(BASE_INSTRUCTIONS).toContain("rewrite exact participant names or handles");
+    expect(BASE_INSTRUCTIONS).toContain("indirect reference");
+  });
+
   it("includes custom section", () => {
     const result = renderSystemPrompt({
       agentName: "Bot",

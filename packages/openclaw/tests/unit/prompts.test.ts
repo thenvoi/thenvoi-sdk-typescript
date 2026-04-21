@@ -43,6 +43,11 @@ describe("Prompts", () => {
       expect(BASE_INSTRUCTIONS).toContain("Example:");
       expect(BASE_INSTRUCTIONS).toContain("Webchat");
     });
+
+    it("should warn that exact names can become visible mentions", () => {
+      expect(BASE_INSTRUCTIONS).toContain("rewrite exact participant names or handles");
+      expect(BASE_INSTRUCTIONS).toContain("indirect phrasing");
+    });
   });
 
   describe("buildSystemPrompt", () => {

@@ -144,6 +144,71 @@ describe("Channel Gateway Lifecycle", () => {
       // Verify callback received the message (sender tracking is internal)
       expect(callback).toHaveBeenCalledTimes(1);
     });
+
+    it("should route replies to the last sender even if another participant name appears in the text", async () => {
+      const callback = vi.fn();
+      setInboundCallback(callback);
+
+      const ctx = createGatewayContext("account-1", mockAccountConfig, { aborted: true });
+      await thenvoiChannel.gateway!.startAccount(ctx);
+
+      mockLinkInstance.rest.listChatParticipants = vi.fn().mockResolvedValue([
+        { id: "user-789", name: "John Doe", type: "User" },
+        { id: "user-456", name: "Jane Doe", type: "User" },
+        { id: "agent-123", name: "Test Agent", type: "Agent" },
+      ]);
+
+      deliverMessage({
+        channelId: "thenvoi" as const,
+        threadId: "room-123",
+        senderId: "user-789",
+        senderType: "User",
+        senderName: "John Doe",
+        text: "Hello",
+        timestamp: "2025-01-15T10:00:00Z",
+      }, "account-1");
+
+      await thenvoiChannel.outbound.sendText({
+        cfg: {},
+        accountId: "account-1",
+        to: "room-123",
+        text: "Jane Doe already finished the review.",
+      });
+
+      expect(mockLinkInstance.rest.createChatMessage).toHaveBeenCalledWith(
+        "room-123",
+        expect.objectContaining({
+          content: "Jane Doe already finished the review.",
+          mentions: [{ id: "user-789", name: "John Doe" }],
+        }),
+      );
+    });
+
+    it("should fall back to the first other participant when no sender is tracked", async () => {
+      const ctx = createGatewayContext("account-2", mockAccountConfig, { aborted: true });
+      await thenvoiChannel.gateway!.startAccount(ctx);
+
+      mockLinkInstance.rest.listChatParticipants = vi.fn().mockResolvedValue([
+        { id: "user-789", name: "John Doe", type: "User" },
+        { id: "user-456", name: "Jane Doe", type: "User" },
+        { id: "agent-123", name: "Test Agent", type: "Agent" },
+      ]);
+
+      await thenvoiChannel.outbound.sendText({
+        cfg: {},
+        accountId: "account-2",
+        to: "room-123",
+        text: "Following up without prior inbound context.",
+      });
+
+      expect(mockLinkInstance.rest.createChatMessage).toHaveBeenCalledWith(
+        "room-123",
+        expect.objectContaining({
+          content: "Following up without prior inbound context.",
+          mentions: [{ id: "user-789", name: "John Doe" }],
+        }),
+      );
+    });
   });
 
   describe("startAccount", () => {

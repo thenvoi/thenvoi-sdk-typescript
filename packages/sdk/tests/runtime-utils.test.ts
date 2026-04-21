@@ -50,6 +50,12 @@ describe("runtime utilities", () => {
     expect(message).toContain("@jane");
   });
 
+  it("warns that exact names can trigger visible mentions", () => {
+    const message = buildParticipantsMessage([{ type: "User", name: "Jane", handle: "jane" }]);
+    expect(message).toContain("do not write their exact display name or handle");
+    expect(message).toContain("platform may convert exact names into visible @mentions");
+  });
+
   it("renders system prompt", () => {
     const prompt = renderSystemPrompt({
       agentName: "Agent",
