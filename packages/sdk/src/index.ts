@@ -8,6 +8,7 @@ export type { PlatformRuntimeOptions } from "./runtime/PlatformRuntime";
 export { AgentRuntime } from "./runtime/rooms/AgentRuntime";
 export type { ExecutionContextOptions } from "./runtime/ExecutionContext";
 export { DefaultPreprocessor } from "./runtime/preprocessing/DefaultPreprocessor";
+export type { CustomToolDef } from "./runtime/tools/customTools";
 export type {
   AgentConfig,
   AgentInput,
