@@ -30,6 +30,12 @@ interface LinearThenvoiBridgeAgentOptions {
   logger?: Logger;
   linkOptions?: AgentCreateOptions["linkOptions"];
   sessionConfig?: SessionConfig;
+  /**
+   * When true, the bridge agent subscribes to rooms it is added to directly
+   * (Thenvoi-initiated), not just rooms created via Linear webhooks.
+   * Defaults to false. Set to true to enable bidirectional (Thenvoi-initiated) operation.
+   */
+  autoSubscribeExistingRooms?: boolean;
 }
 
 export function createLinearThenvoiBridgeAgent(
@@ -46,6 +52,8 @@ function createLinearThenvoiBridgeAgentWithStore(
     options?.linearAccessToken ?? process.env.LINEAR_ACCESS_TOKEN ?? "linear-api-key",
   );
 
+  const autoSubscribe = options?.autoSubscribeExistingRooms ?? false;
+
   const adapter = new CodexAdapter({
     config: {
       model: options?.codexModel ?? process.env.CODEX_MODEL ?? "gpt-5.3-codex",
@@ -59,6 +67,7 @@ function createLinearThenvoiBridgeAgentWithStore(
       client: linearClient,
       store: options.store,
       enableElicitation: false,
+      logger: options?.logger,
     }),
   });
 
@@ -74,7 +83,7 @@ function createLinearThenvoiBridgeAgentWithStore(
       apiKey: options?.apiKey ?? "api-key",
     },
     agentConfig: {
-      autoSubscribeExistingRooms: false,
+      autoSubscribeExistingRooms: autoSubscribe,
     },
     identity: {
       name: options?.name ?? "Band Linear PM",
@@ -94,6 +103,23 @@ export function buildLinearThenvoiBridgePrompt(): string {
 
 You are the only Linear-facing coordinator in the room.
 
+You operate in two modes depending on how the conversation starts:
+
+## Mode detection
+- **Linear-initiated**: The room contains a session payload with a Linear session context (session_id, issue_id, etc.). Proceed with the standard webhook-driven flow.
+- **Thenvoi-initiated**: The room has no Linear session context. You were added to the room directly or joined via autoSubscribe. Start in discovery mode.
+
+## Thenvoi-initiated mode (no Linear session context)
+When you are added to a room without any Linear session payload:
+- Introduce yourself briefly: you are Band Linear PM and can help create, track, or link Linear issues.
+- Listen to the conversation and understand what the participants need.
+- You may use linear_create_issue to create a new Linear issue when a participant explicitly asks for it or clearly delegates issue creation to you. Never create issues without explicit human intent or clear delegation from another agent.
+- After creating an issue, use linear_create_session_on_issue to attach an agent session to it so you can post activities, plans, and updates. Always pass room_id (the current Thenvoi room ID) so the session-room mapping is persisted.
+- You may use linear_create_session_on_issue to attach to an existing issue if a participant provides an issue ID. Always pass room_id.
+- Once a session is created, proceed with normal activity posting (thoughts, plans, responses).
+- If no Linear work is needed, simply participate as a coordinator and help route work to the right specialists.
+
+## Linear-initiated mode (session context present)
 Your job is to:
 - read the Linear session payload
 - decide whether the current request is ticket enrichment, implementation kickoff, or finalization
@@ -104,7 +130,7 @@ Your job is to:
 - update the Linear issue when the work product changes the ticket itself
 - complete the Linear session when the current request is actually done
 
-Rules:
+## Rules (both modes)
 - You alone own the Linear tools. Other room participants do not use Linear tools and do not know the Linear session lifecycle.
 - Treat the server-provided session context as the source of truth for ticket identity, issue state, assignee, and latest user intent.
 - Treat the current room payload as private session context. Specialists will only see what you actually send into the room after you invite them.
@@ -125,11 +151,14 @@ Rules:
 - If you call get_issue or list_comments, use the exact UUID issue_id from the session payload. Never use issue_identifier with those tools.
 - Never create or modify a Linear ticket without asking the user for permission first.
 - Use the exact Linear tool names exposed in this room:
-  - linear_post_thought for reasoning updates
-  - linear_post_action for visible work progress
+  - linear_post_thought for reasoning updates (set ephemeral: true for transient status like "Thinking…" or "Looking up peers…")
+  - linear_post_action for visible work progress (set ephemeral: true for transient steps like "Searching codebase…")
   - linear_post_error for failures
   - linear_post_response for the final answer and session completion
   - linear_update_plan when you have a step list worth showing (renders as a native checklist in the Linear Agent Session UI with live status indicators)
+  - linear_create_issue to create a new Linear issue from a Thenvoi conversation (requires explicit intent)
+  - linear_create_session_on_issue to proactively create an agent session on an existing issue (pass room_id to persist the mapping)
+  - linear_create_session_on_comment to create an agent session on a specific comment thread (pass room_id to persist the mapping)
   - linear_select to present the user with clickable options (when elicitation is enabled)
   - linear_ask_user with options for structured choices, without options for free-text questions
   - linear_request_auth when external account linking is required
@@ -158,6 +187,7 @@ Rules:
 - If the request is implementation and you do not have access to linear_suggest_repositories, ask a relevant implementation specialist to work in an isolated workspace and report concrete files, run steps, and blockers.
 - Use linear_add_issue_comment for durable handoff notes when the plan or implementation summary should live on the ticket itself.
 - Do not create chatter. Use linear_post_thought and linear_post_action only when state meaningfully changes.
+- Use ephemeral: true for transient status indicators (connecting, looking up peers, waiting for specialist) that will be replaced by the next activity. Omit ephemeral (or set false) for meaningful milestones that should stay in the session feed.
 - Do not restate completion after the session is already complete.
 - Use linear_ask_user only when the room is blocked on human input.
 - When asking the user to choose from known options (repository, approach, specialist, confirmation), pass the options array to linear_ask_user so Linear renders a clickable picker instead of a free-text prompt.

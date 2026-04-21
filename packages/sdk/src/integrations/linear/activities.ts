@@ -18,6 +18,7 @@ export interface LinearActivityClient {
   createAgentActivity(input: {
     agentSessionId: string;
     content: Record<string, unknown>;
+    ephemeral?: boolean;
   }): Promise<unknown>;
   updateAgentSession?: (
     id: string,
@@ -40,6 +41,26 @@ export interface LinearActivityClient {
   agentSessionUpdateExternalUrl?: (
     id: string,
     input: Record<string, unknown>,
+  ) => Promise<unknown>;
+  /** Create an agent session on an existing Linear issue (proactive initiation). */
+  agentSessionCreateOnIssue?: (
+    input: { issueId: string; externalLink?: string },
+  ) => Promise<unknown>;
+  /** Create an agent session on a specific comment thread (proactive initiation). */
+  agentSessionCreateOnComment?: (
+    input: { commentId: string; externalLink?: string },
+  ) => Promise<unknown>;
+  /** Create a new Linear issue from scratch. */
+  createIssue?: (
+    input: {
+      teamId: string;
+      title: string;
+      description?: string;
+      priority?: number;
+      assigneeId?: string;
+      stateId?: string;
+      labelIds?: string[];
+    },
   ) => Promise<unknown>;
 }
 
@@ -66,10 +87,12 @@ async function postActivity(
   client: LinearActivityClient,
   sessionId: string,
   content: Record<string, unknown>,
+  options?: { ephemeral?: boolean },
 ): Promise<void> {
   await client.createAgentActivity({
     agentSessionId: sessionId,
     content,
+    ...(options?.ephemeral ? { ephemeral: true } : {}),
   });
 }
 
@@ -78,24 +101,27 @@ async function postBodyActivity(
   sessionId: string,
   type: L.AgentActivityType,
   body: string,
+  options?: { ephemeral?: boolean },
 ): Promise<void> {
-  await postActivity(client, sessionId, { type, body });
+  await postActivity(client, sessionId, { type, body }, options);
 }
 
 export async function postThought(
   client: LinearActivityClient,
   sessionId: string,
   body: string,
+  options?: { ephemeral?: boolean },
 ): Promise<void> {
-  await postBodyActivity(client, sessionId, L.AgentActivityType.Thought, body);
+  await postBodyActivity(client, sessionId, L.AgentActivityType.Thought, body, options);
 }
 
 export async function postError(
   client: LinearActivityClient,
   sessionId: string,
   body: string,
+  options?: { ephemeral?: boolean },
 ): Promise<void> {
-  await postBodyActivity(client, sessionId, L.AgentActivityType.Error, body);
+  await postBodyActivity(client, sessionId, L.AgentActivityType.Error, body, options);
 }
 
 export async function postResponse(
@@ -150,12 +176,13 @@ export async function postAction(
   client: LinearActivityClient,
   sessionId: string,
   body: string,
+  options?: { ephemeral?: boolean },
 ): Promise<void> {
   await postActivity(client, sessionId, {
     type: L.AgentActivityType.Action,
     action: body,
     parameter: "",
-  });
+  }, options);
 }
 
 type LinearPlanStatus = "pending" | "inProgress" | "completed" | "canceled";

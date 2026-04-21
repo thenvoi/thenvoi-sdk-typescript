@@ -11,6 +11,11 @@ import { customToolToOpenAISchema, executeCustomTool } from "../src/runtime/tool
 
 const TEST_ISSUE_ID = "11111111-1111-4111-8111-111111111111";
 const OTHER_TEST_ISSUE_ID = "22222222-2222-4222-8222-222222222222";
+const TEST_COMMENT_ID = "33333333-3333-4333-8333-333333333333";
+const TEST_TEAM_ID = "44444444-4444-4444-8444-444444444444";
+const TEST_STATE_ID = "55555555-5555-4555-8555-555555555555";
+const TEST_LABEL_ID_1 = "66666666-6666-4666-8666-666666666666";
+const TEST_LABEL_ID_2 = "77777777-7777-4777-8777-777777777777";
 
 class MemorySessionRoomStore implements SessionRoomStore {
   private readonly records = new Map<string, SessionRoomRecord>();
@@ -52,6 +57,37 @@ class MemorySessionRoomStore implements SessionRoomStore {
   public async markBootstrapRequestProcessed(eventKey: string): Promise<void> {
     this.bootstrapRequests.delete(eventKey);
   }
+}
+
+function makeMockClientWithSessionCreation(): LinearActivityClient {
+  return {
+    ...makeMockClient(),
+    agentSessionCreateOnIssue: vi.fn(async ({ issueId }: { issueId: string; externalLink?: string }) => ({
+      agentSession: {
+        id: "new-session-1",
+        issueId,
+        status: "active",
+      },
+      success: true,
+    })),
+    agentSessionCreateOnComment: vi.fn(async () => ({
+      agentSession: {
+        id: "new-session-2",
+        issueId: null,
+        status: "active",
+      },
+      success: true,
+    })),
+    createIssue: vi.fn(async () => ({
+      issue: {
+        id: "new-issue-1",
+        identifier: "SOF-42",
+        url: "https://linear.app/example/issue/SOF-42",
+        title: "New issue from Thenvoi",
+      },
+      success: true,
+    })),
+  };
 }
 
 function makeMockClient(options?: { withRepoSuggestions?: boolean }): LinearActivityClient {
@@ -132,6 +168,25 @@ describe("createLinearTools", () => {
     ]);
   });
 
+  it("includes session creation tools when client supports them", () => {
+    const client = makeMockClientWithSessionCreation();
+    const tools = createLinearTools({ client });
+    expect(tools).toHaveLength(16);
+
+    const names = tools.map((tool) => tool.name).sort();
+    expect(names).toContain("linear_create_session_on_issue");
+    expect(names).toContain("linear_create_session_on_comment");
+    expect(names).toContain("linear_create_issue");
+  });
+
+  it("omits session creation tools when client lacks methods", () => {
+    const tools = createLinearTools({ client: makeMockClient() });
+    const names = tools.map((tool) => tool.name);
+    expect(names).not.toContain("linear_create_session_on_issue");
+    expect(names).not.toContain("linear_create_session_on_comment");
+    expect(names).not.toContain("linear_create_issue");
+  });
+
   it("each tool has a description", () => {
     const tools = createLinearTools({ client: makeMockClient() });
     for (const tool of tools) {
@@ -170,6 +225,61 @@ describe("createLinearTools", () => {
     expect(client.createAgentActivity).toHaveBeenCalledWith({
       agentSessionId: "sess-1",
       content: { type: "action", action: "Searching codebase", parameter: "" },
+    });
+  });
+
+  it("linear_post_thought passes ephemeral flag to the activity layer", async () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_post_thought")!;
+
+    const result = await executeCustomTool(tool, {
+      session_id: "sess-1",
+      body: "Thinking...",
+      ephemeral: true,
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(client.createAgentActivity).toHaveBeenCalledWith({
+      agentSessionId: "sess-1",
+      content: { type: "thought", body: "Thinking..." },
+      ephemeral: true,
+    });
+  });
+
+  it("linear_post_action passes ephemeral flag to the activity layer", async () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_post_action")!;
+
+    const result = await executeCustomTool(tool, {
+      session_id: "sess-1",
+      body: "Searching...",
+      ephemeral: true,
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(client.createAgentActivity).toHaveBeenCalledWith({
+      agentSessionId: "sess-1",
+      content: { type: "action", action: "Searching...", parameter: "" },
+      ephemeral: true,
+    });
+  });
+
+  it("linear_post_error does not forward ephemeral flag to the activity layer", async () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_post_error")!;
+
+    await executeCustomTool(tool, {
+      session_id: "sess-1",
+      body: "Something broke",
+      ephemeral: true,
+    });
+
+    expect(client.createAgentActivity).toHaveBeenCalledWith({
+      agentSessionId: "sess-1",
+      content: { type: "error", body: "Something broke" },
     });
   });
 
@@ -480,6 +590,24 @@ describe("createLinearTools", () => {
     });
   });
 
+  it("linear_post_response does not accept ephemeral flag (schema rejects it)", async () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_post_response")!;
+
+    // linear_post_response uses sessionBodySchema (no ephemeral field).
+    // Even if ephemeral is passed, it should be stripped by Zod and not forwarded.
+    await executeCustomTool(tool, {
+      session_id: "sess-1",
+      body: "Final answer",
+    });
+
+    expect(client.createAgentActivity).toHaveBeenCalledWith({
+      agentSessionId: "sess-1",
+      content: { type: "response", body: "Final answer" },
+    });
+  });
+
   it("linear_update_plan validates steps and calls updateAgentSession with structured plan", async () => {
     const client = makeMockClient();
     const tools = createLinearTools({ client });
@@ -676,6 +804,274 @@ describe("createLinearTools", () => {
     });
   });
 
+  it("linear_create_session_on_issue creates a session and returns session info", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_issue")!;
+
+    const result = await executeCustomTool(tool, {
+      issue_id: TEST_ISSUE_ID,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      session: {
+        id: "new-session-1",
+        issueId: TEST_ISSUE_ID,
+        status: "active",
+      },
+    });
+    expect(client.agentSessionCreateOnIssue).toHaveBeenCalledWith({
+      issueId: TEST_ISSUE_ID,
+    });
+  });
+
+  it("linear_create_session_on_issue passes external_link when provided", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_issue")!;
+
+    await executeCustomTool(tool, {
+      issue_id: TEST_ISSUE_ID,
+      external_link: "https://example.com/session",
+    });
+
+    expect(client.agentSessionCreateOnIssue).toHaveBeenCalledWith({
+      issueId: TEST_ISSUE_ID,
+      externalLink: "https://example.com/session",
+    });
+  });
+
+  it("linear_create_session_on_comment creates a session on a comment thread", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_comment")!;
+
+    const result = await executeCustomTool(tool, {
+      comment_id: TEST_COMMENT_ID,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      session: {
+        id: "new-session-2",
+        issueId: null,
+        status: "active",
+      },
+    });
+    expect(client.agentSessionCreateOnComment).toHaveBeenCalledWith({
+      commentId: TEST_COMMENT_ID,
+    });
+  });
+
+  it("linear_create_session_on_comment rejects non-UUID comment_id", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_comment")!;
+
+    await expect(
+      executeCustomTool(tool, { comment_id: "not-a-uuid" }),
+    ).rejects.toThrow();
+  });
+
+  it("linear_create_issue creates a new issue via the Linear client", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_issue")!;
+
+    const result = await executeCustomTool(tool, {
+      team_id: TEST_TEAM_ID,
+      title: "New issue from Thenvoi",
+      description: "Created during collaboration",
+      priority: 2,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      issue: {
+        id: "new-issue-1",
+        identifier: "SOF-42",
+        url: "https://linear.app/example/issue/SOF-42",
+        title: "New issue from Thenvoi",
+      },
+    });
+    expect(client.createIssue).toHaveBeenCalledWith({
+      teamId: TEST_TEAM_ID,
+      title: "New issue from Thenvoi",
+      description: "Created during collaboration",
+      priority: 2,
+    });
+  });
+
+  it("linear_create_issue passes label_ids and state_id", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_issue")!;
+
+    await executeCustomTool(tool, {
+      team_id: TEST_TEAM_ID,
+      title: "Bug report",
+      state_id: TEST_STATE_ID,
+      label_ids: [TEST_LABEL_ID_1, TEST_LABEL_ID_2],
+    });
+
+    expect(client.createIssue).toHaveBeenCalledWith({
+      teamId: TEST_TEAM_ID,
+      title: "Bug report",
+      stateId: TEST_STATE_ID,
+      labelIds: [TEST_LABEL_ID_1, TEST_LABEL_ID_2],
+    });
+  });
+
+  it("linear_create_session_on_issue persists session-room mapping when store and room_id are provided", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const store = new MemorySessionRoomStore();
+    const tools = createLinearTools({ client, store });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_issue")!;
+
+    await executeCustomTool(tool, {
+      issue_id: TEST_ISSUE_ID,
+      room_id: "room-abc",
+    });
+
+    const record = await store.getBySessionId("new-session-1");
+    expect(record).not.toBeNull();
+    expect(record!.linearSessionId).toBe("new-session-1");
+    expect(record!.linearIssueId).toBe(TEST_ISSUE_ID);
+    expect(record!.thenvoiRoomId).toBe("room-abc");
+    expect(record!.status).toBe("active");
+  });
+
+  it("linear_create_session_on_issue rejects empty room_id via schema", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_issue")!;
+
+    await expect(
+      executeCustomTool(tool, { issue_id: TEST_ISSUE_ID, room_id: "" }),
+    ).rejects.toThrow();
+  });
+
+  it("linear_create_session_on_issue skips persistence when room_id is not provided", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const store = new MemorySessionRoomStore();
+    const tools = createLinearTools({ client, store });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_issue")!;
+
+    await executeCustomTool(tool, {
+      issue_id: TEST_ISSUE_ID,
+    });
+
+    const record = await store.getBySessionId("new-session-1");
+    expect(record).toBeNull();
+  });
+
+  it("linear_create_session_on_issue surfaces warning when store persistence fails", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const store = new MemorySessionRoomStore();
+    const mockLogger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    vi.spyOn(store, "upsert").mockRejectedValueOnce(new Error("db write failed"));
+    const tools = createLinearTools({ client, store, logger: mockLogger });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_issue")!;
+
+    const result = await executeCustomTool(tool, {
+      issue_id: TEST_ISSUE_ID,
+      room_id: "room-abc",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      session: { id: "new-session-1", issueId: TEST_ISSUE_ID, status: "active" },
+      warning: "session-room mapping not persisted",
+    });
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      "linear_tools.session_room_persist_failed",
+      expect.objectContaining({
+        sessionId: "new-session-1",
+        roomId: "room-abc",
+        error: "db write failed",
+      }),
+    );
+  });
+
+  it("linear_create_session_on_comment persists session-room mapping when store and room_id are provided", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const store = new MemorySessionRoomStore();
+    const tools = createLinearTools({ client, store });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_comment")!;
+
+    await executeCustomTool(tool, {
+      comment_id: TEST_COMMENT_ID,
+      room_id: "room-xyz",
+    });
+
+    const record = await store.getBySessionId("new-session-2");
+    expect(record).not.toBeNull();
+    expect(record!.thenvoiRoomId).toBe("room-xyz");
+    expect(record!.status).toBe("active");
+    // Comment sessions have null linearIssueId — verify it is persisted as null
+    // and that getByIssueId does not accidentally match it.
+    expect(record!.linearIssueId).toBeNull();
+    const byIssue = await store.getByIssueId(TEST_ISSUE_ID);
+    expect(byIssue).toBeNull();
+  });
+
+  it("linear_create_issue rejects empty title", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_issue")!;
+
+    await expect(
+      executeCustomTool(tool, { team_id: TEST_TEAM_ID, title: "" }),
+    ).rejects.toThrow();
+  });
+
+  it("linear_create_session_on_issue throws when API returns no session ID", async () => {
+    const client = makeMockClientWithSessionCreation();
+    (client.agentSessionCreateOnIssue as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      agentSession: { id: undefined, issueId: null, status: null },
+    });
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_issue")!;
+
+    await expect(
+      executeCustomTool(tool, { issue_id: TEST_ISSUE_ID }),
+    ).rejects.toThrow(/session without an ID/);
+  });
+
+  it("linear_create_issue throws when API returns no issue ID", async () => {
+    const client = makeMockClientWithSessionCreation();
+    (client.createIssue as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      issue: { id: undefined, identifier: null, url: null, title: null },
+    });
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_issue")!;
+
+    await expect(
+      executeCustomTool(tool, { team_id: TEST_TEAM_ID, title: "Test" }),
+    ).rejects.toThrow(/issue without an ID/);
+  });
+
+  it("linear_create_session_on_issue rejects non-UUID issue_id via schema", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_issue")!;
+
+    await expect(
+      executeCustomTool(tool, { issue_id: "not-a-uuid" }),
+    ).rejects.toThrow();
+  });
+
+  it("linear_create_issue rejects non-UUID team_id via schema", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_create_issue")!;
+
+    await expect(
+      executeCustomTool(tool, { team_id: "not-a-uuid", title: "Test" }),
+    ).rejects.toThrow();
+  });
+
   it("includes linear_suggest_repositories when client supports issueRepositorySuggestions", () => {
     const client = makeMockClient({ withRepoSuggestions: true });
     const tools = createLinearTools({ client });
@@ -731,7 +1127,7 @@ describe("createLinearTools", () => {
         issue_id: "SOF-1",
         repositories: [{ hostname: "github.com", repositoryFullName: "org/repo" }],
       }),
-    ).rejects.toThrow("requires the exact Linear issue UUID");
+    ).rejects.toThrow("requires the exact Linear UUID from the session context");
   });
 
   it("linear_suggest_repositories rejects empty repositories array", async () => {

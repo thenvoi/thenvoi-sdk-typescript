@@ -77,6 +77,37 @@ https://<your-tunnel-host>/linear/webhook
 - `*.sqlite` files are gitignored.
 - Do not commit real `LINEAR_ACCESS_TOKEN`, `LINEAR_WEBHOOK_SECRET`, or `THENVOI_API_KEY` values.
 
+## Docker
+
+Build from the repository root:
+
+```bash
+docker build -f packages/sdk/examples/linear-thenvoi/Dockerfile -t thenvoi-linear-bridge .
+```
+
+Run the container, passing the required environment variables:
+
+```bash
+docker run --env-file .env -p 8787:8787 thenvoi-linear-bridge
+```
+
+The SQLite state database is created inside the container at the path set by
+`LINEAR_THENVOI_STATE_DB` (defaults to `.linear-thenvoi-example.sqlite`).
+To persist it across container restarts, mount a volume:
+
+```bash
+docker run --env-file .env -p 8787:8787 \
+  -v linear-bridge-data:/app/packages/sdk/data \
+  -e LINEAR_THENVOI_STATE_DB=/app/packages/sdk/data/state.sqlite \
+  thenvoi-linear-bridge
+```
+
+Health check:
+
+```bash
+curl http://127.0.0.1:8787/healthz
+```
+
 ## Architecture Notes
 
 - `roomStrategy: "issue"` keeps one Thenvoi room per Linear issue.

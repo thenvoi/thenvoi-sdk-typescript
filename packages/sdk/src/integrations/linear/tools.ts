@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { Logger } from "../../core/logger";
 import type { CustomToolDef } from "../../runtime/tools/customTools";
 import type { CandidateRepositoryInput, LinearActivityClient, PlanStep, RepositorySuggestion, SelectOption } from "./activities";
 import {
@@ -34,13 +35,14 @@ interface CreateLinearToolsOptions {
   client: LinearActivityClient;
   store?: SessionRoomStore;
   enableElicitation?: boolean;
+  logger?: Logger;
 }
 
 /**
  * Create Linear activity tools usable by any adapter via `customTools`.
  */
 export function createLinearTools(options: CreateLinearToolsOptions): CustomToolDef[] {
-  const { client, store, enableElicitation = true } = options;
+  const { client, store, enableElicitation = true, logger } = options;
 
   const sessionBodySchema = z.object({
     session_id: z.string().describe("The Linear agent session ID"),
@@ -55,44 +57,57 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
   const optionalIssueIdSchema = issueIdInputSchema;
 
   const tools: CustomToolDef[] = [];
+
+  const ephemeralSessionBodySchema = sessionBodySchema.extend({
+    ephemeral: z.boolean().optional().describe(
+      "If true, this activity is displayed temporarily and replaced when the next activity arrives. " +
+      "Use for transient status indicators like \"Thinking...\", \"Searching...\", or \"Waiting for response...\".",
+    ),
+  });
+
   const addSessionBodyTool = (
     name: string,
     description: string,
-    handler: (args: Record<string, unknown>) => Promise<unknown>,
+    activityFn: typeof postThought,
+    options?: { supportsEphemeral?: boolean },
   ): void => {
+    const supportsEphemeral = options?.supportsEphemeral ?? false;
     tools.push({
       name,
-      description,
-      schema: sessionBodySchema,
-      handler,
+      description: supportsEphemeral
+        ? description + " Set ephemeral: true for transient status updates that should disappear when the next activity arrives."
+        : description,
+      schema: supportsEphemeral ? ephemeralSessionBodySchema : sessionBodySchema,
+      handler: async (args: Record<string, unknown>) => {
+        await activityFn(
+          client,
+          args.session_id as string,
+          args.body as string,
+          supportsEphemeral && args.ephemeral === true ? { ephemeral: true } : undefined,
+        );
+        return { ok: true };
+      },
     });
   };
 
   addSessionBodyTool(
     "linear_post_thought",
     "Post a thought to the Linear agent session, visible to the user as internal reasoning.",
-    async (args) => {
-      await postThought(client, args.session_id as string, args.body as string);
-      return { ok: true };
-    },
+    postThought,
+    { supportsEphemeral: true },
   );
 
   addSessionBodyTool(
     "linear_post_action",
     "Post an action to the Linear agent session, showing the user what step is being taken.",
-    async (args) => {
-      await postAction(client, args.session_id as string, args.body as string);
-      return { ok: true };
-    },
+    postAction,
+    { supportsEphemeral: true },
   );
 
   addSessionBodyTool(
     "linear_post_error",
     "Post an error to the Linear agent session to notify the user of a failure.",
-    async (args) => {
-      await postError(client, args.session_id as string, args.body as string);
-      return { ok: true };
-    },
+    postError,
   );
 
   if (enableElicitation) {
@@ -176,10 +191,14 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
     });
   }
 
-  addSessionBodyTool(
-    "linear_post_response",
-    "Post the final response to the Linear agent session and mark the session completed when a store is available.",
-    async (args) => {
+  // linear_post_response is registered manually (not via addSessionBodyTool) because
+  // its handler calls completeLinearSession which needs `store` — a different signature
+  // than the postThought/postAction/postError functions that addSessionBodyTool expects.
+  tools.push({
+    name: "linear_post_response",
+    description: "Post the final response to the Linear agent session and mark the session completed when a store is available.",
+    schema: sessionBodySchema,
+    handler: async (args: Record<string, unknown>) => {
       await completeLinearSession({
         linearClient: client,
         agentSessionId: args.session_id as string,
@@ -188,7 +207,7 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
       });
       return { ok: true };
     },
-  );
+  });
 
   tools.push(
     {
@@ -258,6 +277,8 @@ export function createLinearTools(options: CreateLinearToolsOptions): CustomTool
       },
     });
   }
+
+  addSessionCreationTools({ tools, client, store, logger });
 
   return tools;
 }
@@ -391,7 +412,7 @@ function addIssueTools(input: {
 function assertUuid(toolName: string, value: string): void {
   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   if (!uuidPattern.test(value)) {
-    throw new Error(`${toolName} requires the exact Linear issue UUID from the session context. Received "${value}".`);
+    throw new Error(`${toolName} requires the exact Linear UUID from the session context (not the human-readable identifier). Received "${value}".`);
   }
 }
 
@@ -577,6 +598,184 @@ async function readWorkflowStates(
     .sort((left, right) => (left.position ?? Number.MAX_SAFE_INTEGER) - (right.position ?? Number.MAX_SAFE_INTEGER));
 
   return { team_id: teamId, states };
+}
+
+function addSessionCreationTools(input: {
+  tools: CustomToolDef[];
+  client: LinearActivityClient;
+  store?: SessionRoomStore;
+  logger?: Logger;
+}): void {
+  const { tools, client, store, logger } = input;
+
+  const sessionCreationBaseSchema = z.object({
+    external_link: z.string().url().optional().describe("Optional URL of an external page associated with this session"),
+    room_id: z.string().min(1).optional().describe("The Thenvoi room ID to persist the session-room mapping. Pass this when creating a session from within a Thenvoi conversation."),
+  });
+
+  const sessionCreationSchema = sessionCreationBaseSchema.extend({
+    issue_id: z.string().uuid().describe("The Linear issue ID (UUID)"),
+  });
+
+  async function persistSessionRoom(
+    sessionId: string,
+    issueId: string | null,
+    roomId: string | undefined,
+  ): Promise<string | null> {
+    if (!store || typeof roomId !== "string") return null;
+    try {
+      // Timestamps reflect the SDK host clock, not Linear's server clock.
+      const now = new Date().toISOString();
+      await store.upsert({
+        linearSessionId: sessionId,
+        linearIssueId: issueId,
+        thenvoiRoomId: roomId,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+      return null;
+    } catch (err) {
+      logger?.warn("linear_tools.session_room_persist_failed", {
+        sessionId,
+        issueId,
+        roomId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return "session-room mapping not persisted";
+    }
+  }
+
+  const createOnIssue = client.agentSessionCreateOnIssue?.bind(client);
+  if (typeof createOnIssue === "function") {
+    tools.push({
+      name: "linear_create_session_on_issue",
+      description:
+        "Create a new Linear agent session on an existing issue. Use this when the conversation produces work that should be tracked against a known Linear issue and no session exists yet.",
+      schema: sessionCreationSchema,
+      handler: async (args: Record<string, unknown>) => {
+        const issueId = args.issue_id as string;
+        const result = await createOnIssue({
+          issueId,
+          ...(typeof args.external_link === "string" ? { externalLink: args.external_link } : {}),
+        });
+        const session = extractCreatedSession(result);
+        const warning = await persistSessionRoom(session.id, session.issueId, args.room_id as string | undefined);
+        return { ok: true, session, ...(warning ? { warning } : {}) };
+      },
+    });
+  }
+
+  const createOnComment = client.agentSessionCreateOnComment?.bind(client);
+  if (typeof createOnComment === "function") {
+    tools.push({
+      name: "linear_create_session_on_comment",
+      description:
+        "Create a new Linear agent session on a specific comment thread. Use this to attach agent work to an existing discussion on a Linear issue.",
+      schema: sessionCreationBaseSchema.extend({
+        comment_id: z.string().uuid().describe("The Linear comment ID (UUID)"),
+      }),
+      handler: async (args: Record<string, unknown>) => {
+        const commentId = args.comment_id as string;
+        const result = await createOnComment({
+          commentId,
+          ...(typeof args.external_link === "string" ? { externalLink: args.external_link } : {}),
+        });
+        const session = extractCreatedSession(result);
+        const warning = await persistSessionRoom(session.id, session.issueId, args.room_id as string | undefined);
+        return { ok: true, session, ...(warning ? { warning } : {}) };
+      },
+    });
+  }
+
+  const createIssueFn = client.createIssue?.bind(client);
+  if (typeof createIssueFn === "function") {
+    tools.push({
+      name: "linear_create_issue",
+      description:
+        "Create a new Linear issue from scratch. Use this when the Thenvoi conversation produces work that should be tracked as a new Linear issue. " +
+        "After creating the issue, call linear_create_session_on_issue to attach an agent session. " +
+        "Never create issues without explicit human intent or clear delegation.",
+      schema: z.object({
+        team_id: z.string().uuid().describe("The Linear team ID to create the issue in"),
+        title: z.string().min(1).describe("Issue title"),
+        description: z.string().optional().describe("Issue description in Markdown"),
+        priority: z.number().int().min(0).max(4).optional().describe("Priority 0-4 (0=none, 1=urgent, 2=high, 3=normal, 4=low)"),
+        assignee_id: z.string().uuid().optional().describe("Assignee user ID (UUID)"),
+        state_id: z.string().uuid().optional().describe("Workflow state ID (UUID)"),
+        label_ids: z.array(z.string().uuid()).optional().describe("Label IDs to attach (UUIDs)"),
+      }),
+      handler: async (args: Record<string, unknown>) => {
+        const result = await createIssueFn({
+          teamId: args.team_id as string,
+          title: args.title as string,
+          ...(typeof args.description === "string" ? { description: args.description } : {}),
+          ...(typeof args.priority === "number" ? { priority: args.priority } : {}),
+          ...(typeof args.assignee_id === "string" ? { assigneeId: args.assignee_id } : {}),
+          ...(typeof args.state_id === "string" ? { stateId: args.state_id } : {}),
+          ...(Array.isArray(args.label_ids) ? { labelIds: args.label_ids as string[] } : {}),
+        });
+
+        const issue = extractCreatedIssue(result);
+        return { ok: true, issue };
+      },
+    });
+  }
+}
+
+/**
+ * Defensively extract session fields from an untyped Linear API response.
+ * The Linear SDK may return a typed object, but we cast to Record<string, unknown>
+ * intentionally so the extraction is resilient to SDK version changes.
+ */
+function extractCreatedSession(result: unknown): {
+  id: string;
+  issueId: string | null;
+  status: string | null;
+} {
+  const payload = typeof result === "object" && result !== null ? result as Record<string, unknown> : {};
+  const session = typeof payload.agentSession === "object" && payload.agentSession !== null
+    ? payload.agentSession as Record<string, unknown>
+    : payload;
+
+  const id = typeof session.id === "string" ? session.id : null;
+  if (!id) {
+    throw new Error("Linear API returned a session without an ID.");
+  }
+
+  return {
+    id,
+    issueId: typeof session.issueId === "string" ? session.issueId : null,
+    status: typeof session.status === "string" ? session.status : null,
+  };
+}
+
+/**
+ * Defensively extract issue fields from an untyped Linear API response.
+ * See {@link extractCreatedSession} for rationale on the casting approach.
+ */
+function extractCreatedIssue(result: unknown): {
+  id: string;
+  identifier: string | null;
+  url: string | null;
+  title: string | null;
+} {
+  const payload = typeof result === "object" && result !== null ? result as Record<string, unknown> : {};
+  const issue = typeof payload.issue === "object" && payload.issue !== null
+    ? payload.issue as Record<string, unknown>
+    : payload;
+
+  const id = typeof issue.id === "string" ? issue.id : null;
+  if (!id) {
+    throw new Error("Linear API returned an issue without an ID.");
+  }
+
+  return {
+    id,
+    identifier: typeof issue.identifier === "string" ? issue.identifier : null,
+    url: typeof issue.url === "string" ? issue.url : null,
+    title: typeof issue.title === "string" ? issue.title : null,
+  };
 }
 
 function extractRepositorySuggestions(response: unknown): RepositorySuggestion[] {
