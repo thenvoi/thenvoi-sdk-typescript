@@ -412,7 +412,7 @@ function addIssueTools(input: {
 function assertUuid(toolName: string, value: string): void {
   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   if (!uuidPattern.test(value)) {
-    throw new Error(`${toolName} requires a valid Linear UUID. Received "${value}".`);
+    throw new Error(`${toolName} requires the exact Linear UUID from the session context (not the human-readable identifier). Received "${value}".`);
   }
 }
 
@@ -693,7 +693,9 @@ function addSessionCreationTools(input: {
     tools.push({
       name: "linear_create_issue",
       description:
-        "Create a new Linear issue from scratch. Use this when the Thenvoi conversation produces work that should be tracked as a new Linear issue. Never create issues without explicit human intent or clear delegation.",
+        "Create a new Linear issue from scratch. Use this when the Thenvoi conversation produces work that should be tracked as a new Linear issue. " +
+        "After creating the issue, call linear_create_session_on_issue to attach an agent session. " +
+        "Never create issues without explicit human intent or clear delegation.",
       schema: z.object({
         team_id: z.string().uuid().describe("The Linear team ID to create the issue in"),
         title: z.string().min(1).describe("Issue title"),
@@ -721,6 +723,11 @@ function addSessionCreationTools(input: {
   }
 }
 
+/**
+ * Defensively extract session fields from an untyped Linear API response.
+ * The Linear SDK may return a typed object, but we cast to Record<string, unknown>
+ * intentionally so the extraction is resilient to SDK version changes.
+ */
 function extractCreatedSession(result: unknown, logger?: Logger): {
   id: string;
   issueId: string | null;
@@ -746,6 +753,10 @@ function extractCreatedSession(result: unknown, logger?: Logger): {
   };
 }
 
+/**
+ * Defensively extract issue fields from an untyped Linear API response.
+ * See {@link extractCreatedSession} for rationale on the casting approach.
+ */
 function extractCreatedIssue(result: unknown, logger?: Logger): {
   id: string;
   identifier: string | null;

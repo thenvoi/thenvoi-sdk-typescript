@@ -590,6 +590,24 @@ describe("createLinearTools", () => {
     });
   });
 
+  it("linear_post_response does not accept ephemeral flag (schema rejects it)", async () => {
+    const client = makeMockClient();
+    const tools = createLinearTools({ client });
+    const tool = tools.find((entry) => entry.name === "linear_post_response")!;
+
+    // linear_post_response uses sessionBodySchema (no ephemeral field).
+    // Even if ephemeral is passed, it should be stripped by Zod and not forwarded.
+    await executeCustomTool(tool, {
+      session_id: "sess-1",
+      body: "Final answer",
+    });
+
+    expect(client.createAgentActivity).toHaveBeenCalledWith({
+      agentSessionId: "sess-1",
+      content: { type: "response", body: "Final answer" },
+    });
+  });
+
   it("linear_update_plan validates steps and calls updateAgentSession with structured plan", async () => {
     const client = makeMockClient();
     const tools = createLinearTools({ client });
@@ -1137,7 +1155,7 @@ describe("createLinearTools", () => {
         issue_id: "SOF-1",
         repositories: [{ hostname: "github.com", repositoryFullName: "org/repo" }],
       }),
-    ).rejects.toThrow("requires a valid Linear UUID");
+    ).rejects.toThrow("requires the exact Linear UUID from the session context");
   });
 
   it("linear_suggest_repositories rejects empty repositories array", async () => {
