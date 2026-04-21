@@ -42,6 +42,9 @@ const PEER_PAGE_SIZE = 100;
 const RECOVERED_ROOM_EVENT_RETRY_LIMIT = 2;
 const RECOVERED_ROOM_EVENT_RETRY_BASE_DELAY_MS = 1_000;
 
+// Issue state types eligible for auto-start.
+const AUTO_START_ELIGIBLE_TYPES: Set<string> = new Set(["backlog", "unstarted", "triage"]);
+
 export interface LinearBridgeRuntime {
   roomResolutionLocks: Map<string, Promise<SessionRoomRecord>>;
   resolvedHostHandleCache: WeakMap<RestApi, string>;
@@ -176,6 +179,29 @@ export async function handleAgentSessionEvent(
     }
   }
 
+  // Auto-start: fire in background, runs concurrently with room resolution (best-effort).
+  let autoStartPromise: Promise<AutoStartResult> | undefined;
+  if (action === "created" && issueId) {
+    const originalStateType = extractIssueStateField(input.payload.agentSession.issue, "type");
+    const teamId = extractIssueTeamId(input.payload.agentSession.issue);
+    if (teamId && originalStateType && AUTO_START_ELIGIBLE_TYPES.has(originalStateType)) {
+      autoStartPromise = tryMoveIssueToStarted({
+        linearClient: input.deps.linearClient,
+        issueId,
+        teamId,
+        logger,
+      }).catch((autoStartError) => {
+        logger.warn("linear_thenvoi_bridge.auto_start_failed", {
+          sessionId,
+          issueId,
+          teamId,
+          error: autoStartError instanceof Error ? autoStartError.message : String(autoStartError),
+        });
+        return { moved: false, stateId: null, stateName: null };
+      });
+    }
+  }
+
   let roomRecord: SessionRoomRecord | null = null;
   let externalUrlPromise: Promise<void> | undefined;
   try {
@@ -214,6 +240,8 @@ export async function handleAgentSessionEvent(
       });
     }
 
+    // Intent is computed from the *original* state type (before auto-start) so it reflects
+    // why the session was created (e.g. "planning" for backlog issues), not the state we moved it to.
     const sessionIntent = detectSessionIntent({
       issueStateType: extractIssueStateField(input.payload.agentSession.issue, "type"),
       promptContext: input.payload.promptContext,
@@ -251,6 +279,19 @@ export async function handleAgentSessionEvent(
       issueDelegateName = delegateResult.delegateName ?? input.payload.appUserId;
     }
 
+    // Await auto-start before building the message so issue state info is up-to-date.
+    // The promise already has a .catch() at creation that converts errors to { moved: false }.
+    const autoStartResult = await autoStartPromise;
+
+    let issueStateId = extractIssueStateField(input.payload.agentSession.issue, "id");
+    let issueStateName = extractIssueStateField(input.payload.agentSession.issue, "name");
+    let resolvedStateType = extractIssueStateField(input.payload.agentSession.issue, "type");
+    if (autoStartResult?.moved) {
+      if (autoStartResult.stateId) issueStateId = autoStartResult.stateId;
+      if (autoStartResult.stateName) issueStateName = autoStartResult.stateName;
+      resolvedStateType = "started";
+    }
+
     const message = buildBridgeMessage({
       sessionId,
       issueId,
@@ -268,9 +309,9 @@ export async function handleAgentSessionEvent(
       issueTeamKey: extractIssueTeamKey(input.payload.agentSession.issue),
       issueTeamName: extractIssueTeamName(input.payload.agentSession.issue),
       issueTeamId: extractIssueTeamId(input.payload.agentSession.issue),
-      issueStateId: extractIssueStateField(input.payload.agentSession.issue, "id"),
-      issueStateName: extractIssueStateField(input.payload.agentSession.issue, "name"),
-      issueStateType: extractIssueStateField(input.payload.agentSession.issue, "type"),
+      issueStateId,
+      issueStateName,
+      issueStateType: resolvedStateType,
       issueAssigneeId: extractIssueAssigneeField(input.payload.agentSession.issue, "id"),
       issueAssigneeName:
         extractIssueAssigneeField(input.payload.agentSession.issue, "displayName")
@@ -366,6 +407,7 @@ export async function handleAgentSessionEvent(
     // (promises already have .catch, so these won't throw).
     await externalUrlPromise;
     await delegatePromise;
+    await autoStartPromise;
 
     // Report errors back to Linear before re-throwing.
     try {
@@ -523,6 +565,56 @@ async function trySetAgentAsDelegate(input: {
     delegateId: input.appUserId,
   });
   return { set: true, delegateName };
+}
+
+interface AutoStartResult {
+  moved: boolean;
+  stateId: string | null;
+  stateName: string | null;
+}
+
+async function tryMoveIssueToStarted(input: {
+  linearClient: HandleAgentSessionEventInput["deps"]["linearClient"];
+  issueId: string;
+  teamId: string;
+  logger: Logger;
+}): Promise<AutoStartResult> {
+  const response = await input.linearClient.workflowStates({
+    filter: {
+      team: { id: { eq: input.teamId } },
+      type: { eq: "started" },
+    },
+  });
+
+  const nodes = Array.isArray(response.nodes) ? response.nodes : [];
+
+  // Linear paginates at 50 nodes by default — safe for workflow states (teams rarely exceed this).
+  const startedStates = [...nodes].sort((a, b) => a.position - b.position);
+
+  const targetState = startedStates[0];
+  if (!targetState?.id) {
+    input.logger.info("linear_thenvoi_bridge.auto_start_no_started_state", {
+      issueId: input.issueId,
+      teamId: input.teamId,
+    });
+    return { moved: false, stateId: null, stateName: null };
+  }
+
+  await input.linearClient.updateIssue(input.issueId, {
+    stateId: targetState.id,
+  });
+
+  input.logger.info("linear_thenvoi_bridge.auto_start_moved", {
+    issueId: input.issueId,
+    stateId: targetState.id,
+    stateName: targetState.name ?? null,
+  });
+
+  return {
+    moved: true,
+    stateId: targetState.id,
+    stateName: targetState.name ?? null,
+  };
 }
 
 async function resolveHostAgentHandle(input: {

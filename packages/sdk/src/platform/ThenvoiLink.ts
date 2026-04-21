@@ -35,7 +35,7 @@ export interface ThenvoiLinkOptions {
 
 const DEFAULT_WS_URL = "wss://app.thenvoi.com/api/v1/socket";
 
-function deriveDefaultRestUrl(wsUrl: string): string {
+export function deriveDefaultRestUrl(wsUrl: string): string {
   const parsed = new URL(wsUrl);
   const protocol = parsed.protocol === "ws:" ? "http:" : "https:";
   return `${protocol}//${parsed.host}`;
