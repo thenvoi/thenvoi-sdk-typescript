@@ -247,6 +247,8 @@ export class AgentRuntime {
             name: event.payload.name,
             type: event.payload.type,
             handle: event.payload.handle,
+            is_remote: event.payload.is_remote,
+            is_external: event.payload.is_external,
           };
           context.addParticipant(participant);
           await this.onParticipantAdded?.(event.roomId, participant);

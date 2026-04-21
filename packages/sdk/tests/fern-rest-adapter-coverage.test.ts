@@ -282,6 +282,7 @@ describe("FernRestAdapter coverage", () => {
           name: "Jane",
           type: "User",
           description: null,
+          is_remote: false,
           is_external: false,
           inserted_at: "2026-03-10T00:00:00.000Z",
         },
@@ -350,6 +351,7 @@ describe("FernRestAdapter coverage", () => {
           name: "Jane",
           type: "User",
           description: null,
+          is_remote: false,
           is_external: false,
           inserted_at: "2026-03-10T00:00:00.000Z",
         },
@@ -456,7 +458,7 @@ describe("FernRestAdapter coverage", () => {
       chatParticipants: {
         listChatParticipants: async () => ({
           data: [
-            { id: "u1", name: "Jane", type: "User", handle: "@jane" },
+            { id: "u1", name: "Jane", type: "User", handle: "@jane", is_remote: false, is_external: false },
             { id: 42 },
           ],
         }),
@@ -466,7 +468,7 @@ describe("FernRestAdapter coverage", () => {
     });
 
     await expect(adapter.listChatParticipants("room-1")).resolves.toEqual([
-      { id: "u1", name: "Jane", type: "User", handle: "@jane" },
+      { id: "u1", name: "Jane", type: "User", handle: "@jane", is_remote: false, is_external: false },
     ]);
   });
 
@@ -474,7 +476,7 @@ describe("FernRestAdapter coverage", () => {
     const adapter = new FernRestAdapter({
       agentApiParticipants: {
         listAgentChatParticipants: async () => ({
-          data: [{ id: "u2", name: "Sam", type: "Agent", handle: null }],
+          data: [{ id: "u2", name: "Sam", type: "Agent", handle: null, is_remote: true, is_external: true }],
         }),
       },
       agentApiMessages: {
@@ -495,7 +497,7 @@ describe("FernRestAdapter coverage", () => {
     });
 
     await expect(adapter.listChatParticipants("room-1")).resolves.toEqual([
-      { id: "u2", name: "Sam", type: "Agent", handle: null },
+      { id: "u2", name: "Sam", type: "Agent", handle: null, is_remote: true, is_external: true },
     ]);
     await expect(adapter.getNextMessage({ chatId: "room-1" })).resolves.toBeNull();
     await expect(
