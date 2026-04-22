@@ -39,6 +39,10 @@ type ContactCallbackRestApi =
   & Partial<ContactRestApi>;
 
 function toParticipantRecord(participant: ChatParticipant): ParticipantRecord {
+  return mapParticipantRecord(participant);
+}
+
+export function mapParticipantRecord(participant: Pick<ParticipantRecord, "id" | "name" | "type" | "handle" | "is_remote" | "is_external">): ParticipantRecord {
   return {
     id: participant.id,
     name: participant.name,
