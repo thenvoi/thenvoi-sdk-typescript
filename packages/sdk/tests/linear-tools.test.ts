@@ -1016,6 +1016,34 @@ describe("createLinearTools", () => {
     expect(byIssue).toBeNull();
   });
 
+  it("linear_create_session_on_comment surfaces warning when store persistence fails", async () => {
+    const client = makeMockClientWithSessionCreation();
+    const store = new MemorySessionRoomStore();
+    const mockLogger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    vi.spyOn(store, "upsert").mockRejectedValueOnce(new Error("db error"));
+    const tools = createLinearTools({ client, store, logger: mockLogger });
+    const tool = tools.find((entry) => entry.name === "linear_create_session_on_comment")!;
+
+    const result = await executeCustomTool(tool, {
+      comment_id: TEST_COMMENT_ID,
+      room_id: "room-xyz",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      session: { id: "new-session-2", issueId: null, status: "active" },
+      warning: "session-room mapping not persisted",
+    });
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      "linear_tools.session_room_persist_failed",
+      expect.objectContaining({
+        sessionId: "new-session-2",
+        roomId: "room-xyz",
+        error: "db error",
+      }),
+    );
+  });
+
   it("linear_create_issue rejects empty title", async () => {
     const client = makeMockClientWithSessionCreation();
     const tools = createLinearTools({ client });

@@ -659,7 +659,7 @@ function addSessionCreationTools(input: {
           issueId,
           ...(typeof args.external_link === "string" ? { externalLink: args.external_link } : {}),
         });
-        const session = extractCreatedSession(result);
+        const session = extractCreatedSession(result, logger);
         const warning = await persistSessionRoom(session.id, session.issueId, args.room_id as string | undefined);
         return { ok: true, session, ...(warning ? { warning } : {}) };
       },
@@ -681,7 +681,7 @@ function addSessionCreationTools(input: {
           commentId,
           ...(typeof args.external_link === "string" ? { externalLink: args.external_link } : {}),
         });
-        const session = extractCreatedSession(result);
+        const session = extractCreatedSession(result, logger);
         const warning = await persistSessionRoom(session.id, session.issueId, args.room_id as string | undefined);
         return { ok: true, session, ...(warning ? { warning } : {}) };
       },
@@ -716,7 +716,7 @@ function addSessionCreationTools(input: {
           ...(Array.isArray(args.label_ids) ? { labelIds: args.label_ids as string[] } : {}),
         });
 
-        const issue = extractCreatedIssue(result);
+        const issue = extractCreatedIssue(result, logger);
         return { ok: true, issue };
       },
     });
@@ -728,7 +728,7 @@ function addSessionCreationTools(input: {
  * The Linear SDK may return a typed object, but we cast to Record<string, unknown>
  * intentionally so the extraction is resilient to SDK version changes.
  */
-function extractCreatedSession(result: unknown): {
+function extractCreatedSession(result: unknown, logger?: Logger): {
   id: string;
   issueId: string | null;
   status: string | null;
@@ -740,6 +740,9 @@ function extractCreatedSession(result: unknown): {
 
   const id = typeof session.id === "string" ? session.id : null;
   if (!id) {
+    logger?.error("linear_tools.orphan_session_created", {
+      raw: safeStringify(result),
+    });
     throw new Error("Linear API returned a session without an ID.");
   }
 
@@ -754,7 +757,7 @@ function extractCreatedSession(result: unknown): {
  * Defensively extract issue fields from an untyped Linear API response.
  * See {@link extractCreatedSession} for rationale on the casting approach.
  */
-function extractCreatedIssue(result: unknown): {
+function extractCreatedIssue(result: unknown, logger?: Logger): {
   id: string;
   identifier: string | null;
   url: string | null;
@@ -767,6 +770,9 @@ function extractCreatedIssue(result: unknown): {
 
   const id = typeof issue.id === "string" ? issue.id : null;
   if (!id) {
+    logger?.error("linear_tools.orphan_issue_created", {
+      raw: safeStringify(result),
+    });
     throw new Error("Linear API returned an issue without an ID.");
   }
 
@@ -776,6 +782,14 @@ function extractCreatedIssue(result: unknown): {
     url: typeof issue.url === "string" ? issue.url : null,
     title: typeof issue.title === "string" ? issue.title : null,
   };
+}
+
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function extractRepositorySuggestions(response: unknown): RepositorySuggestion[] {
