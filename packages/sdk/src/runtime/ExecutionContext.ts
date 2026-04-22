@@ -286,6 +286,8 @@ export class ExecutionContext {
       name: participant.name,
       type: participant.type,
       handle: participant.handle ?? null,
+      ...(participant.is_remote !== undefined ? { is_remote: participant.is_remote } : {}),
+      ...(participant.is_external !== undefined ? { is_external: participant.is_external } : {}),
     }));
     this.replaceParticipants(normalized);
     return [...this.participants];
