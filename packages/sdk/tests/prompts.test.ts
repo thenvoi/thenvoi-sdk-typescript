@@ -20,9 +20,9 @@ describe("renderSystemPrompt", () => {
     expect(result).toContain(BASE_INSTRUCTIONS);
   });
 
-  it("warns that exact names can become visible mentions", () => {
-    expect(BASE_INSTRUCTIONS).toContain("rewrite exact participant names or handles");
-    expect(BASE_INSTRUCTIONS).toContain("indirect reference");
+  it("explains that names in content are plain text", () => {
+    expect(BASE_INSTRUCTIONS).toContain("Message content is plain text");
+    expect(BASE_INSTRUCTIONS).toContain("Only handles listed in the mentions array create @mentions");
   });
 
   it("includes custom section", () => {

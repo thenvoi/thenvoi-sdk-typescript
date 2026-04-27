@@ -50,10 +50,10 @@ describe("runtime utilities", () => {
     expect(message).toContain("@jane");
   });
 
-  it("warns that exact names can trigger visible mentions", () => {
+  it("explains that mentions only come from the mentions array", () => {
     const message = buildParticipantsMessage([{ type: "User", name: "Jane", handle: "jane" }]);
-    expect(message).toContain("do not write their exact display name or handle");
-    expect(message).toContain("platform may convert exact names into visible @mentions");
+    expect(message).toContain("Message content is plain text");
+    expect(message).toContain("only entries in the thenvoi_send_message mentions array create mentions");
   });
 
   it("renders system prompt", () => {

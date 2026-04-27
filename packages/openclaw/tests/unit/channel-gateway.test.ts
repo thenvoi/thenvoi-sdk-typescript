@@ -145,7 +145,7 @@ describe("Channel Gateway Lifecycle", () => {
       expect(callback).toHaveBeenCalledTimes(1);
     });
 
-    it("should route replies to the last sender even if another participant name appears in the text", async () => {
+    it("should route replies to the last sender even if another participant name or handle appears in the text", async () => {
       const callback = vi.fn();
       setInboundCallback(callback);
 
@@ -153,9 +153,9 @@ describe("Channel Gateway Lifecycle", () => {
       await thenvoiChannel.gateway!.startAccount(ctx);
 
       mockLinkInstance.rest.listChatParticipants = vi.fn().mockResolvedValue([
-        { id: "user-789", name: "John Doe", type: "User" },
-        { id: "user-456", name: "Jane Doe", type: "User" },
-        { id: "agent-123", name: "Test Agent", type: "Agent" },
+        { id: "user-789", name: "John Doe", type: "User", handle: "@john" },
+        { id: "user-456", name: "amit", type: "User", handle: "@amit" },
+        { id: "agent-123", name: "Test Agent", type: "Agent", handle: "@test-agent" },
       ]);
 
       deliverMessage({
@@ -172,14 +172,14 @@ describe("Channel Gateway Lifecycle", () => {
         cfg: {},
         accountId: "account-1",
         to: "room-123",
-        text: "Jane Doe already finished the review.",
+        text: "amit already finished the GitHub review.",
       });
 
       expect(mockLinkInstance.rest.createChatMessage).toHaveBeenCalledWith(
         "room-123",
         expect.objectContaining({
-          content: "Jane Doe already finished the review.",
-          mentions: [{ id: "user-789", name: "John Doe" }],
+          content: "amit already finished the GitHub review.",
+          mentions: [{ id: "user-789" }],
         }),
       );
     });
@@ -205,7 +205,7 @@ describe("Channel Gateway Lifecycle", () => {
         "room-123",
         expect.objectContaining({
           content: "Following up without prior inbound context.",
-          mentions: [{ id: "user-789", name: "John Doe" }],
+          mentions: [{ id: "user-789" }],
         }),
       );
     });

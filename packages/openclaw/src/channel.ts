@@ -363,7 +363,7 @@ function resolveConfig(account: ThenvoiAccountConfig): { apiKey: string; agentId
 // Mention Resolution
 // =============================================================================
 
-type Mention = { id: string; name?: string };
+type Mention = { id: string };
 
 /**
  * Resolve mentions for a message: use last sender when available, then fall back
@@ -387,14 +387,14 @@ async function resolveMentions(
       (p) => p.id === lastSender.senderId && p.id !== agentId
     );
     if (senderParticipant) {
-      return { mentions: [{ id: senderParticipant.id, name: senderParticipant.name }], participants };
+      return { mentions: [{ id: senderParticipant.id }], participants };
     }
   }
 
   // 2. Fallback: first other participant
   const other = participants.find((p) => p.id !== agentId);
   if (other) {
-    return { mentions: [{ id: other.id, name: other.name }], participants };
+    return { mentions: [{ id: other.id }], participants };
   }
 
   return null;

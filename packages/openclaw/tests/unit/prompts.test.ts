@@ -44,9 +44,9 @@ describe("Prompts", () => {
       expect(BASE_INSTRUCTIONS).toContain("Webchat");
     });
 
-    it("should warn that exact names can become visible mentions", () => {
-      expect(BASE_INSTRUCTIONS).toContain("rewrite exact participant names or handles");
-      expect(BASE_INSTRUCTIONS).toContain("indirect phrasing");
+    it("should explain that names in content are plain text", () => {
+      expect(BASE_INSTRUCTIONS).toContain("Message content is plain text");
+      expect(BASE_INSTRUCTIONS).toContain("Only handles listed in the mentions array create @mentions");
     });
   });
 
