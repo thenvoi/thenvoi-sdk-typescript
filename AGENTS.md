@@ -297,12 +297,12 @@ packages/sdk/src/
 ```
 packages/sdk/tests/
 ├── *.test.ts          # Unit tests (per adapter, runtime, tools, MCP, Linear, etc.)
-└── integration/       # Integration & e2e harnesses (smoke, e2e, two-codex-agents, codex-acp-smoke)
+└── integration/       # Integration & e2e harnesses (runnable scripts)
 ```
 
 - Test runner: `vitest` (with v8 coverage via `@vitest/coverage-v8`)
 - Integration tests under `tests/integration/` are runnable scripts, not in the default `vitest run` set
-- `tests/README.md` explains how to run them
+- See `packages/sdk/tests/README.md` for the current harness list and how to run each one
 
 ## Commands
 
@@ -341,7 +341,7 @@ pnpm --filter @thenvoi/sdk run dev:linear
 
 1. Creating an entry barrel under `packages/sdk/src/<name>/index.ts`
 2. Adding the entry to `tsup.config.ts`
-3. Adding the `./` export to `packages/sdk/package.json`
+3. Adding the `./<name>` export to `packages/sdk/package.json#exports`
 
 ## Environment Variables
 
@@ -388,7 +388,7 @@ When adding a new adapter, follow this workflow. Use the lowercase module name (
 ### Phase 5: Example
 
 - Create `packages/sdk/examples/<framework>/<framework>-agent.ts` mirroring an existing example (e.g., `examples/anthropic/anthropic-agent.ts`).
-- Use `loadAgentConfig("my_agent")` for credentials, **not** direct `process.env` reads.
+- Use `loadAgentConfig("my_agent")` (YAML) or `loadAgentConfigFromEnv()` (env vars) for credentials, **not** direct `process.env` reads.
 
 ### Phase 6: Final Validation
 
@@ -413,6 +413,8 @@ pnpm --filter @thenvoi/sdk test
 ## Example Files (`packages/sdk/examples/`)
 
 Each example is a standalone TypeScript script runnable with `tsx`. Folders include: `basic`, `openai`, `anthropic`, `gemini`, `claude-sdk`, `codex`, `langgraph`, `letta`, `parlant`, `custom-adapter`, `a2a-bridge`, `a2a-gateway`, `linear-thenvoi`.
+
+> Note: the `vercel-ai-sdk`, `google-adk`, and `opencode` adapters ship without dedicated example folders today. Mirror an existing example (e.g., `examples/anthropic/`) when adding one.
 
 ### Conventions
 
