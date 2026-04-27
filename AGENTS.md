@@ -352,7 +352,7 @@ The SDK reads only the `THENVOI_*` prefix by default (override via `loadAgentCon
 - `THENVOI_WS_URL`: WebSocket base URL (optional; default: `wss://app.thenvoi.com/api/v1/socket` — the `phoenix` lib appends `/websocket`)
 - `THENVOI_REST_URL`: REST API URL (optional; derived from `THENVOI_WS_URL` if not set, via `deriveDefaultRestUrl`)
 
-LLM API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, etc.) are read directly by the underlying provider SDKs and passed via adapter options.
+LLM API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`/`GEMINI_API_KEY`, etc.) are read directly by the underlying provider SDKs and passed via adapter options. For Gemini, `@google/genai` accepts both `GOOGLE_API_KEY` and `GEMINI_API_KEY` (it prefers `GOOGLE_API_KEY` if both are set; verified in `@google/genai` 1.50.x `getApiKeyFromEnv`).
 
 ## Adding a New Framework Adapter
 
