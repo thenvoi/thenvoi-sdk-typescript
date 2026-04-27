@@ -61,22 +61,24 @@ Tool schemas live in `packages/sdk/src/runtime/tools/schemas.ts` (`TOOL_MODELS`)
 
 ## REST Client API Pattern
 
-REST is wrapped around the Fern-generated `@thenvoi/rest-client`. `FernRestAdapter` exposes a domain-grouped facade you reach via `link.rest`:
+REST is wrapped around the Fern-generated `@thenvoi/rest-client`. `FernRestAdapter` and `RestFacade` expose a **flat** method surface you reach via `link.rest`:
 
 ```ts
-// Pattern: link.rest.<domain>.<method>(...)
-await link.rest.chat.createChatMessage(roomId, { content, mentions });
-await link.rest.chat.createChatEvent(roomId, { content, messageType: "thought" });
-await link.rest.contacts.listContacts({ page, pageSize });
-await link.rest.memory.listMemories({ subjectId });
-await link.rest.agent.getAgentMe();
+// Pattern: link.rest.<method>(...)
+await link.rest.createChatMessage(roomId, { content, mentions });
+await link.rest.createChatEvent(roomId, { content, messageType: "thought" });
+await link.rest.listContacts({ page, pageSize });
+await link.rest.listMemories({ subject_id });
+await link.rest.getAgentMe();
 ```
 
-Domain groups (see `packages/sdk/src/client/rest/types.ts`): `agent`, `chat` (messaging + rooms + participants), `contacts`, `memory`, `peers`, plus pagination helpers in `packages/sdk/src/client/rest/pagination.ts`.
+Memory list args use snake_case (`subject_id`, `content_query`, `page_size`, `status`) because the wire DTOs preserve the API's snake_case names — see `WireListMemoriesArgs` in `packages/sdk/src/contracts/dtos.ts`. Other args are camelCase.
+
+The full method set is the union `ThenvoiLinkRestApi = AgentProfileRestApi & MessageLifecycleRestApi & AgentToolsRestApi & ChatListingRestApi` (`packages/sdk/src/client/rest/types.ts`), covering: agent profile (`getAgentMe`), chat messaging (`createChatMessage`, `createChatEvent`, `createChat`, `listChats`, `getChatContext`), participants (`listChatParticipants`, `addChatParticipant`, `removeChatParticipant`), message lifecycle (`markMessageProcessing`, `markMessageProcessed`, `markMessageFailed`, `listMessages`, `getNextMessage`), contacts (`addContact`, `removeContact`, `respondContactRequest`, `listContacts`, `listContactRequests`), memory (`storeMemory`, `getMemory`, `supersedeMemory`, `archiveMemory`, `listMemories`), and peers (`listPeers`). Pagination helpers live in `packages/sdk/src/client/rest/pagination.ts`.
 
 ## WebSocket Channels & Events
 
-WebSocket transport is Phoenix Channels (`packages/sdk/src/platform/streaming/PhoenixChannelsTransport.ts`). Default URL: `wss://app.thenvoi.com/api/v1/socket/websocket`.
+WebSocket transport is Phoenix Channels (`packages/sdk/src/platform/streaming/PhoenixChannelsTransport.ts`). Default base URL: `wss://app.thenvoi.com/api/v1/socket` (the `phoenix` JS lib appends `/websocket` to form the actual WS endpoint — set `THENVOI_WS_URL` to the base URL, not the `/websocket` URL).
 
 ### Channels (Phoenix Channels Protocol V2)
 
@@ -269,7 +271,7 @@ A complete reference application lives in `packages/sdk/examples/linear-thenvoi/
 ```
 packages/sdk/src/
 ├── agent/             # Agent.create() entry point
-├── adapters/          # Framework adapters (one folder per framework)
+├── adapters/          # Framework adapters (one folder per framework, plus GenericAdapter.ts at top level)
 │   ├── tool-calling/  # ToolCallingAdapter base + ToolCallingModel interface
 │   └── shared/        # conversationPrompt, history, coercion utilities
 ├── client/rest/       # FernRestAdapter, RestFacade, pagination, REST types
@@ -347,7 +349,7 @@ The SDK reads only the `THENVOI_*` prefix by default (override via `loadAgentCon
 
 - `THENVOI_AGENT_ID`: agent UUID (required)
 - `THENVOI_API_KEY`: agent API key (required)
-- `THENVOI_WS_URL`: WebSocket URL (optional; default: `wss://app.thenvoi.com/api/v1/socket/websocket`)
+- `THENVOI_WS_URL`: WebSocket base URL (optional; default: `wss://app.thenvoi.com/api/v1/socket` — the `phoenix` lib appends `/websocket`)
 - `THENVOI_REST_URL`: REST API URL (optional; derived from `THENVOI_WS_URL` if not set, via `deriveDefaultRestUrl`)
 
 LLM API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, etc.) are read directly by the underlying provider SDKs and passed via adapter options.
