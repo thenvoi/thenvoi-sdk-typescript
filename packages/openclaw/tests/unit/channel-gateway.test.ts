@@ -229,7 +229,7 @@ describe("Channel Gateway Lifecycle", () => {
     it("should recover from connect() failure and keep blocking on abortSignal", async () => {
       const connectError = new Error("HTTP 429: Too Many Requests");
 
-      // Override the ThenvoiLink mock so the NEXT instance's connect() rejects
+      // Override the ThenvoiLink mock so the NEXT instance's connect() rejects.
       const { ThenvoiLink } = await import("@thenvoi/sdk");
       vi.mocked(ThenvoiLink).mockImplementationOnce((opts: Record<string, unknown>) => {
         mockLinkInstance = {
@@ -244,6 +244,23 @@ describe("Channel Gateway Lifecycle", () => {
           markProcessed: vi.fn().mockResolvedValue(undefined),
         };
         return mockLinkInstance as ReturnType<typeof ThenvoiLink>;
+      });
+
+      // Simulate RoomPresence.start's real behavior: when the link is not
+      // connected it calls link.connect() again before subscribing.
+      const { RoomPresence } = await import("@thenvoi/sdk/runtime");
+      vi.mocked(RoomPresence).mockImplementationOnce(() => {
+        capturedPresenceInstance = {
+          onRoomJoined: null,
+          onRoomLeft: null,
+          onRoomEvent: null,
+          onContactEvent: null,
+          start: vi.fn(async () => {
+            await (mockLinkInstance.connect as () => Promise<void>)();
+          }),
+          stop: vi.fn().mockResolvedValue(undefined),
+        };
+        return capturedPresenceInstance as ReturnType<typeof RoomPresence>;
       });
 
       const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -261,22 +278,19 @@ describe("Channel Gateway Lifecycle", () => {
         resolved = true;
       });
 
-      // Give it a tick to process
       await new Promise((r) => setTimeout(r, 10));
 
-      // Error was caught and logged — startAccount did NOT reject
       expect(errorSpy).toHaveBeenCalledWith(
         expect.stringContaining("Initial connect failed"),
         connectError,
       );
-
-      // Still blocking on abortSignal (not rejected, not resolved)
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Presence start failed after initial connect failure"),
+        connectError,
+      );
+      expect(mockLinkInstance.connect).toHaveBeenCalledTimes(2);
       expect(resolved).toBe(false);
 
-      // Presence was still started despite connect failure
-      expect(capturedPresenceInstance.start).toHaveBeenCalled();
-
-      // Clean up
       controller.abort();
       await promise;
       expect(resolved).toBe(true);
