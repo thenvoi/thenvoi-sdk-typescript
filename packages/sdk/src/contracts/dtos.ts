@@ -35,6 +35,8 @@ export interface ParticipantRecord {
   name: string;
   type: string;
   handle?: string | null;
+  is_remote?: boolean | null;
+  is_external?: boolean | null;
   role?: string;
 }
 
@@ -53,6 +55,8 @@ export interface WireContactRecord {
   name?: string | null;
   type?: string;
   description?: string | null;
+  is_remote?: boolean | null;
+  // Legacy alias for is_remote.
   is_external?: boolean | null;
   inserted_at?: string;
 }
