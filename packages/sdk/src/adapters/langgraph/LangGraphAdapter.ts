@@ -56,6 +56,9 @@ export interface LangGraphAdapterOptions {
   emitExecutionEvents?: boolean;
   includeMemoryTools?: boolean;
   logger?: Logger;
+  includeTools?: string[];
+  excludeTools?: string[];
+  includeCategories?: string[];
 }
 
 export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterToolsProtocol> {
@@ -71,6 +74,9 @@ export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
   private readonly emitExecutionEvents: boolean;
   private readonly includeMemoryTools: boolean;
   private readonly logger: Logger;
+  private readonly includeTools?: string[];
+  private readonly excludeTools?: string[];
+  private readonly includeCategories?: string[];
   private readonly sdkLoader: LazyAsyncValue<LangGraphSdk>;
   private renderedSystemPrompt = "";
   private readonly bootstrappedRooms = new Set<string>();
@@ -94,6 +100,9 @@ export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
     this.emitExecutionEvents = options.emitExecutionEvents ?? true;
     this.includeMemoryTools = options.includeMemoryTools ?? false;
     this.logger = options.logger ?? new NoopLogger();
+    this.includeTools = options.includeTools;
+    this.excludeTools = options.excludeTools;
+    this.includeCategories = options.includeCategories;
     this.sdkLoader = new LazyAsyncValue({
       load: async () => loadLangGraphSdk(),
       onRejected: (error: unknown) => {
@@ -130,6 +139,9 @@ export class LangGraphAdapter extends SimpleAdapter<HistoryProvider, AdapterTool
           sdk,
           tools,
           includeMemoryTools: this.includeMemoryTools,
+          includeTools: this.includeTools,
+          excludeTools: this.excludeTools,
+          includeCategories: this.includeCategories,
           logger: this.logger,
         }),
         ...this.additionalTools,
@@ -293,10 +305,16 @@ function buildLangGraphTools(input: {
   sdk: LangGraphSdk;
   tools: AdapterToolsProtocol;
   includeMemoryTools: boolean;
+  includeTools?: string[];
+  excludeTools?: string[];
+  includeCategories?: string[];
   logger: Logger;
 }): unknown[] {
   const schemas = input.tools.getToolSchemas("openai", {
     includeMemory: input.includeMemoryTools,
+    includeTools: input.includeTools,
+    excludeTools: input.excludeTools,
+    includeCategories: input.includeCategories,
   });
   const wrappers: unknown[] = [];
 

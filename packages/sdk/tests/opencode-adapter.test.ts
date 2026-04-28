@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { HttpStatusError, OpencodeAdapter } from "../src/adapters";
 import type { OpencodeSessionState } from "../src/converters";
+import type { OpencodeClientLike } from "../src/adapters/opencode/client";
 import { FakeTools, makeMessage } from "./testUtils";
 
 class EventQueue {
@@ -171,7 +172,7 @@ describe("OpencodeAdapter", () => {
     const client = new FakeOpencodeClient();
     createdClients.push(client);
     const adapter = new OpencodeAdapter({
-      clientFactory: () => client as any,
+      clientFactory: () => client as OpencodeClientLike,
       mcpBackendFactory: async () => ({
         kind: "http",
         server: { url: "http://127.0.0.1:5555/mcp" },
@@ -220,7 +221,7 @@ describe("OpencodeAdapter", () => {
     const client = new FakeOpencodeClient();
     createdClients.push(client);
     const adapter = new OpencodeAdapter({
-      clientFactory: () => client as any,
+      clientFactory: () => client as OpencodeClientLike,
       mcpBackendFactory: async () => ({
         kind: "http",
         server: { url: "http://127.0.0.1:5555/mcp" },
@@ -283,7 +284,7 @@ describe("OpencodeAdapter", () => {
     client.markMissing("old-session");
     createdClients.push(client);
     const adapter = new OpencodeAdapter({
-      clientFactory: () => client as any,
+      clientFactory: () => client as OpencodeClientLike,
       mcpBackendFactory: async () => ({
         kind: "http",
         server: { url: "http://127.0.0.1:5555/mcp" },

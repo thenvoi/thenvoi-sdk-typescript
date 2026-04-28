@@ -18,7 +18,6 @@ import { ACPPushHandler } from "./pushHandler";
 import { AgentRouter } from "./router";
 import {
   DEFAULT_ACP_SERVER_MODES,
-  asJsonSafe,
   createPendingPrompt,
   normalizeMcpServers,
   type PendingACPPrompt,

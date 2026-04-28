@@ -1189,6 +1189,42 @@ describe("LettaAdapter", () => {
     expect(callCount).toBe(1);
   });
 
+  it("forwards tool filters to platform tool schema lookup", async () => {
+    const client = new FakeLettaClient();
+    client.responseBatches.push(assistantResponse("Done"));
+
+    const adapter = new LettaAdapter({
+      includeTools: ["thenvoi_send_message"],
+      excludeTools: ["thenvoi_send_event"],
+      includeCategories: ["chat"],
+      clientFactory: async () => client,
+    });
+
+    await adapter.onStarted("Agent", "An agent");
+
+    const tools = new FakeTools();
+    const schemaRequests: Array<Record<string, unknown>> = [];
+    tools.getOpenAIToolSchemas = (options) => {
+      schemaRequests.push({ ...(options ?? {}) });
+      return [];
+    };
+
+    await adapter.onMessage(
+      makeMessage("Hi", "room-filtered-tools"),
+      tools,
+      [],
+      null,
+      null,
+      { isSessionBootstrap: false, roomId: "room-filtered-tools" },
+    );
+
+    expect(schemaRequests).toEqual([{
+      includeTools: ["thenvoi_send_message"],
+      excludeTools: ["thenvoi_send_event"],
+      includeCategories: ["chat"],
+    }]);
+  });
+
   it("extracts assistant text from array content format", async () => {
     const client = new FakeLettaClient();
     client.responseBatches.push({

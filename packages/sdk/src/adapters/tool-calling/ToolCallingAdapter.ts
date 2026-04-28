@@ -36,6 +36,9 @@ export interface ToolCallingAdapterOptions {
   enableExecutionReporting?: boolean;
   customTools?: CustomToolDef[];
   logger?: Logger;
+  includeTools?: string[];
+  excludeTools?: string[];
+  includeCategories?: string[];
 }
 
 type ToolCallingTools = MessagingTools & ToolExecutor & ToolSchemaProvider;
@@ -50,6 +53,9 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
   private readonly customTools: CustomToolDef[];
   private readonly customToolIndex: Map<string, CustomToolDef>;
   private readonly logger: Logger;
+  private readonly includeTools?: string[];
+  private readonly excludeTools?: string[];
+  private readonly includeCategories?: string[];
 
   public constructor(options: ToolCallingAdapterOptions) {
     super();
@@ -62,6 +68,9 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
     this.customTools = options.customTools ?? [];
     this.customToolIndex = buildCustomToolIndex(this.customTools);
     this.logger = options.logger ?? new NoopLogger();
+    this.includeTools = options.includeTools;
+    this.excludeTools = options.excludeTools;
+    this.includeCategories = options.includeCategories;
   }
 
   public async onMessage(
@@ -74,6 +83,9 @@ export class ToolCallingAdapter extends SimpleAdapter<HistoryProvider, ToolCalli
   ): Promise<void> {
     const platformSchemas = tools.getToolSchemas(this.toolFormat, {
       includeMemory: this.includeMemoryTools,
+      includeTools: this.includeTools,
+      excludeTools: this.excludeTools,
+      includeCategories: this.includeCategories,
     });
     const customSchemas = customToolsToSchemas(this.customTools, this.toolFormat);
     const schemas = [...platformSchemas, ...customSchemas];
