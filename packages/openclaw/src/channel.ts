@@ -637,9 +637,14 @@ export const thenvoiChannel: OpenClawChannel = {
         links().set(accountId, link);
         console.log(`[thenvoi:${accountId}] Link created`);
 
-        // Connect WebSocket
-        await link.connect();
-        console.log(`[thenvoi:${accountId}] WebSocket connected`);
+        let initialConnectFailed = false;
+        try {
+          await link.connect();
+          console.log(`[thenvoi:${accountId}] WebSocket connected`);
+        } catch (connectError) {
+          initialConnectFailed = true;
+          console.error(`[thenvoi:${accountId}] Initial connect failed; waiting for restart or shutdown:`, connectError);
+        }
 
         // Create RoomPresence for automatic room subscription management
         const presence = new RoomPresence({
@@ -797,10 +802,18 @@ export const thenvoiChannel: OpenClawChannel = {
 
         presences().set(accountId, presence);
 
-        // Start the event loop
-        await presence.start();
+        try {
+          await presence.start();
+        } catch (presenceError) {
+          if (!initialConnectFailed) {
+            throw presenceError;
+          }
+          console.error(`[thenvoi:${accountId}] Presence start failed after initial connect failure; waiting for restart or shutdown:`, presenceError);
+        }
 
-        console.log(`[thenvoi:${accountId}] Connected to Thenvoi platform`);
+        if (!initialConnectFailed) {
+          console.log(`[thenvoi:${accountId}] Connected to Thenvoi platform`);
+        }
 
         // Block until OpenClaw signals shutdown — startAccount must stay
         // alive for the lifetime of the connection, otherwise OpenClaw
