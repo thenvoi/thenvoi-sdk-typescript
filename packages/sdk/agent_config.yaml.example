@@ -1,0 +1,71 @@
+# Thenvoi SDK agent configuration
+# Copy this file to agent_config.yaml and fill in your credentials.
+#
+# Usage in code:
+#   import { loadAgentConfig } from "@thenvoi/sdk";
+#   const config = loadAgentConfig("basic_agent");
+#   Agent.create({ adapter, ...config });
+
+basic_agent:
+  agent_id: "your-agent-id"
+  api_key: "your-api-key"
+
+openai_agent:
+  agent_id: "your-openai-agent-id"
+  api_key: "your-api-key"
+
+anthropic_agent:
+  agent_id: "your-anthropic-agent-id"
+  api_key: "your-api-key"
+
+gemini_agent:
+  agent_id: "your-gemini-agent-id"
+  api_key: "your-api-key"
+
+claude_sdk_agent:
+  agent_id: "your-claude-sdk-agent-id"
+  api_key: "your-api-key"
+
+codex_agent:
+  agent_id: "your-codex-agent-id"
+  api_key: "your-api-key"
+
+langgraph_agent:
+  agent_id: "your-langgraph-agent-id"
+  api_key: "your-api-key"
+
+a2a_bridge_agent:
+  agent_id: "your-a2a-bridge-agent-id"
+  api_key: "your-api-key"
+
+a2a_bridge_auth_agent:
+  agent_id: "your-a2a-bridge-auth-agent-id"
+  api_key: "your-api-key"
+
+a2a_gateway_agent:
+  agent_id: "your-a2a-gateway-agent-id"
+  api_key: "your-api-key"
+
+parlant_agent:
+  agent_id: "your-parlant-agent-id"
+  api_key: "your-api-key"
+
+custom_adapter_agent:
+  agent_id: "your-custom-adapter-agent-id"
+  api_key: "your-api-key"
+
+linear_thenvoi_bridge:
+  agent_id: "your-band-linear-pm-agent-id"
+  api_key: "your-api-key"
+
+planner_agent:
+  agent_id: "your-planner-agent-id"
+  api_key: "your-api-key"
+
+reviewer_agent:
+  agent_id: "your-reviewer-agent-id"
+  api_key: "your-api-key"
+
+linear_thenvoi_transport:
+  agent_id: "your-linear-transport-agent-id"
+  api_key: "your-api-key"
