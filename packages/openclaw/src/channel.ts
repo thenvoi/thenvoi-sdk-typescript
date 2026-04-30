@@ -363,10 +363,12 @@ function resolveConfig(account: ThenvoiAccountConfig): { apiKey: string; agentId
 // Mention Resolution
 // =============================================================================
 
-type Mention = { id: string; name?: string };
+type Mention = { id: string };
 
 /**
- * Resolve mentions for a message: find @Name in text, fall back to last sender, then any participant.
+ * Resolve mentions for a message: use last sender when available, then fall back
+ * to the first other participant. OpenClaw must not infer routing from @Name text
+ * inside the reply body.
  * Returns null if no participants are available to mention (caller decides how to handle).
  */
 async function resolveMentions(
@@ -374,35 +376,25 @@ async function resolveMentions(
   agentId: string,
   accountId: string,
   roomId: string,
-  text: string,
+  _text: string,
 ): Promise<{ mentions: Mention[]; participants: Array<{ id: string; name: string }> } | null> {
   const participants = await rest.listChatParticipants(roomId);
 
-  // 1. Explicit @Name mentions in text (case-insensitive)
-  const mentioned: Mention[] = [];
-  const textLower = text.toLowerCase();
-  for (const p of participants) {
-    if (p.id !== agentId && textLower.includes(`@${p.name.toLowerCase()}`)) {
-      mentioned.push({ id: p.id, name: p.name });
-    }
-  }
-  if (mentioned.length > 0) return { mentions: mentioned, participants };
-
-  // 2. Fallback: last sender in this thread
+  // 1. Fallback: last sender in this thread
   const lastSender = registry().lastSenderByThread.get(`${accountId}:${roomId}`);
   if (lastSender) {
     const senderParticipant = participants.find(
       (p) => p.id === lastSender.senderId && p.id !== agentId
     );
     if (senderParticipant) {
-      return { mentions: [{ id: senderParticipant.id, name: senderParticipant.name }], participants };
+      return { mentions: [{ id: senderParticipant.id }], participants };
     }
   }
 
-  // 3. Fallback: first other participant
+  // 2. Fallback: first other participant
   const other = participants.find((p) => p.id !== agentId);
   if (other) {
-    return { mentions: [{ id: other.id, name: other.name }], participants };
+    return { mentions: [{ id: other.id }], participants };
   }
 
   return null;
