@@ -282,6 +282,7 @@ describe("FernRestAdapter coverage", () => {
           name: "Jane",
           type: "User",
           description: null,
+          is_remote: false,
           is_external: false,
           inserted_at: "2026-03-10T00:00:00.000Z",
         },
@@ -350,11 +351,40 @@ describe("FernRestAdapter coverage", () => {
           name: "Jane",
           type: "User",
           description: null,
+          is_remote: false,
           is_external: false,
           inserted_at: "2026-03-10T00:00:00.000Z",
         },
       ],
       metadata: { page: 3, pageSize: 20, totalCount: 1, totalPages: 9 },
+    });
+    const legacyOnlyAdapter = new FernRestAdapter({
+      agentContacts: {
+        listAgentContacts: async () => ({
+          data: [{
+            id: "contact-legacy",
+            handle: "@legacy",
+            name: "Legacy",
+            type: "User",
+            description: null,
+            is_external: true,
+            inserted_at: "2026-03-10T00:00:00.000Z",
+          }],
+        }),
+      },
+    });
+    await expect(legacyOnlyAdapter.listContacts({ page: 1, pageSize: 50 })).resolves.toEqual({
+      data: [{
+        id: "contact-legacy",
+        handle: "@legacy",
+        name: "Legacy",
+        type: "User",
+        description: null,
+        is_remote: true,
+        is_external: true,
+        inserted_at: "2026-03-10T00:00:00.000Z",
+      }],
+      metadata: {},
     });
     await expect(adapter.addContact({ handle: "@jane", message: "hello" })).resolves.toEqual({
       id: "req-1",
@@ -456,7 +486,7 @@ describe("FernRestAdapter coverage", () => {
       chatParticipants: {
         listChatParticipants: async () => ({
           data: [
-            { id: "u1", name: "Jane", type: "User", handle: "@jane" },
+            { id: "u1", name: "Jane", type: "User", handle: "@jane", is_remote: false, is_external: false },
             { id: 42 },
           ],
         }),
@@ -466,7 +496,19 @@ describe("FernRestAdapter coverage", () => {
     });
 
     await expect(adapter.listChatParticipants("room-1")).resolves.toEqual([
-      { id: "u1", name: "Jane", type: "User", handle: "@jane" },
+      { id: "u1", name: "Jane", type: "User", handle: "@jane", is_remote: false, is_external: false },
+    ]);
+    const legacyParticipantAdapter = new FernRestAdapter({
+      chatParticipants: {
+        listChatParticipants: async () => ({
+          data: [{ id: "uLegacy", name: "Legacy", type: "Agent", handle: null, is_external: true }],
+        }),
+        addChatParticipant: async () => ({ data: {} }),
+        removeChatParticipant: async () => ({ data: {} }),
+      },
+    });
+    await expect(legacyParticipantAdapter.listChatParticipants("room-1")).resolves.toEqual([
+      { id: "uLegacy", name: "Legacy", type: "Agent", handle: null, is_remote: true, is_external: true },
     ]);
   });
 
@@ -474,7 +516,7 @@ describe("FernRestAdapter coverage", () => {
     const adapter = new FernRestAdapter({
       agentApiParticipants: {
         listAgentChatParticipants: async () => ({
-          data: [{ id: "u2", name: "Sam", type: "Agent", handle: null }],
+          data: [{ id: "u2", name: "Sam", type: "Agent", handle: null, is_remote: true, is_external: true }],
         }),
       },
       agentApiMessages: {
@@ -495,7 +537,7 @@ describe("FernRestAdapter coverage", () => {
     });
 
     await expect(adapter.listChatParticipants("room-1")).resolves.toEqual([
-      { id: "u2", name: "Sam", type: "Agent", handle: null },
+      { id: "u2", name: "Sam", type: "Agent", handle: null, is_remote: true, is_external: true },
     ]);
     await expect(adapter.getNextMessage({ chatId: "room-1" })).resolves.toBeNull();
     await expect(

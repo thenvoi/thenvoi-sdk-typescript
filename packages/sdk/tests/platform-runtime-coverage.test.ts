@@ -203,6 +203,7 @@ describe("PlatformRuntime coverage", () => {
           name: "Jane",
           type: "User",
           description: null,
+          is_remote: false,
           is_external: false,
           inserted_at: "2026-03-10T00:00:00.000Z",
         },
