@@ -226,6 +226,77 @@ describe("Channel Gateway Lifecycle", () => {
       expect(firstLink.disconnect).toHaveBeenCalled();
     });
 
+    it("should recover from connect() failure and keep blocking on abortSignal", async () => {
+      const connectError = new Error("HTTP 429: Too Many Requests");
+
+      // Override the ThenvoiLink mock so the NEXT instance's connect() rejects.
+      const { ThenvoiLink } = await import("@thenvoi/sdk");
+      vi.mocked(ThenvoiLink).mockImplementationOnce((opts: Record<string, unknown>) => {
+        mockLinkInstance = {
+          agentId: opts.agentId,
+          rest: {
+            getAgentMe: vi.fn().mockResolvedValue({ id: opts.agentId }),
+            listChatParticipants: vi.fn().mockResolvedValue([]),
+            createChatMessage: vi.fn().mockResolvedValue({ ok: true }),
+          },
+          connect: vi.fn().mockRejectedValue(connectError),
+          disconnect: vi.fn().mockResolvedValue(undefined),
+          markProcessed: vi.fn().mockResolvedValue(undefined),
+        };
+        return mockLinkInstance as ReturnType<typeof ThenvoiLink>;
+      });
+
+      // Simulate RoomPresence.start's real behavior: when the link is not
+      // connected it calls link.connect() again before subscribing.
+      const { RoomPresence } = await import("@thenvoi/sdk/runtime");
+      vi.mocked(RoomPresence).mockImplementationOnce(() => {
+        capturedPresenceInstance = {
+          onRoomJoined: null,
+          onRoomLeft: null,
+          onRoomEvent: null,
+          onContactEvent: null,
+          start: vi.fn(async () => {
+            await (mockLinkInstance.connect as () => Promise<void>)();
+          }),
+          stop: vi.fn().mockResolvedValue(undefined),
+        };
+        return capturedPresenceInstance as ReturnType<typeof RoomPresence>;
+      });
+
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const controller = new AbortController();
+      const ctx = {
+        cfg: {},
+        accountId: "recovering",
+        account: mockAccountConfig,
+        abortSignal: controller.signal,
+      };
+
+      let resolved = false;
+      const promise = thenvoiChannel.gateway!.startAccount(ctx).then(() => {
+        resolved = true;
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Initial connect failed"),
+        connectError,
+      );
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Presence start failed after initial connect failure"),
+        connectError,
+      );
+      expect(mockLinkInstance.connect).toHaveBeenCalledTimes(2);
+      expect(resolved).toBe(false);
+
+      controller.abort();
+      await promise;
+      expect(resolved).toBe(true);
+      errorSpy.mockRestore();
+    });
+
     it("should block until abort signal fires", async () => {
       const controller = new AbortController();
       const ctx = {
