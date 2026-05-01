@@ -41,9 +41,9 @@ if (isDirectExecution(import.meta.url)) {
   }
 
   const config = loadAgentConfig("letta_agent");
-  console.log("[letta-agent] Starting with config:", JSON.stringify(config));
-  console.log("[letta-agent] Model:", process.env.LETTA_MODEL ?? "openai/gpt-4o");
-  console.log("[letta-agent] Base URL:", lettaBaseUrl ?? "cloud");
+  console.warn("[letta-agent] Starting with config:", JSON.stringify(config));
+  console.warn("[letta-agent] Model:", process.env.LETTA_MODEL ?? "openai/gpt-4o");
+  console.warn("[letta-agent] Base URL:", lettaBaseUrl ?? "cloud");
   void createLettaAgent(
     {
       model: process.env.LETTA_MODEL,
@@ -51,5 +51,5 @@ if (isDirectExecution(import.meta.url)) {
       lettaBaseUrl,
     },
     config,
-  ).run().then(() => console.log("[letta-agent] run() resolved")).catch((e) => console.error("[letta-agent] run() error:", e));
+  ).run().then(() => console.warn("[letta-agent] run() resolved")).catch((e) => console.error("[letta-agent] run() error:", e));
 }

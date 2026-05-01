@@ -2,14 +2,17 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { GoogleADKAdapter } from "../src/adapters";
+import type { ToolFilterOptions } from "../src/contracts/dtos";
 import { GoogleADKHistoryConverter } from "../src/converters";
-import type { AgentToolsProtocol } from "../src/core";
+import type { GoogleADKAdapterOptions } from "../src/adapters";
 import { FakeTools, makeMessage } from "./testUtils";
 
 class GoogleAdkTestTools extends FakeTools {
   public readonly executedCalls: Array<{ toolName: string; args: Record<string, unknown> }> = [];
+  public readonly schemaRequests: ToolFilterOptions[] = [];
 
-  public override getOpenAIToolSchemas(): Array<Record<string, unknown>> {
+  public override getOpenAIToolSchemas(options?: ToolFilterOptions): Array<Record<string, unknown>> {
+    this.schemaRequests.push(options ?? {});
     return [{
       type: "function",
       function: {
@@ -38,15 +41,15 @@ class GoogleAdkTestTools extends FakeTools {
 
 function createFakeGoogleAdkSdk(
   run: (agent: Record<string, unknown>, request: { userId: string; sessionId: string; newMessage: { role: "user"; parts: Array<{ text: string }> } }) => AsyncIterable<unknown>,
-): () => Promise<any> {
+): NonNullable<GoogleADKAdapterOptions["sdkFactory"]> {
   return async () => ({
     createAgent: (params: Record<string, unknown>) => params,
     createFunctionTool: (params: Record<string, unknown>) => params,
-    createRunner: ({ agent }: { agent: Record<string, unknown> }) => ({
+    createRunner: ({ agent }: { agent: unknown; appName: string }) => ({
       sessionService: {
         createSession: async () => ({ ok: true }),
       },
-      runAsync: (request: { userId: string; sessionId: string; newMessage: { role: "user"; parts: Array<{ text: string }> } }) => run(agent, request),
+      runAsync: (request: { userId: string; sessionId: string; newMessage: { role: "user"; parts: Array<{ text: string }> } }) => run(agent as Record<string, unknown>, request),
     }),
     isFinalResponse: (event: Record<string, unknown>) => event.final === true,
     getFunctionCalls: (event: Record<string, unknown>) => Array.isArray(event.functionCalls) ? event.functionCalls : [],
@@ -159,5 +162,36 @@ describe("GoogleADKAdapter", () => {
 
     expect(tools.messages).toEqual(["custom:Toronto"]);
     expect(tools.executedCalls).toEqual([]);
+  });
+
+  it("forwards tool filters to platform tool schema lookup", async () => {
+    const tools = new GoogleAdkTestTools();
+
+    const adapter = new GoogleADKAdapter({
+      enableMemoryTools: true,
+      includeTools: ["thenvoi_send_message"],
+      excludeTools: ["thenvoi_send_event"],
+      includeCategories: ["chat"],
+      sdkFactory: createFakeGoogleAdkSdk(async function* () {
+        yield { final: true, text: "Done" };
+      }),
+    });
+
+    await adapter.onStarted("Weather Agent", "Answers weather questions");
+    await adapter.onMessage(
+      makeMessage("Need weather", "room-3"),
+      tools,
+      new GoogleADKHistoryConverter().convert([]),
+      null,
+      null,
+      { isSessionBootstrap: true, roomId: "room-3" },
+    );
+
+    expect(tools.schemaRequests).toEqual([{
+      includeMemory: true,
+      includeTools: ["thenvoi_send_message"],
+      excludeTools: ["thenvoi_send_event"],
+      includeCategories: ["chat"],
+    }]);
   });
 });

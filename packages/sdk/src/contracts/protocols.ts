@@ -15,6 +15,7 @@ import type {
   RespondContactRequestArgs,
   StoreMemoryArgs,
   ToolOperationResult,
+  ToolFilterOptions,
   ToolSchemaRecord,
 } from "./dtos";
 
@@ -66,10 +67,10 @@ export interface PeerLookupTools {
 export interface ToolSchemaProvider {
   getToolSchemas(
     format: "openai" | "anthropic",
-    options?: { includeMemory?: boolean },
+    options?: ToolFilterOptions,
   ): ToolSchemaRecord[];
-  getAnthropicToolSchemas(options?: { includeMemory?: boolean }): ToolSchemaRecord[];
-  getOpenAIToolSchemas(options?: { includeMemory?: boolean }): ToolSchemaRecord[];
+  getAnthropicToolSchemas(options?: ToolFilterOptions): ToolSchemaRecord[];
+  getOpenAIToolSchemas(options?: ToolFilterOptions): ToolSchemaRecord[];
 }
 
 export interface ContactTools {

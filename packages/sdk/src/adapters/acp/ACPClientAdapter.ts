@@ -16,9 +16,12 @@ import { SimpleAdapter } from "../../core/simpleAdapter";
 import type { AdapterToolsProtocol } from "../../contracts/protocols";
 import { renderSystemPrompt } from "../../runtime/prompts";
 import type { PlatformMessage } from "../../runtime/types";
-import type { McpToolRegistration } from "../../mcp/registrations";
-import { ThenvoiMcpServer } from "../../mcp/server";
-import { ThenvoiMcpSseServer } from "../../mcp/sse";
+import {
+  createThenvoiMcpBackend,
+  type ThenvoiMcpBackend,
+  type ThenvoiMcpBackendKind,
+  type McpToolRegistration,
+} from "../../mcp";
 import {
   ThenvoiACPClient,
 } from "./client";
@@ -29,17 +32,7 @@ import {
 } from "./types";
 import { acpModule } from "./loader";
 
-type InjectedMcpBackend =
-  | {
-    kind: "http";
-    server: ThenvoiMcpServer;
-    stop(): Promise<void>;
-  }
-  | {
-    kind: "sse";
-    server: ThenvoiMcpSseServer;
-    stop(): Promise<void>;
-  }
+type SupportedInjectedMcpTransport = Extract<ThenvoiMcpBackendKind, "http" | "sse">
 
 export interface ACPClientAdapterOptions {
   command: string | string[];
@@ -71,7 +64,7 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
   private readonly activeSessions = new Set<string>()
   private readonly bootstrappedSessions = new Set<string>()
 
-  private backend: InjectedMcpBackend | null = null
+  private backend: ThenvoiMcpBackend | null = null
   private client: ThenvoiACPClient | null = null
   private connectionHandle: ACPClientConnectionHandle | null = null
   private connection: ClientSideConnection | null = null
@@ -379,10 +372,10 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
       return mcpServers
     }
 
-    return mcpServers
+    throw new Error(`Unsupported MCP backend for ACP client injection: ${backend.kind}`)
   }
 
-  private async getOrCreateBackend(): Promise<InjectedMcpBackend> {
+  private async getOrCreateBackend(): Promise<ThenvoiMcpBackend> {
     if (this.backend) {
       return this.backend
     }
@@ -391,38 +384,12 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
       ? "http"
       : (this.connectionState?.agentCapabilities?.mcpCapabilities?.sse ? "sse" : "http")
 
-    if (transport === "sse") {
-      const server = new ThenvoiMcpSseServer({
-        tools: (roomId) => this.roomTools.get(roomId),
-        enableMemoryTools: this.enableMemoryTools,
-        enableContactTools: true,
-        additionalTools: this.additionalMcpTools,
-      })
-      await server.start()
-      this.backend = {
-        kind: "sse",
-        server,
-        stop: async () => {
-          await server.stop()
-        },
-      }
-      return this.backend
-    }
-
-    const server = new ThenvoiMcpServer({
-      tools: (roomId) => this.roomTools.get(roomId),
+    this.backend = await createThenvoiMcpBackend({
+      kind: transport as SupportedInjectedMcpTransport,
       enableMemoryTools: this.enableMemoryTools,
-      enableContactTools: true,
+      getToolsForRoom: (roomId) => this.roomTools.get(roomId),
       additionalTools: this.additionalMcpTools,
     })
-    await server.start()
-    this.backend = {
-      kind: "http",
-      server,
-      stop: async () => {
-        await server.stop()
-      },
-    }
 
     return this.backend
   }

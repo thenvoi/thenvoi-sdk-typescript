@@ -105,6 +105,9 @@ interface CodexAdapterOptions {
   includeMemoryTools?: boolean;
   factory?: CodexFactory;
   logger?: Logger;
+  includeTools?: string[];
+  excludeTools?: string[];
+  includeCategories?: string[];
 }
 
 type ToolLikeItem =
@@ -135,6 +138,9 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
   private readonly factoryOverride?: CodexFactory;
   private readonly logger: Logger;
   private readonly debugEnabled: boolean;
+  private readonly includeTools?: string[];
+  private readonly excludeTools?: string[];
+  private readonly includeCategories?: string[];
   private client: CodexClientLike | null = null;
   private clientPromise: Promise<CodexClientLike> | null = null;
   private lastInitFailure = 0;
@@ -166,6 +172,9 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
     this.includeMemoryTools = options?.includeMemoryTools ?? false;
     this.factoryOverride = options?.factory;
     this.logger = options?.logger ?? new NoopLogger();
+    this.includeTools = options?.includeTools;
+    this.excludeTools = options?.excludeTools;
+    this.includeCategories = options?.includeCategories;
     this.debugEnabled = options?.config?.debug ?? false;
   }
 
@@ -638,7 +647,12 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
     const specs: Array<{ name: string; description: string; inputSchema: unknown }> = [];
     const seen = new Set<string>();
     const schemas = [
-      ...tools.getOpenAIToolSchemas({ includeMemory: this.includeMemoryTools }),
+      ...tools.getOpenAIToolSchemas({
+        includeMemory: this.includeMemoryTools,
+        includeTools: this.includeTools,
+        excludeTools: this.excludeTools,
+        includeCategories: this.includeCategories,
+      }),
       ...this.customTools.map((tool) => customToolToOpenAISchema(tool)),
     ];
 
