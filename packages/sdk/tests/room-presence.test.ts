@@ -170,9 +170,9 @@ describe("RoomPresence", () => {
     );
   });
 
-  it("admits a room only once under concurrent admission attempts", async () => {
+  it("admits a room only once under concurrent admission attempts, notifying each caller with its own payload", async () => {
     const transport = new FakeTransport();
-    const joined: string[] = [];
+    const joined: Array<{ roomId: string; payload: unknown }> = [];
 
     await using presence = new RoomPresence({
       link: new BandLink({
@@ -183,15 +183,15 @@ describe("RoomPresence", () => {
       }),
       autoSubscribeExistingRooms: false,
     });
-    presence.onRoomJoined = async (roomId) => {
-      joined.push(roomId);
+    presence.onRoomJoined = async (roomId, payload) => {
+      joined.push({ roomId, payload });
     };
 
     await presence.start();
 
     const [first, second] = await Promise.all([
-      presence.admitRoom("room-1", {}),
-      presence.admitRoom("room-1", {}),
+      presence.admitRoom("room-1", { source: "first" }),
+      presence.admitRoom("room-1", { source: "second" }),
     ]);
 
     // Both calls race `beginRoomAdmission` before either awaits the transport
@@ -199,9 +199,13 @@ describe("RoomPresence", () => {
     // loser awaits that winner's result rather than reporting a hardcoded
     // false, so both resolve to the same true outcome. Admission itself
     // happens once (one transport join), but each caller asked to be
-    // notified, so each independently gets its own onRoomJoined call.
+    // notified, so each independently gets its own onRoomJoined call with
+    // its own payload — never the other caller's.
     expect([first, second]).toEqual([true, true]);
-    expect(joined).toEqual(["room-1", "room-1"]);
+    expect(joined).toEqual([
+      { roomId: "room-1", payload: { source: "first" } },
+      { roomId: "room-1", payload: { source: "second" } },
+    ]);
     expect(transport.hasTopic("chat_room:room-1")).toBe(true);
     expect(presence.roster.roomMembership("room-1")).toBe("admitted");
   });
@@ -297,12 +301,95 @@ describe("RoomPresence", () => {
     await waitFor(() => joined.length === 1 && presence.roster.roomMembership("room-1") === "admitted");
 
     releaseStaleJoin();
-    await expect(staleAdmission).resolves.toBe(false);
+    // The stale ticket's own subscribe succeeded, but a newer ticket already
+    // won the room — the caller must see the room's real, current state
+    // (admitted), not `false` just because its own ticket lost the race.
+    await expect(staleAdmission).resolves.toBe(true);
 
     expect(presence.roster.roomMembership("room-1")).toBe("admitted");
     expect(transport.hasTopic("chat_room:room-1")).toBe(true);
 
     joinSpy.mockRestore();
+  });
+
+  it("does not let a stale ticket's own failed subscribe clobber a healthy room's error state", async () => {
+    const transport = new FakeTransport();
+
+    await using presence = new RoomPresence({
+      link: new BandLink({
+        agentId: "agent-1",
+        apiKey: "key",
+        transport,
+        restApi: new FakeRestApi({ listChats: async () => ({ data: [] }) }),
+      }),
+      autoSubscribeExistingRooms: false,
+    });
+
+    await presence.start();
+
+    let releaseStaleJoin: (error?: unknown) => void = () => undefined;
+    const staleJoinOutcome = new Promise<void>((resolve, reject) => {
+      releaseStaleJoin = (error) => (error ? reject(error) : resolve());
+    });
+    let chatJoinCount = 0;
+    const joinSpy = vi.spyOn(transport, "join").mockImplementation(async (topic, handlers) => {
+      if (topic === "chat_room:room-1") {
+        chatJoinCount += 1;
+        if (chatJoinCount === 1) {
+          await staleJoinOutcome;
+        }
+      }
+      return FakeTransport.prototype.join.call(transport, topic, handlers);
+    });
+
+    // Same race as above, but this time the stale ticket's own subscribe
+    // will fail (not just lose the race) once released.
+    const staleAdmission = presence.admitRoom("room-1", {}, false);
+    await waitFor(() => chatJoinCount === 1);
+
+    await transport.emit("agent_rooms:agent-1", "room_removed", {
+      id: "room-1",
+      status: "inactive",
+      type: "direct",
+      title: "Room",
+      removed_at: new Date().toISOString(),
+    });
+    await transport.emit("agent_rooms:agent-1", "room_added", {
+      id: "room-1",
+      status: "active",
+      type: "direct",
+      title: "Room",
+      removed_at: "",
+    });
+    await waitFor(() => presence.roster.roomMembership("room-1") === "admitted");
+
+    releaseStaleJoin(new Error("stale ticket's own join failed"));
+
+    // The stale ticket's own subscribe failed, but the room is admitted via
+    // the newer ticket — the caller must see success, not a spurious failure.
+    await expect(staleAdmission).resolves.toBe(true);
+    expect(presence.roster.roomMembership("room-1")).toBe("admitted");
+    joinSpy.mockRestore();
+
+    // The stale ticket's irrelevant failure must not linger and later be
+    // misattributed as the cause of a genuinely fresh failure on this room.
+    await transport.emit("agent_rooms:agent-1", "room_removed", {
+      id: "room-1",
+      status: "inactive",
+      type: "direct",
+      title: "Room",
+      removed_at: new Date().toISOString(),
+    });
+    await waitFor(() => presence.roster.roomMembership("room-1") === "unadmitted");
+    const freshError = new Error("fresh, unrelated failure");
+    const failingJoin = vi.spyOn(transport, "join").mockRejectedValueOnce(freshError);
+
+    await expect(presence.admitRoomOrThrow("room-1")).rejects.toSatisfy((error: unknown) => {
+      expect((error as TransportError).cause).toBe(freshError);
+      return true;
+    });
+
+    failingJoin.mockRestore();
   });
 
   it("admitRoomOrThrow rejects with the real subscribe error attached as cause", async () => {

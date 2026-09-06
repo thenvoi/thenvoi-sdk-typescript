@@ -121,13 +121,13 @@ export class RoomPresence implements AsyncDisposable {
   private async completeAdmission(roomId: string, ticket: bigint): Promise<boolean> {
     let succeeded = false;
     let admitted = false;
+    let subscribeError: unknown;
     try {
       await this.link.subscribeRoom(roomId);
       succeeded = true;
-      this.lastSubscribeError.delete(roomId);
     } catch (error) {
       this.logger.warn("RoomPresence failed to subscribe room", { roomId, error });
-      this.lastSubscribeError.set(roomId, error);
+      subscribeError = error;
     } finally {
       admitted = this.roster.recordRoomAdmission(roomId, ticket, succeeded);
     }
@@ -137,12 +137,27 @@ export class RoomPresence implements AsyncDisposable {
     // roomId, not by ticket) — only release the transport subscription when
     // nobody currently holds the room, or this would tear down the newer
     // ticket's live subscription out from under it.
-    if (succeeded && !admitted && this.roster.roomMembership(roomId) !== "admitted") {
+    const roomIsAdmitted = admitted || this.roster.roomMembership(roomId) === "admitted";
+    if (succeeded && !admitted && !roomIsAdmitted) {
       this.logger.debug("RoomPresence admission ticket went stale", { roomId });
       await this.unsubscribeRoom(roomId);
     }
 
-    return admitted;
+    // Only remember a failure when it's actually the reason the room isn't
+    // admitted — a stale ticket's own subscribe can fail (or succeed) after
+    // a newer ticket already won the room, and that outcome must not clobber
+    // `lastSubscribeError` with an irrelevant error for a room that is fine.
+    if (roomIsAdmitted) {
+      this.lastSubscribeError.delete(roomId);
+    } else if (subscribeError !== undefined) {
+      this.lastSubscribeError.set(roomId, subscribeError);
+    }
+
+    // Our own ticket may have lost the race (or even failed outright) while a
+    // newer ticket already admitted this room; report the room's real,
+    // current state rather than only our own ticket's fate, so a caller like
+    // `admitRoomOrThrow` doesn't fail a room that is in fact joined.
+    return roomIsAdmitted;
   }
 
   private async serialize(body: () => Promise<void>): Promise<void> {
@@ -219,6 +234,7 @@ export class RoomPresence implements AsyncDisposable {
 
     const roomIds = this.roster.trackedRoomIds();
     this.roster.clear();
+    this.lastSubscribeError.clear();
     // Each room's unsubscribe + onRoomLeft only touches that room's own
     // transport topic and (via AgentRuntime's handler) its own map entries,
     // so nothing here races across rooms.
@@ -280,6 +296,7 @@ export class RoomPresence implements AsyncDisposable {
     }
 
     await this.unsubscribeRoom(roomId);
+    this.lastSubscribeError.delete(roomId);
     if (!this.roster.recordRoomRemoved(roomId)) {
       this.logger.debug("RoomPresence ignoring removal for untracked room", { roomId });
       return;
