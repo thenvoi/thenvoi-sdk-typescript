@@ -107,6 +107,8 @@ export class AgentRuntime {
         case "message_created":
           await this.getOrCreateExecution(roomId).enqueue(event);
           return;
+        default:
+          assertNever(event);
       }
     };
     this.presence.onContactEvent = this.onContactEvent ?? null;
@@ -318,6 +320,10 @@ export class AgentRuntime {
       });
     }
   }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled room event: ${JSON.stringify(value)}`);
 }
 
 function syntheticRuntimeFailureEvent(agentId: string): PlatformEvent {
