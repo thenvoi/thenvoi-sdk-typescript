@@ -1,6 +1,5 @@
 import type { BandLink } from "../../platform/BandLink";
 import type { ContactEvent, PlatformEvent } from "../../platform/events";
-import { TransportError } from "../../core/errors";
 import type { Logger } from "../../core/logger";
 import { NoopLogger } from "../../core/logger";
 import type { MetadataMap, ParticipantRecord } from "../../contracts/dtos";
@@ -207,9 +206,7 @@ export class AgentRuntime {
   }
 
   public async bootstrapRoomMessage(roomId: string, message: PlatformMessage): Promise<void> {
-    if (!(await this.presence.admitRoom(roomId, {}, false))) {
-      throw new TransportError(`Failed to subscribe to room ${roomId}`);
-    }
+    await this.presence.admitRoomOrThrow(roomId);
     await this.getOrCreateExecution(roomId).bootstrapMessage(message);
   }
 

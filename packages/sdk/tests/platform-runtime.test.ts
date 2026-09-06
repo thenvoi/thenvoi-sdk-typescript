@@ -363,11 +363,16 @@ describe("PlatformRuntime", () => {
 
     await runtime.start(adapter);
 
-    vi.spyOn(transport, "join").mockRejectedValueOnce(new Error("join failed"));
+    const subscribeError = new Error("join failed");
+    vi.spyOn(transport, "join").mockRejectedValueOnce(subscribeError);
 
     await expect(
       runtime.bootstrapRoomMessage("room-bootstrap", makeMessage("hello", "room-bootstrap")),
-    ).rejects.toThrow(TransportError);
+    ).rejects.toSatisfy((error: unknown) => {
+      expect(error).toBeInstanceOf(TransportError);
+      expect((error as TransportError).cause).toBe(subscribeError);
+      return true;
+    });
 
     await expect(transport.emit("chat_room:room-bootstrap", "message_created", {})).rejects.toThrow(
       "No handler for chat_room:room-bootstrap/message_created",

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { RoomPresence } from "../src/runtime/rooms/RoomPresence";
 import { BandLink } from "../src/platform/BandLink";
+import { TransportError } from "../src/core/errors";
 import { FakeRestApi, FakeTransport } from "./testUtils";
 
 async function waitFor(check: () => boolean): Promise<void> {
@@ -196,11 +197,140 @@ describe("RoomPresence", () => {
     // Both calls race `beginRoomAdmission` before either awaits the transport
     // join, so exactly one claims the ticket and actually joins — but the
     // loser awaits that winner's result rather than reporting a hardcoded
-    // false, so both resolve to the same true outcome.
+    // false, so both resolve to the same true outcome. Admission itself
+    // happens once (one transport join), but each caller asked to be
+    // notified, so each independently gets its own onRoomJoined call.
     expect([first, second]).toEqual([true, true]);
-    expect(joined).toEqual(["room-1"]);
+    expect(joined).toEqual(["room-1", "room-1"]);
     expect(transport.hasTopic("chat_room:room-1")).toBe(true);
     expect(presence.roster.roomMembership("room-1")).toBe("admitted");
+  });
+
+  it("notifies a caller with its own payload even when a concurrent caller wins the admission", async () => {
+    const transport = new FakeTransport();
+    const joined: Array<{ roomId: string; payload: unknown }> = [];
+
+    await using presence = new RoomPresence({
+      link: new BandLink({
+        agentId: "agent-1",
+        apiKey: "key",
+        transport,
+        restApi: new FakeRestApi({ listChats: async () => ({ data: [] }) }),
+      }),
+      autoSubscribeExistingRooms: false,
+    });
+    presence.onRoomJoined = async (roomId, payload) => {
+      joined.push({ roomId, payload });
+    };
+
+    await presence.start();
+
+    // The synchronous ticket claim always goes to whichever call starts
+    // first, so the first array element wins and performs the real
+    // subscribe; the second is the loser awaiting that outcome.
+    const [winnerAdmitted, loserAdmitted] = await Promise.all([
+      presence.admitRoom("room-1", { source: "bootstrap" }, false),
+      presence.admitRoom("room-1", { source: "room_added" }, true),
+    ]);
+
+    expect(winnerAdmitted).toBe(true);
+    expect(loserAdmitted).toBe(true);
+    // Only the loser asked to be notified, and it must see its own payload —
+    // not the winner's, and not be silently skipped just because it lost
+    // the ticket race.
+    expect(joined).toEqual([{ roomId: "room-1", payload: { source: "room_added" } }]);
+  });
+
+  it("keeps a newer admission's subscription alive when an older, slower ticket resolves stale", async () => {
+    const transport = new FakeTransport();
+    const joined: string[] = [];
+
+    await using presence = new RoomPresence({
+      link: new BandLink({
+        agentId: "agent-1",
+        apiKey: "key",
+        transport,
+        restApi: new FakeRestApi({ listChats: async () => ({ data: [] }) }),
+      }),
+      autoSubscribeExistingRooms: false,
+    });
+    presence.onRoomJoined = async (roomId) => {
+      joined.push(roomId);
+    };
+
+    await presence.start();
+
+    let releaseStaleJoin: () => void = () => undefined;
+    const staleJoinGate = new Promise<void>((resolve) => {
+      releaseStaleJoin = resolve;
+    });
+    let chatJoinCount = 0;
+    const joinSpy = vi.spyOn(transport, "join").mockImplementation(async (topic, handlers) => {
+      if (topic === "chat_room:room-1") {
+        chatJoinCount += 1;
+        if (chatJoinCount === 1) {
+          await staleJoinGate;
+        }
+      }
+      return FakeTransport.prototype.join.call(transport, topic, handlers);
+    });
+
+    // Mirrors bootstrapRoomMessage: an admission entry point outside the
+    // sequential WS event loop, whose own subscribe is still in flight.
+    const staleAdmission = presence.admitRoom("room-1", {}, false);
+    await waitFor(() => chatJoinCount === 1);
+
+    await transport.emit("agent_rooms:agent-1", "room_removed", {
+      id: "room-1",
+      status: "inactive",
+      type: "direct",
+      title: "Room",
+      removed_at: new Date().toISOString(),
+    });
+    await transport.emit("agent_rooms:agent-1", "room_added", {
+      id: "room-1",
+      status: "active",
+      type: "direct",
+      title: "Room",
+      removed_at: "",
+    });
+    await waitFor(() => joined.length === 1 && presence.roster.roomMembership("room-1") === "admitted");
+
+    releaseStaleJoin();
+    await expect(staleAdmission).resolves.toBe(false);
+
+    expect(presence.roster.roomMembership("room-1")).toBe("admitted");
+    expect(transport.hasTopic("chat_room:room-1")).toBe(true);
+
+    joinSpy.mockRestore();
+  });
+
+  it("admitRoomOrThrow rejects with the real subscribe error attached as cause", async () => {
+    const transport = new FakeTransport();
+    const subscribeError = new Error("join failed");
+
+    await using presence = new RoomPresence({
+      link: new BandLink({
+        agentId: "agent-1",
+        apiKey: "key",
+        transport,
+        restApi: new FakeRestApi({ listChats: async () => ({ data: [] }) }),
+      }),
+      autoSubscribeExistingRooms: false,
+    });
+
+    await presence.start();
+
+    const failingJoin = vi.spyOn(transport, "join").mockRejectedValueOnce(subscribeError);
+
+    await expect(presence.admitRoomOrThrow("room-1")).rejects.toSatisfy((error: unknown) => {
+      expect(error).toBeInstanceOf(TransportError);
+      expect((error as TransportError).message).toBe("Failed to subscribe to room room-1");
+      expect((error as TransportError).cause).toBe(subscribeError);
+      return true;
+    });
+
+    failingJoin.mockRestore();
   });
 
   it("does not fire onRoomLeft for a room that was never admitted", async () => {

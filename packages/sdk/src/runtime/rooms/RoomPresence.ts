@@ -1,6 +1,6 @@
 import type { MetadataMap } from "../../contracts/dtos";
 import { DEFAULT_REQUEST_OPTIONS } from "../../client/rest/requestOptions";
-import { RuntimeStateError } from "../../core/errors";
+import { RuntimeStateError, TransportError } from "../../core/errors";
 import type { BandLink } from "../../platform/BandLink";
 import type {
   ContactEvent,
@@ -44,6 +44,10 @@ export class RoomPresence implements AsyncDisposable {
   private contactsSubscribed = false;
   private lifecycle: Promise<void> = Promise.resolve();
   private readonly admissionInFlight = new Map<string, Promise<boolean>>();
+  // Read once by `admitRoomOrThrow` right after a failed admission; a
+  // subsequent successful subscribe clears it so a caller never attributes
+  // today's failure to a stale reason from an earlier attempt.
+  private readonly lastSubscribeError = new Map<string, unknown>();
 
   public constructor(options: RoomPresenceOptions) {
     this.link = options.link;
@@ -74,15 +78,36 @@ export class RoomPresence implements AsyncDisposable {
 
   public async admitRoom(roomId: string, payload: MetadataMap, notify = true): Promise<boolean> {
     const ticket = this.roster.beginRoomAdmission(roomId, true);
-    if (ticket === undefined) {
-      // Someone else already holds the ticket: report their real outcome
-      // instead of a hardcoded false, so every racing caller learns the
-      // truth rather than only the winner.
-      const inFlight = this.admissionInFlight.get(roomId);
-      return inFlight ? await inFlight : this.roster.roomMembership(roomId) === "admitted";
-    }
+    // Whether the room ends up admitted is shared fate across every racing
+    // caller, but notifying is not: each caller notifies for its own payload
+    // and its own `notify` flag, regardless of which one actually performed
+    // the transport join.
+    const admitted =
+      ticket === undefined ? await this.awaitInFlightAdmission(roomId) : await this.performAdmission(roomId, ticket);
 
-    const admission = this.completeAdmission(roomId, ticket, payload, notify);
+    if (admitted && notify) {
+      await this.onRoomJoined?.(roomId, payload);
+    }
+    return admitted;
+  }
+
+  /** Admit a room for a caller that needs to know *why* a failed subscribe happened, not just that it did. */
+  public async admitRoomOrThrow(roomId: string): Promise<void> {
+    if (!(await this.admitRoom(roomId, {}, false))) {
+      throw new TransportError(`Failed to subscribe to room ${roomId}`, this.lastSubscribeError.get(roomId));
+    }
+  }
+
+  private async awaitInFlightAdmission(roomId: string): Promise<boolean> {
+    // Someone else already holds the ticket: report their real outcome
+    // instead of a hardcoded false, so every racing caller learns the truth
+    // rather than only the winner.
+    const inFlight = this.admissionInFlight.get(roomId);
+    return inFlight ? await inFlight : this.roster.roomMembership(roomId) === "admitted";
+  }
+
+  private async performAdmission(roomId: string, ticket: bigint): Promise<boolean> {
+    const admission = this.completeAdmission(roomId, ticket);
     this.admissionInFlight.set(roomId, admission);
     try {
       return await admission;
@@ -93,39 +118,34 @@ export class RoomPresence implements AsyncDisposable {
     }
   }
 
-  private async completeAdmission(
-    roomId: string,
-    ticket: bigint,
-    payload: MetadataMap,
-    notify: boolean,
-  ): Promise<boolean> {
+  private async completeAdmission(roomId: string, ticket: bigint): Promise<boolean> {
     let succeeded = false;
     let admitted = false;
     try {
       await this.link.subscribeRoom(roomId);
       succeeded = true;
+      this.lastSubscribeError.delete(roomId);
     } catch (error) {
       this.logger.warn("RoomPresence failed to subscribe room", { roomId, error });
+      this.lastSubscribeError.set(roomId, error);
     } finally {
       admitted = this.roster.recordRoomAdmission(roomId, ticket, succeeded);
     }
 
-    if (succeeded && !admitted) {
+    // A newer ticket may have already won this room while our own subscribe
+    // was in flight (BandLink's subscribe/unsubscribe guard is keyed only by
+    // roomId, not by ticket) — only release the transport subscription when
+    // nobody currently holds the room, or this would tear down the newer
+    // ticket's live subscription out from under it.
+    if (succeeded && !admitted && this.roster.roomMembership(roomId) !== "admitted") {
       this.logger.debug("RoomPresence admission ticket went stale", { roomId });
       await this.unsubscribeRoom(roomId);
     }
 
-    if (!admitted) {
-      return false;
-    }
-
-    if (notify) {
-      await this.onRoomJoined?.(roomId, payload);
-    }
-    return true;
+    return admitted;
   }
 
-  private serialize(body: () => Promise<void>): Promise<void> {
+  private async serialize(body: () => Promise<void>): Promise<void> {
     const run = this.lifecycle.then(body, body);
     this.lifecycle = run.then(
       () => undefined,
