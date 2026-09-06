@@ -1,5 +1,6 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { Server as HttpServer } from "node:http";
+import { AgentFailure } from "@band-ai/band-sdk-core";
 
 import type {
   GatewayCancelRequest,
@@ -11,6 +12,9 @@ import type {
 } from "./types";
 import { buildStatusEvent } from "./statusEvent";
 import { asNonEmptyString } from "../shared/coercion";
+
+/** This gateway's `AgentFailure.provider` identity. */
+const PROVIDER = "a2a-gateway";
 
 interface ExpressAppLike {
   use: (...args: unknown[]) => void;
@@ -616,10 +620,12 @@ function verifyBearerAuthorization(
 function buildGatewayExecutionFailureMetadata(
   error: unknown,
 ): Record<string, unknown> {
-  return {
-    error_type: error instanceof Error ? error.name : "UnknownError",
-    error_message: sanitizeGatewayErrorMessage(error),
-  };
+  const message = sanitizeGatewayErrorMessage(error);
+  return new AgentFailure(
+    PROVIDER,
+    message,
+    error instanceof Error ? error.name : "UnknownError",
+  ).toObject();
 }
 
 function sanitizeGatewayErrorMessage(error: unknown): string {

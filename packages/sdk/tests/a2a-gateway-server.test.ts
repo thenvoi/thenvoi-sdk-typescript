@@ -393,12 +393,13 @@ describe("GatewayServer", () => {
     expect(event.kind).toBe("status-update");
     expect(event.final).toBe(true);
     expect(event.status?.state).toBe("failed");
-    expect(event.metadata?.error_type).toBe("Error");
-    expect(typeof event.metadata?.error_message).toBe("string");
-    expect(String(event.metadata?.error_message)).toContain("[REDACTED]");
-    expect(String(event.metadata?.error_message)).not.toContain("secret-token");
-    expect(String(event.metadata?.error_message)).not.toContain("abc123");
-    expect(String(event.metadata?.error_message)).not.toContain("xyz");
+    expect(event.metadata?.provider).toBe("a2a-gateway");
+    expect(event.metadata?.code).toBe("Error");
+    expect(typeof event.metadata?.message).toBe("string");
+    expect(String(event.metadata?.message)).toContain("[REDACTED]");
+    expect(String(event.metadata?.message)).not.toContain("secret-token");
+    expect(String(event.metadata?.message)).not.toContain("abc123");
+    expect(String(event.metadata?.message)).not.toContain("xyz");
   });
 
   it("builds agent card skills tagged with band and gateway", async () => {

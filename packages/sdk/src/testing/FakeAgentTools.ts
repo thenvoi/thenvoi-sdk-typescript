@@ -1,3 +1,4 @@
+import type { AgentFailure } from "@band-ai/band-sdk-core";
 import type {
   AdapterToolsProtocol,
   AgentToolsCapabilities,
@@ -5,7 +6,7 @@ import type {
   ContactTools,
   MemoryTools,
 } from "../contracts/protocols";
-import { DEFAULT_AGENT_TOOLS_CAPABILITIES } from "../contracts/protocols";
+import { DEFAULT_AGENT_TOOLS_CAPABILITIES, toFailureEvent } from "../contracts/protocols";
 import { isBlankEventContent } from "../contracts/chatEvents";
 import type {
   AddContactArgs,
@@ -106,6 +107,12 @@ export class FakeAgentTools
     this.eventsSent.push({ content, messageType, metadata });
     const id = `evt-${this.eventCounter++}`;
     return { id, status: "sent" };
+  }
+
+  public async sendFailure(failure: AgentFailure): Promise<ToolOperationResult> {
+    this.maybeFail("sendFailure");
+    const { content, messageType, metadata } = toFailureEvent(failure);
+    return this.sendEvent(content, messageType, metadata);
   }
 
   public async addParticipant(

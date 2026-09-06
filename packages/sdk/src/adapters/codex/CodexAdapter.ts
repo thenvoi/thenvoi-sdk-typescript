@@ -1,4 +1,5 @@
 import type { ModelReasoningEffort, WebSearchMode } from "@openai/codex-sdk";
+import { AgentFailure } from "@band-ai/band-sdk-core";
 
 import { SimpleAdapter } from "../../core/simpleAdapter";
 import {
@@ -9,7 +10,7 @@ import {
 } from "../../contracts/protocols";
 import type { MentionInput } from "../../contracts/dtos";
 import type { Logger } from "../../core/logger";
-import { NoopLogger } from "../../core/logger";
+import { resolveLogger } from "../../core/logger";
 import type { HistoryProvider, PlatformMessage } from "../../runtime/types";
 import { renderSystemPrompt } from "../../runtime/prompts";
 import { SEND_MESSAGE_TOOL_NAME, SEND_EVENT_TOOL_NAME } from "../../runtime/tools/schemas";
@@ -23,7 +24,9 @@ import {
   executeCustomTool,
   findCustomToolInIndex,
 } from "../../runtime/tools/customTools";
-import { asErrorMessage, asNonEmptyString, asOptionalRecord, asRecord, toWireString } from "../shared/coercion";
+import { asErrorMessage, asNonEmptyString, asOptionalRecord, asRecord, asString, toWireString } from "../shared/coercion";
+import { ProviderTurnFailedError, agentFailure } from "../shared/providerFailure";
+import { deliverReply } from "../shared/deliveryFailedError";
 import { findLatestTaskMetadata } from "../shared/history";
 import {
   CodexAppServerStdioClient,
@@ -130,6 +133,8 @@ const SILENT_REPORTING_TOOLS = new Set([
 ]);
 
 export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProtocol> {
+  protected readonly provider = "codex";
+
   private readonly baseConfig: CodexAdapterConfig;
   private readonly roomConfigOverrides = new Map<string, Partial<CodexAdapterConfig>>();
   private readonly customTools: CustomToolDef[];
@@ -168,7 +173,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
     this.customToolIndex = buildCustomToolIndex(this.customTools);
     this.includeMemoryTools = options?.includeMemoryTools ?? false;
     this.factoryOverride = options?.factory;
-    this.logger = options?.logger ?? new NoopLogger();
+    this.logger = resolveLogger(options?.logger);
     this.debugEnabled = options?.config?.debug ?? false;
   }
 
@@ -212,17 +217,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
       }
     }
 
-    this.debug("codex_adapter.client.ensure.start", { roomId: context.roomId });
-    const client = await this.ensureClient();
-    this.debug("codex_adapter.client.ensure.done", { roomId: context.roomId });
-    const threadId = await this.getOrCreateThread(
-      context.roomId,
-      tools,
-      history,
-      context.isSessionBootstrap,
-      message.metadata?.linear_reset_room_session !== true,
-      config,
-    );
+    const { client, threadId } = await this.ensureClientAndThread(context, tools, history, message, config);
     this.debug("codex_adapter.thread.ready", {
       roomId: context.roomId,
       threadId,
@@ -253,13 +248,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
       threadId,
       toolNames,
     });
-    const turnStarted = parseTurnStartResponse(await client.request<unknown>(
-      "turn/start",
-      toRpcParams(turnParams),
-    ));
-    if (!turnStarted) {
-      throw new Error("Codex returned an invalid turn/start payload");
-    }
+    const turnStarted = await this.startTurn(client, turnParams, tools);
     this.debug("codex_adapter.turn.started", {
       roomId: context.roomId,
       threadId,
@@ -267,6 +256,98 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
     });
 
     const turnId = turnStarted.turn.id;
+    const { finalText, sawSendMessageTool, turnStatus, turnError } = await this.runEventLoop(
+      client,
+      threadId,
+      turnId,
+      tools,
+      config,
+      context.roomId,
+    );
+
+    await this.emitTurnOutcome({
+      tools,
+      message,
+      roomId: context.roomId,
+      threadId,
+      turnId,
+      turnStatus,
+      turnError,
+      finalText,
+      sawSendMessageTool,
+      fallbackSendAgentText: config.fallbackSendAgentText ?? true,
+    });
+    this.debug("codex_adapter.turn.completed", {
+      roomId: context.roomId,
+      threadId,
+      turnId,
+      turnStatus,
+      turnError,
+    });
+  }
+
+  private async ensureClientAndThread(
+    context: { isSessionBootstrap: boolean; roomId: string },
+    tools: AgentToolsProtocol,
+    history: HistoryProvider,
+    message: PlatformMessage,
+    config: CodexAdapterConfig,
+  ): Promise<{ client: CodexClientLike; threadId: string }> {
+    try {
+      this.debug("codex_adapter.client.ensure.start", { roomId: context.roomId });
+      const client = await this.ensureClient();
+      this.debug("codex_adapter.client.ensure.done", { roomId: context.roomId });
+      const threadId = await this.getOrCreateThread(
+        context.roomId,
+        tools,
+        history,
+        context.isSessionBootstrap,
+        message.metadata?.linear_reset_room_session !== true,
+        config,
+      );
+      return { client, threadId };
+    } catch (error) {
+      const failure = agentFailure(this.provider, asErrorMessage(error));
+      await this.safeSendFailure(tools, failure);
+      throw new ProviderTurnFailedError(failure);
+    }
+  }
+
+  // A provider call like any other, and deliberately not folded into
+  // ensureClientAndThread's catch: a bad model id or revoked auth reaching
+  // the queue as a bare error must fail only this turn, not stop every room.
+  private async startTurn(
+    client: CodexClientLike,
+    turnParams: TurnStartParams,
+    tools: AgentToolsProtocol,
+  ): Promise<TurnStartResponse> {
+    let turnStarted: TurnStartResponse | null;
+    try {
+      turnStarted = parseTurnStartResponse(await client.request<unknown>(
+        "turn/start",
+        toRpcParams(turnParams),
+      ));
+    } catch (error) {
+      const failure = agentFailure(this.provider, asErrorMessage(error));
+      await this.safeSendFailure(tools, failure);
+      throw new ProviderTurnFailedError(failure);
+    }
+    if (!turnStarted) {
+      const failure = agentFailure(this.provider, "Codex returned an invalid turn/start payload.");
+      await this.safeSendFailure(tools, failure);
+      throw new ProviderTurnFailedError(failure);
+    }
+    return turnStarted;
+  }
+
+  private async runEventLoop(
+    client: CodexClientLike,
+    threadId: string,
+    turnId: string,
+    tools: AgentToolsProtocol,
+    config: CodexAdapterConfig,
+    roomId: string,
+  ): Promise<{ finalText: string; sawSendMessageTool: boolean; turnStatus: TurnStatus; turnError: string }> {
     let finalText = "";
     let sawSendMessageTool = false;
     let turnStatus: TurnStatus = "failed";
@@ -298,7 +379,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
         const usedSendMessage = await this.handleServerRequest({
           client,
           tools,
-          roomId: context.roomId,
+          roomId,
           event,
           enableExecutionReporting: config.enableExecutionReporting ?? false,
         });
@@ -319,13 +400,9 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
         const error = asOptionalRecord(params.error) ?? {};
         const errorMessage = asNonEmptyString(error.message) ?? "Unknown Codex error";
         if (params.willRetry === true) {
-          this.logger.warn("codex_adapter.retryable_error", { error: errorMessage, roomId: context.roomId });
+          this.logger.warn("codex_adapter.retryable_error", { error: errorMessage, roomId });
         } else {
-          await this.safeSendEvent(tools, `Codex error: ${errorMessage}`, "error", {
-            codex_room_id: context.roomId,
-            codex_thread_id: threadId,
-            codex_turn_id: turnId,
-          });
+          await this.safeSendFailure(tools, agentFailure(this.provider, errorMessage, asString(error.code), error));
         }
         continue;
       }
@@ -350,7 +427,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
         }
 
         await this.emitItemCompletedEvents(tools, item, {
-          roomId: context.roomId,
+          roomId,
           threadId,
           turnId,
           enableExecutionReporting: config.enableExecutionReporting ?? false,
@@ -363,7 +440,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
         const turn = parseTurnRef(params.turn);
         if (!turn) {
           this.logger.warn("codex_adapter.invalid_turn_completed_payload", {
-            roomId: context.roomId,
+            roomId,
             threadId,
             turnId,
           });
@@ -380,25 +457,7 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
       }
     }
 
-    await this.emitTurnOutcome({
-      tools,
-      message,
-      roomId: context.roomId,
-      threadId,
-      turnId,
-      turnStatus,
-      turnError,
-      finalText,
-      sawSendMessageTool,
-      fallbackSendAgentText: config.fallbackSendAgentText ?? true,
-    });
-    this.debug("codex_adapter.turn.completed", {
-      roomId: context.roomId,
-      threadId,
-      turnId,
-      turnStatus,
-      turnError,
-    });
+    return { finalText, sawSendMessageTool, turnStatus, turnError };
   }
 
   public override async onCleanup(roomId: string): Promise<void> {
@@ -990,20 +1049,32 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
 
     if (input.turnStatus === "completed") {
       if (input.fallbackSendAgentText && input.finalText.trim() && !input.sawSendMessageTool) {
-        await input.tools.sendMessage(input.finalText.trim(), mention);
+        await deliverReply(input.tools, input.finalText.trim(), mention);
       }
       return;
     }
 
+    // These two paths are the only ones in any adapter that told the requester
+    // their turn had failed *in the message stream, with a mention*. Mentions
+    // ride on messages alone — the event endpoint accepts none — so the reply
+    // stays exactly as it was and the structured failure is posted alongside
+    // it, rather than in place of it. `safeSendFailure` cannot throw, so the
+    // machine-readable record lands even when the reply after it does not.
     if (input.turnStatus === "interrupted") {
-      await input.tools.sendMessage("I stopped before completing this request.", mention);
+      const interrupted = "I stopped before completing this request.";
+      await this.safeSendFailure(
+        input.tools,
+        new AgentFailure(this.provider, input.turnError || interrupted, input.turnStatus),
+      );
+      await deliverReply(input.tools, interrupted, mention);
       return;
     }
 
     const errorText = input.turnError
       ? `I couldn't complete this request (${input.turnStatus}): ${input.turnError}`
       : `I couldn't complete this request (${input.turnStatus}).`;
-    await input.tools.sendMessage(errorText, mention);
+    await this.safeSendFailure(input.tools, new AgentFailure(this.provider, errorText, input.turnStatus));
+    await deliverReply(input.tools, errorText, mention);
   }
 
   private extractTurnError(error: TurnErrorInfo | null | undefined): string {
@@ -1031,107 +1102,157 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
     args: string;
   }): Promise<boolean> {
     const mention = this.currentMention(input.message);
-    const mappedThreadId = this.roomThreadIds.get(input.roomId) ?? extractThreadIdFromHistory(input.history.raw);
 
-    if (input.command === "help") {
-      await input.tools.sendMessage(
-        "Codex commands: `/status`, `/model`, `/models`, `/model list`, `/models list`, `/model <id>`, `/reasoning [low|medium|high|xhigh]`, `/help`.",
+    switch (input.command) {
+      case "help":
+        await this.handleHelpCommand(input.tools, mention);
+        return true;
+      case "status":
+        await this.handleStatusCommand(input.tools, input.roomId, input.history, mention);
+        return true;
+      case "model":
+      case "models":
+        await this.handleModelCommand(input.tools, input.roomId, input.args, mention);
+        return true;
+      case "reasoning":
+        await this.handleReasoningCommand(input.tools, input.roomId, input.args, mention);
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private async handleHelpCommand(tools: AgentToolsProtocol, mention: MentionInput): Promise<void> {
+    await deliverReply(
+      tools,
+      "Codex commands: `/status`, `/model`, `/models`, `/model list`, `/models list`, `/model <id>`, `/reasoning [low|medium|high|xhigh]`, `/help`.",
+      mention,
+    );
+  }
+
+  private async handleStatusCommand(
+    tools: AgentToolsProtocol,
+    roomId: string,
+    history: HistoryProvider,
+    mention: MentionInput,
+  ): Promise<void> {
+    const roomConfig = this.getConfig(roomId);
+    const mappedThreadId = this.roomThreadIds.get(roomId) ?? extractThreadIdFromHistory(history.raw);
+    await deliverReply(
+      tools,
+      [
+        "Codex status:",
+        `- selected_model: ${roomConfig.model ?? "default"}`,
+        `- room_id: ${roomId}`,
+        `- thread_id: ${mappedThreadId ?? "not mapped"}`,
+        `- approval_policy: ${String(roomConfig.approvalPolicy ?? "never")}`,
+        `- sandbox_mode: ${roomConfig.sandboxMode ?? "workspace-write"}`,
+        `- reasoning_effort: ${roomConfig.reasoningEffort ?? "default"}`,
+      ].join("\n"),
+      mention,
+    );
+  }
+
+  private async handleModelCommand(
+    tools: AgentToolsProtocol,
+    roomId: string,
+    args: string,
+    mention: MentionInput,
+  ): Promise<void> {
+    const arg = args.trim();
+    if (!arg) {
+      const roomConfig = this.getConfig(roomId);
+      await deliverReply(
+        tools,
+        `Current model: \`${roomConfig.model ?? "default"}\`. Use \`/model list\` or \`/model <id>\`.`,
         mention,
       );
-      return true;
+      return;
     }
 
-    if (input.command === "status") {
-      const roomConfig = this.getConfig(input.roomId);
-      await input.tools.sendMessage(
-        [
-          "Codex status:",
-          `- selected_model: ${roomConfig.model ?? "default"}`,
-          `- room_id: ${input.roomId}`,
-          `- thread_id: ${mappedThreadId ?? "not mapped"}`,
-          `- approval_policy: ${String(roomConfig.approvalPolicy ?? "never")}`,
-          `- sandbox_mode: ${roomConfig.sandboxMode ?? "workspace-write"}`,
-          `- reasoning_effort: ${roomConfig.reasoningEffort ?? "default"}`,
-        ].join("\n"),
+    if (arg === "list" || arg === "ls") {
+      await this.handleModelListCommand(tools, mention);
+      return;
+    }
+
+    const overrides = this.roomConfigOverrides.get(roomId) ?? {};
+    overrides.model = arg;
+    this.roomConfigOverrides.set(roomId, overrides);
+    await deliverReply(
+      tools,
+      `Model override set to \`${arg}\` for subsequent turns.`,
+      mention,
+    );
+  }
+
+  // The one local command that reaches Codex, and local commands run before
+  // onMessage's failure catch — so it reports its own, or a `/model list`
+  // against a downed app server stops every room.
+  private async handleModelListCommand(tools: AgentToolsProtocol, mention: MentionInput): Promise<void> {
+    let response: unknown;
+    try {
+      const client = await this.ensureClient();
+      response = await client.request<unknown>("model/list", {});
+    } catch (error) {
+      const failure = agentFailure(this.provider, asErrorMessage(error));
+      await this.safeSendFailure(tools, failure);
+      throw new ProviderTurnFailedError(failure);
+    }
+    const result = parseModelListResponse(response);
+    if (!result) {
+      await deliverReply(tools, "Received an invalid model list from Codex.", mention);
+      return;
+    }
+    const visible = result.data.filter((entry) => !entry.hidden);
+    if (visible.length === 0) {
+      await deliverReply(tools, "No visible models returned by Codex.", mention);
+      return;
+    }
+
+    await deliverReply(
+      tools,
+      [
+        "Available models:",
+        ...visible.map((entry) => `- \`${entry.id}\`${entry.isDefault ? " (default)" : ""}`),
+      ].join("\n"),
+      mention,
+    );
+  }
+
+  private async handleReasoningCommand(
+    tools: AgentToolsProtocol,
+    roomId: string,
+    args: string,
+    mention: MentionInput,
+  ): Promise<void> {
+    const effort = args.trim().toLowerCase();
+    if (!effort) {
+      const roomConfig = this.getConfig(roomId);
+      await deliverReply(
+        tools,
+        `Current reasoning effort: \`${roomConfig.reasoningEffort ?? "default"}\`. Use \`/reasoning ${CODEX_REASONING_EFFORTS.join("|")}\`.`,
         mention,
       );
-      return true;
+      return;
     }
 
-    if (input.command === "model" || input.command === "models") {
-      const arg = input.args.trim();
-      if (!arg) {
-        const roomConfig = this.getConfig(input.roomId);
-        await input.tools.sendMessage(
-          `Current model: \`${roomConfig.model ?? "default"}\`. Use \`/model list\` or \`/model <id>\`.`,
-          mention,
-        );
-        return true;
-      }
-
-      if (arg === "list" || arg === "ls") {
-        const client = await this.ensureClient();
-        const result = parseModelListResponse(await client.request<unknown>("model/list", {}));
-        if (!result) {
-          await input.tools.sendMessage("Received an invalid model list from Codex.", mention);
-          return true;
-        }
-        const visible = result.data.filter((entry) => !entry.hidden);
-        if (visible.length === 0) {
-          await input.tools.sendMessage("No visible models returned by Codex.", mention);
-          return true;
-        }
-
-        await input.tools.sendMessage(
-          [
-            "Available models:",
-            ...visible.map((entry) => `- \`${entry.id}\`${entry.isDefault ? " (default)" : ""}`),
-          ].join("\n"),
-          mention,
-        );
-        return true;
-      }
-
-      const overrides = this.roomConfigOverrides.get(input.roomId) ?? {};
-      overrides.model = arg;
-      this.roomConfigOverrides.set(input.roomId, overrides);
-      await input.tools.sendMessage(
-        `Model override set to \`${arg}\` for subsequent turns.`,
+    if (!(CODEX_REASONING_EFFORTS as readonly string[]).includes(effort)) {
+      await deliverReply(
+        tools,
+        `Invalid reasoning effort \`${effort}\`. Valid values: ${CODEX_REASONING_EFFORTS.join(", ")}.`,
         mention,
       );
-      return true;
+      return;
     }
 
-    if (input.command === "reasoning") {
-      const effort = input.args.trim().toLowerCase();
-      if (!effort) {
-        const roomConfig = this.getConfig(input.roomId);
-        await input.tools.sendMessage(
-          `Current reasoning effort: \`${roomConfig.reasoningEffort ?? "default"}\`. Use \`/reasoning ${CODEX_REASONING_EFFORTS.join("|")}\`.`,
-          mention,
-        );
-        return true;
-      }
-
-      if (!(CODEX_REASONING_EFFORTS as readonly string[]).includes(effort)) {
-        await input.tools.sendMessage(
-          `Invalid reasoning effort \`${effort}\`. Valid values: ${CODEX_REASONING_EFFORTS.join(", ")}.`,
-          mention,
-        );
-        return true;
-      }
-
-      const overrides = this.roomConfigOverrides.get(input.roomId) ?? {};
-      overrides.reasoningEffort = effort as CodexReasoningEffort;
-      this.roomConfigOverrides.set(input.roomId, overrides);
-      await input.tools.sendMessage(
-        `Reasoning effort set to \`${effort}\` for subsequent turns.`,
-        mention,
-      );
-      return true;
-    }
-
-    return false;
+    const overrides = this.roomConfigOverrides.get(roomId) ?? {};
+    overrides.reasoningEffort = effort as CodexReasoningEffort;
+    this.roomConfigOverrides.set(roomId, overrides);
+    await deliverReply(
+      tools,
+      `Reasoning effort set to \`${effort}\` for subsequent turns.`,
+      mention,
+    );
   }
 
   private async safeSendEvent(
@@ -1147,6 +1268,18 @@ export class CodexAdapter extends SimpleAdapter<HistoryProvider, AgentToolsProto
         messageType,
         content,
         metadata,
+        error,
+      });
+    }
+  }
+
+  private async safeSendFailure(tools: AgentToolsProtocol, failure: AgentFailure): Promise<void> {
+    try {
+      await tools.sendFailure(failure);
+    } catch (error) {
+      this.logger.warn("codex_adapter.failure_emit_failed", {
+        provider: failure.provider,
+        code: failure.code,
         error,
       });
     }

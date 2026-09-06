@@ -1,8 +1,37 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HttpStatusError, OpencodeAdapter, type OpencodeClientLike } from "../src/adapters";
 import type { OpencodeSessionState } from "../src/converters";
-import { FakeTools, makeMessage } from "./testUtils";
+import { FakeTools, findFailureEvent, makeMessage } from "./testUtils";
+import { describeDeliveryContract } from "./deliveryContract";
+
+/**
+ * Posts the first reply, then fails — a chat that goes away partway through a
+ * turn, which `failOn: ["sendMessage"]` cannot express because it would also
+ * take out the permission prompt that opens the turn under test.
+ */
+class ChatLostAfterFirstReply extends FakeTools {
+  public override async sendMessage(
+    content: string,
+    mentions?: string[] | Array<{ id: string; handle?: string }>,
+  ): Promise<Record<string, unknown>> {
+    if (this.messages.length > 0) {
+      throw new Error("chat delivery failed");
+    }
+    return super.sendMessage(content, mentions);
+  }
+}
+
+/** The HTTP MCP backend every OpenCode test injects; `extra` adds what one test needs. */
+function httpMcpBackend(extra: Record<string, unknown> = {}) {
+  return async () => ({
+    kind: "http" as const,
+    server: { url: "http://127.0.0.1:5555/mcp" },
+    allowedTools: [],
+    stop: async () => undefined,
+    ...extra,
+  });
+}
 
 class EventQueue {
   private readonly events: Array<Record<string, unknown>> = [];
@@ -46,6 +75,9 @@ class FakeOpencodeClient {
   public readonly createdSessions: string[] = [];
   public readonly createdSessionTitles: string[] = [];
   public readonly eventQueue = new EventQueue();
+  public promptError: Error | null = null;
+  /** Stands in for a server that accepts the abort and never answers it. */
+  public abortNeverSettles = false;
   private readonly missingSessions = new Set<string>();
   private sessionCounter = 0;
 
@@ -72,6 +104,11 @@ class FakeOpencodeClient {
     sessionId: string,
     payload: Record<string, unknown>,
   ): Promise<void> {
+    if (this.promptError) {
+      const error = this.promptError;
+      this.promptError = null;
+      throw error;
+    }
     this.promptCalls.push({ sessionId, payload });
   }
 
@@ -96,6 +133,9 @@ class FakeOpencodeClient {
 
   public async abortSession(sessionId: string): Promise<void> {
     this.aborts.push(sessionId);
+    if (this.abortNeverSettles) {
+      await new Promise<void>(() => undefined);
+    }
   }
 
   public async registerMcpServer(input: { name: string; url: string; headers?: Record<string, string> }): Promise<Record<string, unknown>> {
@@ -174,12 +214,7 @@ describe("OpencodeAdapter", () => {
     createdClients.push(client);
     const adapter = new OpencodeAdapter({
       clientFactory: () => client as any,
-      mcpBackendFactory: async () => ({
-        kind: "http",
-        server: { url: "http://127.0.0.1:5555/mcp" },
-        allowedTools: [],
-        stop: async () => undefined,
-      }),
+      mcpBackendFactory: httpMcpBackend(),
     });
     adapters.push(adapter);
 
@@ -223,13 +258,7 @@ describe("OpencodeAdapter", () => {
     createdClients.push(client);
     const adapter = new OpencodeAdapter({
       clientFactory: () => client as any,
-      mcpBackendFactory: async () => ({
-        kind: "http",
-        server: { url: "http://127.0.0.1:5555/mcp" },
-        allowedTools: [],
-        authToken: "s3cr3t-token",
-        stop: async () => undefined,
-      }),
+      mcpBackendFactory: httpMcpBackend({ authToken: "s3cr3t-token" }),
     });
     adapters.push(adapter);
 
@@ -269,12 +298,7 @@ describe("OpencodeAdapter", () => {
     createdClients.push(client);
     const adapter = new OpencodeAdapter({
       clientFactory: () => client as any,
-      mcpBackendFactory: async () => ({
-        kind: "http",
-        server: { url: "http://127.0.0.1:5555/mcp" },
-        allowedTools: [],
-        stop: async () => undefined,
-      }),
+      mcpBackendFactory: httpMcpBackend(),
     });
     adapters.push(adapter);
 
@@ -325,6 +349,53 @@ describe("OpencodeAdapter", () => {
     ]);
   });
 
+  it("observes a turn that outlives its request, so a failed background delivery cannot end the process", async () => {
+    // A permission ask returns `onMessage` with the turn still open, so the
+    // reply arrives from the background loop with no turn left to fail. The
+    // promise must still be observed: unobserved, a delivery failure there is
+    // an unhandled rejection, which ends the process rather than the turn.
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const tools = new ChatLostAfterFirstReply();
+    const client = new FakeOpencodeClient();
+    createdClients.push(client);
+    const adapter = new OpencodeAdapter({
+      clientFactory: () => client as unknown as OpencodeClientLike,
+      mcpBackendFactory: httpMcpBackend(),
+      logger,
+    });
+    adapters.push(adapter);
+
+    await adapter.onStarted("OpenCode Agent", "Writes code");
+
+    const firstTurn = adapter.onMessage(
+      makeMessage("Need approval flow"),
+      tools,
+      { sessionId: null, roomId: null, createdAt: null, replayMessages: [] },
+      null,
+      null,
+      { isSessionBootstrap: true, roomId: "room-observed" },
+    );
+
+    await waitFor(() => client.createdSessions.length === 1);
+    const sessionId = client.createdSessions[0]!;
+    client.eventQueue.push({
+      type: "permission.asked",
+      properties: { id: "perm-1", sessionID: sessionId, permission: "bash", patterns: ["npm test"] },
+    });
+
+    await firstTurn;
+    expect(tools.messages.at(-1)).toContain("approve perm-1");
+
+    emitAssistantText(client, sessionId, "Approved action completed.");
+    client.eventQueue.push({ type: "session.idle", properties: { sessionID: sessionId } });
+
+    await waitFor(() => logger.error.mock.calls.length > 0);
+    expect(logger.error).toHaveBeenCalledWith(
+      "OpenCode turn failed after the request returned",
+      expect.objectContaining({ roomId: "room-observed" }),
+    );
+  });
+
   it("recreates missing sessions and injects replay history", async () => {
     const tools = new FakeTools();
     const client = new FakeOpencodeClient();
@@ -332,12 +403,7 @@ describe("OpencodeAdapter", () => {
     createdClients.push(client);
     const adapter = new OpencodeAdapter({
       clientFactory: () => client as any,
-      mcpBackendFactory: async () => ({
-        kind: "http",
-        server: { url: "http://127.0.0.1:5555/mcp" },
-        allowedTools: [],
-        stop: async () => undefined,
-      }),
+      mcpBackendFactory: httpMcpBackend(),
     });
     adapters.push(adapter);
 
@@ -380,12 +446,7 @@ describe("OpencodeAdapter", () => {
     createdClients.push(client);
     const adapter = new OpencodeAdapter({
       clientFactory: () => client as unknown as OpencodeClientLike,
-      mcpBackendFactory: async () => ({
-        kind: "http",
-        server: { url: "http://127.0.0.1:5555/mcp" },
-        allowedTools: [],
-        stop: async () => undefined,
-      }),
+      mcpBackendFactory: httpMcpBackend(),
     });
     adapters.push(adapter);
 
@@ -419,12 +480,7 @@ describe("OpencodeAdapter", () => {
     const adapter = new OpencodeAdapter({
       clientFactory: () => client as unknown as OpencodeClientLike,
       config: { sessionTitlePrefix: "Acme" },
-      mcpBackendFactory: async () => ({
-        kind: "http",
-        server: { url: "http://127.0.0.1:5555/mcp" },
-        allowedTools: [],
-        stop: async () => undefined,
-      }),
+      mcpBackendFactory: httpMcpBackend(),
     });
     adapters.push(adapter);
 
@@ -457,12 +513,7 @@ describe("OpencodeAdapter", () => {
     createdClients.push(client);
     const adapter = new OpencodeAdapter({
       clientFactory: () => client as unknown as OpencodeClientLike,
-      mcpBackendFactory: async () => ({
-        kind: "http",
-        server: { url: "http://127.0.0.1:5555/mcp" },
-        allowedTools: [],
-        stop: async () => undefined,
-      }),
+      mcpBackendFactory: httpMcpBackend(),
     });
     adapters.push(adapter);
 
@@ -490,4 +541,229 @@ describe("OpencodeAdapter", () => {
     expect(client.registeredMcpServers.some((entry) => entry.name === "thenvoi")).toBe(false);
     expect(client.deregisteredMcpServers).not.toContain("thenvoi");
   });
+
+  it("migrates an HttpStatusError from promptAsync to a structured sendFailure", async () => {
+    const tools = new FakeTools();
+    const client = new FakeOpencodeClient();
+    createdClients.push(client);
+    client.promptError = new HttpStatusError(500, { message: "internal error" });
+    const adapter = new OpencodeAdapter({
+      clientFactory: () => client as any,
+      mcpBackendFactory: httpMcpBackend(),
+    });
+    adapters.push(adapter);
+
+    await adapter.onStarted("OpenCode Agent", "Writes code");
+    await adapter.onMessage(
+      makeMessage("Trigger a status error"),
+      tools,
+      { sessionId: null, roomId: null, createdAt: null, replayMessages: [] },
+      null,
+      null,
+      { isSessionBootstrap: true, roomId: "room-http-error" },
+    );
+
+    const failureEvent = findFailureEvent(tools);
+    expect(failureEvent).toBeDefined();
+    expect((failureEvent?.metadata as any)?.failure).toMatchObject({
+      provider: "opencode",
+      code: "500",
+      detail: { message: "internal error" },
+    });
+    expect(tools.messages).toHaveLength(0);
+  });
+
+  it("migrates a generic thrown error (no structured signal) to a sendFailure fallback with no code", async () => {
+    const tools = new FakeTools();
+    const client = new FakeOpencodeClient();
+    createdClients.push(client);
+    client.promptError = new Error("connection reset");
+    const adapter = new OpencodeAdapter({
+      clientFactory: () => client as any,
+      mcpBackendFactory: httpMcpBackend(),
+    });
+    adapters.push(adapter);
+
+    await adapter.onStarted("OpenCode Agent", "Writes code");
+    await adapter.onMessage(
+      makeMessage("Trigger a generic error"),
+      tools,
+      { sessionId: null, roomId: null, createdAt: null, replayMessages: [] },
+      null,
+      null,
+      { isSessionBootstrap: true, roomId: "room-generic-error" },
+    );
+
+    const failureEvent = findFailureEvent(tools);
+    expect(failureEvent).toBeDefined();
+    expect((failureEvent?.metadata as any)?.failure).toMatchObject({
+      provider: "opencode",
+      code: null,
+      message: "OpenCode failed while processing the message: connection reset",
+    });
+  });
+
+  it("migrates OpenCode's own per-turn timeout to sendFailure with code: timeout, and aborts the session", async () => {
+    const tools = new FakeTools();
+    const client = new FakeOpencodeClient();
+    createdClients.push(client);
+    const adapter = new OpencodeAdapter({
+      clientFactory: () => client as any,
+      config: { turnTimeoutMs: 30 },
+      mcpBackendFactory: httpMcpBackend(),
+    });
+    adapters.push(adapter);
+
+    await adapter.onStarted("OpenCode Agent", "Writes code");
+    await adapter.onMessage(
+      makeMessage("Never responds"),
+      tools,
+      { sessionId: null, roomId: null, createdAt: null, replayMessages: [] },
+      null,
+      null,
+      { isSessionBootstrap: true, roomId: "room-timeout" },
+    );
+
+    const sessionId = client.createdSessions[0]!;
+    expect(client.aborts).toContain(sessionId);
+    const failureEvent = findFailureEvent(tools);
+    expect(failureEvent).toBeDefined();
+    expect((failureEvent?.metadata as any)?.failure).toMatchObject({
+      provider: "opencode",
+      code: "timeout",
+      message: "OpenCode timed out before completing the turn.",
+    });
+  });
+
+  it("reports its turn timeout without waiting on an abort the wedged server never answers", async () => {
+    const tools = new FakeTools();
+    const client = new FakeOpencodeClient();
+    // A server wedged enough to blow the turn timeout is equally capable of
+    // never answering the abort. Reporting the timeout is what frees the room,
+    // so it cannot depend on the peer we just gave up on.
+    client.abortNeverSettles = true;
+    createdClients.push(client);
+    const adapter = new OpencodeAdapter({
+      clientFactory: () => client as any,
+      config: { turnTimeoutMs: 30 },
+      mcpBackendFactory: httpMcpBackend(),
+    });
+    adapters.push(adapter);
+
+    await adapter.onStarted("OpenCode Agent", "Writes code");
+    await adapter.onMessage(
+      makeMessage("Never responds"),
+      tools,
+      { sessionId: null, roomId: null, createdAt: null, replayMessages: [] },
+      null,
+      null,
+      { isSessionBootstrap: true, roomId: "room-wedged-abort" },
+    );
+
+    expect(client.aborts).toEqual([client.createdSessions[0]!]);
+    expect((findFailureEvent(tools)?.metadata as any)?.failure).toMatchObject({
+      provider: "opencode",
+      code: "timeout",
+    });
+  });
+
+  it("migrates OpenCode's own session.error signal (no text produced) to a generic sendFailure fallback", async () => {
+    const tools = new FakeTools();
+    const client = new FakeOpencodeClient();
+    createdClients.push(client);
+    const adapter = new OpencodeAdapter({
+      clientFactory: () => client as any,
+      mcpBackendFactory: httpMcpBackend(),
+    });
+    adapters.push(adapter);
+
+    await adapter.onStarted("OpenCode Agent", "Writes code");
+    const pending = adapter.onMessage(
+      makeMessage("Trigger a provider-level error"),
+      tools,
+      { sessionId: null, roomId: null, createdAt: null, replayMessages: [] },
+      null,
+      null,
+      { isSessionBootstrap: true, roomId: "room-session-error" },
+    );
+
+    await waitFor(() => client.createdSessions.length === 1);
+    const sessionId = client.createdSessions[0]!;
+    client.eventQueue.push({
+      type: "session.error",
+      properties: {
+        sessionID: sessionId,
+        error: { name: "ProviderError", data: { message: "The model is unavailable." } },
+      },
+    });
+
+    await pending;
+
+    const failureEvent = findFailureEvent(tools);
+    expect(failureEvent).toBeDefined();
+    expect((failureEvent?.metadata as any)?.failure).toMatchObject({
+      provider: "opencode",
+      code: null,
+      message: "ProviderError: The model is unavailable.",
+    });
+  });
+
+  it("does not reach ensureClientStarted before the failure boundary — a client-startup throw reaches sendFailure instead of propagating uncaught", async () => {
+    const tools = new FakeTools();
+    const adapter = new OpencodeAdapter({
+      clientFactory: () => {
+        throw new Error("boom - can't start client");
+      },
+    });
+    adapters.push(adapter);
+
+    await adapter.onStarted("OpenCode Agent", "Writes code");
+    await expect(
+      adapter.onMessage(
+        makeMessage("First message"),
+        tools,
+        { sessionId: null, roomId: null, createdAt: null, replayMessages: [] },
+        null,
+        null,
+        { isSessionBootstrap: true, roomId: "room-client-start-error" },
+      ),
+    ).resolves.toBeUndefined();
+
+    const failureEvent = findFailureEvent(tools);
+    expect(failureEvent).toBeDefined();
+    expect((failureEvent?.metadata as any)?.failure).toMatchObject({
+      provider: "opencode",
+      message: "OpenCode failed while processing the message: boom - can't start client",
+    });
+  });
+
+  describeDeliveryContract([{
+    path: "assistant text flushed on session idle",
+    turn: async (tools) => {
+      const client = new FakeOpencodeClient();
+      createdClients.push(client);
+      const adapter = new OpencodeAdapter({
+        clientFactory: () => client as any,
+        mcpBackendFactory: httpMcpBackend(),
+      });
+      adapters.push(adapter);
+
+      await adapter.onStarted("OpenCode Agent", "Writes code");
+      const pending = adapter.onMessage(
+        makeMessage("Deliver a reply that fails to send"),
+        tools,
+        { sessionId: null, roomId: null, createdAt: null, replayMessages: [] },
+        null,
+        null,
+        { isSessionBootstrap: true, roomId: "room-delivery-failure" },
+      );
+
+      await waitFor(() => client.createdSessions.length === 1);
+      const sessionId = client.createdSessions[0]!;
+      emitAssistantText(client, sessionId, "Here is the fix.");
+      client.eventQueue.push({ type: "session.idle", properties: { sessionID: sessionId } });
+
+      await pending;
+    },
+  }]);
 });
