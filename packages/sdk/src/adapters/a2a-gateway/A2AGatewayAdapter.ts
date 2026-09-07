@@ -39,6 +39,8 @@ interface PendingTaskRecord extends PendingA2ATask {
 export class A2AGatewayAdapter
   extends SimpleAdapter<GatewaySessionState, MessagingTools>
 {
+  protected readonly provider = "a2a-gateway";
+
   private readonly bandRest: A2AGatewayAdapterOptions["bandRest"];
   private readonly gatewayUrl: string;
   private readonly host: string;

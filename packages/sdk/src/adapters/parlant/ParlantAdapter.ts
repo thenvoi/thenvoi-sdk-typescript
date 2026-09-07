@@ -1,11 +1,15 @@
+import type { AgentFailure } from "@band-ai/band-sdk-core";
+
 import { SimpleAdapter } from "../../core/simpleAdapter";
 import type { MessagingTools } from "../../contracts/protocols";
 import type { Logger } from "../../core/logger";
-import { NoopLogger } from "../../core/logger";
+import { resolveLogger } from "../../core/logger";
 import { UnsupportedFeatureError } from "../../core/errors";
 import type { PlatformMessage } from "../../runtime/types";
 import { renderSystemPrompt } from "../../runtime/prompts";
 import { asErrorMessage, asNonEmptyString, asOptionalRecord } from "../shared/coercion";
+import { ProviderTurnFailedError, agentFailure } from "../shared/providerFailure";
+import { deliverReply, rethrowIfDeliveryFailure } from "../shared/deliveryFailedError";
 import { LazyAsyncValue } from "../shared/lazyAsyncValue";
 import {
   ParlantHistoryConverter,
@@ -89,6 +93,8 @@ const DEFAULT_MAX_HISTORY_MESSAGES = 100;
 export class ParlantAdapter
   extends SimpleAdapter<ParlantMessages, MessagingTools>
 {
+  protected readonly provider = "parlant";
+
   private readonly environment: string;
   private readonly baseUrl?: string;
   private readonly agentId: string;
@@ -129,7 +135,7 @@ export class ParlantAdapter
     this.maxHistoryMessages =
       options.maxHistoryMessages ?? DEFAULT_MAX_HISTORY_MESSAGES;
     this.clientFactory = options.clientFactory;
-    this.logger = options.logger ?? new NoopLogger();
+    this.logger = resolveLogger(options.logger);
     this.clientLoader = new LazyAsyncValue({
       load: async () => this.createClient(),
       onRejected: (error) => {
@@ -207,42 +213,40 @@ export class ParlantAdapter
       );
 
       if (!reply) {
-        await tools.sendEvent(
-          "Parlant did not return a response before timeout.",
-          "error",
-          {
-            parlant_session_id: sessionId,
-            parlant_timeout_seconds: this.responseTimeoutSeconds,
-          },
-        );
-        return;
+        const failure = agentFailure(this.provider, "Parlant did not return a response before timeout.", "timeout");
+        await this.safeSendFailure(tools, failure, context.roomId);
+        throw new ProviderTurnFailedError(failure);
       }
 
-      await tools.sendMessage(reply, [{ id: message.senderId }]);
+      await deliverReply(tools, reply, [{ id: message.senderId }]);
     } catch (error) {
+      rethrowIfDeliveryFailure(error);
+
       const errorMessage = asErrorMessage(error);
       this.logger.error("Parlant adapter request failed", {
         roomId: context.roomId,
         agentId: this.agentId,
         error,
       });
-      try {
-        await tools.sendEvent(
-          `Parlant adapter error: ${errorMessage}`,
-          "error",
-          {
-            parlant_error: errorMessage,
-          },
-        );
-      } catch (eventError) {
-        this.logger.warn("Parlant adapter failed to emit error event", {
-          roomId: context.roomId,
-          agentId: this.agentId,
-          error: eventError,
-        });
-      }
+      const failure = agentFailure(this.provider, errorMessage);
+      await this.safeSendFailure(tools, failure, context.roomId);
+      throw new ProviderTurnFailedError(failure);
+    }
+  }
 
-      throw error instanceof Error ? error : new Error(errorMessage);
+  private async safeSendFailure(
+    tools: MessagingTools,
+    failure: AgentFailure,
+    roomId: string,
+  ): Promise<void> {
+    try {
+      await tools.sendFailure(failure);
+    } catch (eventError) {
+      this.logger.warn("Parlant adapter failed to emit error event", {
+        roomId,
+        agentId: this.agentId,
+        error: eventError,
+      });
     }
   }
 

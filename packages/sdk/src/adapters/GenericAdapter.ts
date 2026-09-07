@@ -15,6 +15,8 @@ export type GenericAdapterHandler = (args: {
 }) => Promise<void>;
 
 export class GenericAdapter extends SimpleAdapter<HistoryProvider> {
+  protected readonly provider = "generic";
+
   private readonly handler: GenericAdapterHandler;
 
   public constructor(handler: GenericAdapterHandler) {

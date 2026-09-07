@@ -7,6 +7,7 @@
         "A2AAdapter",
         "A2AGatewayAdapter",
         "Agent",
+        "AgentFailure",
         "AgentRuntime",
         "AnthropicAdapter",
         "BandLink",
@@ -16,6 +17,8 @@
         "ClaudeSDKAdapter",
         "CodexAdapter",
         "DefaultPreprocessor",
+        "FAILURE_EVENT_TYPE",
+        "FAILURE_METADATA_KEY",
         "GeminiAdapter",
         "GenericAdapter",
         "GoogleADKAdapter",
@@ -34,7 +37,8 @@
         "deriveDefaultRestUrl",
         "isDirectExecution",
         "loadAgentConfig",
-        "loadAgentConfigFromEnv"
+        "loadAgentConfigFromEnv",
+        "toFailureEvent"
       ],
       "declarations": [
         "A2AAdapter",
@@ -48,6 +52,7 @@
         "AgentConfigResult",
         "AgentCreateOptions",
         "AgentCredentials",
+        "AgentFailure",
         "AgentInput",
         "AgentRuntime",
         "AgentToolsProtocol",
@@ -76,6 +81,8 @@
         "CustomToolDef",
         "DefaultPreprocessor",
         "ExecutionContextOptions",
+        "FAILURE_EVENT_TYPE",
+        "FAILURE_METADATA_KEY",
         "FrameworkAdapter",
         "FrameworkAdapterInput",
         "GeminiAdapter",
@@ -128,7 +135,8 @@
         "deriveDefaultRestUrl",
         "isDirectExecution",
         "loadAgentConfig",
-        "loadAgentConfigFromEnv"
+        "loadAgentConfigFromEnv",
+        "toFailureEvent"
       ]
     },
     "./adapters": {
@@ -303,22 +311,30 @@
     },
     "./core": {
       "runtime": [
+        "AgentFailure",
         "BandSdkError",
         "ConsoleLogger",
+        "FAILURE_EVENT_TYPE",
+        "FAILURE_METADATA_KEY",
         "NoopLogger",
+        "RecoverableTurnError",
         "RuntimeStateError",
         "SimpleAdapter",
         "TransportError",
         "UnsupportedFeatureError",
         "ValidationError",
-        "WebSocketDisconnectError"
+        "WebSocketDisconnectError",
+        "toFailureEvent"
       ],
       "declarations": [
         "AdapterToolsProtocol",
+        "AgentFailure",
         "AgentToolsProtocol",
         "BandSdkError",
         "ConsoleLogger",
         "ContactTools",
+        "FAILURE_EVENT_TYPE",
+        "FAILURE_METADATA_KEY",
         "FrameworkAdapter",
         "FrameworkAdapterInput",
         "HistoryConverter",
@@ -329,6 +345,7 @@
         "ParticipantTools",
         "PeerLookupTools",
         "Preprocessor",
+        "RecoverableTurnError",
         "RoomParticipantTools",
         "RuntimeStateError",
         "SimpleAdapter",
@@ -339,7 +356,8 @@
         "ValidationError",
         "WebSocketConflictPolicy",
         "WebSocketDisconnectError",
-        "WebSocketDisconnectReason"
+        "WebSocketDisconnectReason",
+        "toFailureEvent"
       ]
     },
     "./converters": {

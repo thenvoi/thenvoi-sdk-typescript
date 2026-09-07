@@ -56,6 +56,7 @@ export class PlatformRuntime implements AsyncDisposable {
     description?: string | null;
   };
   private readonly logger: Logger;
+  private readonly linkLogger?: Logger;
   private readonly _onParticipantAdded?: (roomId: string, participant: ParticipantRecord) => Promise<void> | void;
   private readonly _onParticipantRemoved?: (roomId: string, participantId: string) => Promise<void> | void;
   private readonly _roomFilter?: (room: MetadataMap) => boolean;
@@ -104,6 +105,7 @@ export class PlatformRuntime implements AsyncDisposable {
     this.contactConfig = options.contactConfig;
     this.agentConfig = options.agentConfig;
     this.logger = options.logger ?? new NoopLogger();
+    this.linkLogger = options.logger ?? options.linkOptions?.logger;
     this.configuredIdentity = options.identity;
     this._onParticipantAdded = options.onParticipantAdded;
     this._onParticipantRemoved = options.onParticipantRemoved;
@@ -161,7 +163,7 @@ export class PlatformRuntime implements AsyncDisposable {
         apiKey: this._apiKey,
         wsUrl: this._wsUrl,
         restUrl: this._restUrl,
-        logger: this.logger,
+        logger: this.linkLogger,
       });
     }
 
@@ -222,16 +224,20 @@ export class PlatformRuntime implements AsyncDisposable {
       await this.runtime.start();
       this.contactsSubscribed = Boolean(this.link.capabilities.contacts);
     } catch (error) {
-      try {
-        await this.stop();
-      } catch (stopError) {
-        throw new AggregateError(
-          [error, stopError],
-          "PlatformRuntime failed to start and cleanup also failed",
-        );
-      }
-      throw error;
+      await this.cleanupAfterFailedStart(error);
     }
+  }
+
+  private async cleanupAfterFailedStart(startError: unknown): Promise<never> {
+    try {
+      await this.stop();
+    } catch (stopError) {
+      throw new AggregateError(
+        [startError, stopError],
+        "PlatformRuntime failed to start and cleanup also failed",
+      );
+    }
+    throw startError;
   }
 
   public async stop(timeoutMs?: number): Promise<boolean> {

@@ -665,8 +665,14 @@ describe("PlatformRuntime", () => {
     ).toThrow("loadAgentConfig()");
   });
 
-  it("forwards logger to lazily-constructed BandLink", async () => {
+  it("prefers the runtime logger for a lazily-constructed BandLink", async () => {
     const spyLogger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const linkLogger = {
       debug: vi.fn(),
       info: vi.fn(),
       warn: vi.fn(),
@@ -680,11 +686,33 @@ describe("PlatformRuntime", () => {
       apiKey: "k",
       wsUrl: "wss://example.test/socket",
       logger: spyLogger,
-      linkOptions: { transport, restApi },
+      linkOptions: { transport, restApi, logger: linkLogger },
     });
 
     await runtime.initialize();
 
     expect((runtime.link as unknown as { logger: unknown }).logger).toBe(spyLogger);
+  });
+
+  it("preserves a BandLink logger when no runtime logger is configured", async () => {
+    const linkLogger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const transport = new FakeTransport();
+    const restApi = new FakeRestApi();
+
+    const runtime = new PlatformRuntime({
+      agentId: "a1",
+      apiKey: "k",
+      wsUrl: "wss://example.test/socket",
+      linkOptions: { transport, restApi, logger: linkLogger },
+    });
+
+    await runtime.initialize();
+
+    expect((runtime.link as unknown as { logger: unknown }).logger).toBe(linkLogger);
   });
 });

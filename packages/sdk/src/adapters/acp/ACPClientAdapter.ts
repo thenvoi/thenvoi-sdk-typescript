@@ -8,17 +8,23 @@ import type {
   InitializeResponse,
   McpServer,
   PermissionOption,
+  PromptResponse,
   RequestPermissionRequest,
   RequestPermissionResponse,
 } from "@agentclientprotocol/sdk";
+import { AgentFailure } from "@band-ai/band-sdk-core";
 
 import { ACPClientHistoryConverter, type ACPClientSessionState } from "../../converters/acp-client";
 import { SimpleAdapter } from "../../core/simpleAdapter";
-import { NoopLogger, type Logger } from "../../core/logger";
+import { resolveLogger, type Logger } from "../../core/logger";
 import { ValidationError } from "../../core/errors";
 import type { AdapterToolsProtocol } from "../../contracts/protocols";
 import { renderSystemPrompt } from "../../runtime/prompts";
 import { mentionSubjectsFromMetadata, replaceUuidMentions } from "../../runtime/formatters";
+import { abandon } from "../shared/abandon";
+import { asErrorMessage } from "../shared/coercion";
+import { deliverReply } from "../shared/deliveryFailedError";
+import { agentFailure } from "../shared/providerFailure";
 import { systemUpdateParts } from "../shared/conversationPrompt";
 import { isBlankEventContent } from "../../contracts/chatEvents";
 import type { PlatformMessage } from "../../runtime/types";
@@ -56,6 +62,17 @@ type InjectedMcpBackend =
 // agent's turn forever, but should give a human realistic time to notice it.
 const DEFAULT_PERMISSION_TIMEOUT_MS = 5 * 60_000;
 
+// Deliberately much larger than the permission wait above: this bounds a whole
+// agent turn, and ACP backends are coding agents whose turns routinely run for
+// tens of minutes. It exists to catch a genuinely wedged agent, not to cap
+// normal work — expiring it cancels the prompt and drops the room's session.
+const DEFAULT_TURN_TIMEOUT_MS = 60 * 60_000;
+
+// `setTimeout` silently clamps any larger delay to 1ms rather than erroring,
+// so a finite `turnTimeoutMs` meant to mean "effectively unbounded" would fire
+// almost immediately instead. `Infinity` is the only value that means that.
+const MAX_TURN_TIMEOUT_MS = 2_147_483_647;
+
 export interface ACPClientAdapterOptions {
   command: string | string[];
   cwd?: string;
@@ -77,10 +94,17 @@ export interface ACPClientAdapterOptions {
   // Only meaningful when `resolvePermission` is set. Defaults to
   // `DEFAULT_PERMISSION_TIMEOUT_MS`.
   permissionTimeoutMs?: number;
+  // Bounds every turn's `connection.prompt` call — a silent/stuck agent
+  // otherwise produces no signal at all. Unlike `permissionTimeoutMs`, this
+  // is unconditional: every turn is raced against it. Defaults to
+  // `DEFAULT_TURN_TIMEOUT_MS`.
+  turnTimeoutMs?: number;
   logger?: Logger;
 }
 
 export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, AdapterToolsProtocol> {
+  protected readonly provider = "acp";
+
   private readonly command: string[]
   private readonly cwd: string
   private readonly env?: Record<string, string>
@@ -100,6 +124,7 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
 
   private readonly resolvePermission?: (request: RequestPermissionRequest, signal: AbortSignal) => Promise<string | undefined>
   private readonly permissionTimeoutMs: number
+  private readonly turnTimeoutMs: number
   private readonly logger: Logger
 
   private backend: InjectedMcpBackend | null = null
@@ -111,6 +136,11 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
   private started = false
   private systemPrompt = ""
   private spawnPromise: Promise<ClientSideConnection> | null = null
+  // Bumped by `stop()`; an in-flight `spawnConnection()` checks this against
+  // its own captured value before installing itself, so a superseded attempt
+  // (stop() raced against a slow connect) stops its own handle instead of
+  // silently resurrecting a deliberately-stopped adapter.
+  private connectionGeneration = 0
 
   public constructor(options: ACPClientAdapterOptions) {
     super({
@@ -133,7 +163,7 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
     this.connectionFactory = options.connectionFactory ?? createSubprocessConnection
 
     this.resolvePermission = options.resolvePermission
-    this.logger = options.logger ?? new NoopLogger()
+    this.logger = resolveLogger(options.logger)
     this.permissionTimeoutMs = options.permissionTimeoutMs ?? DEFAULT_PERMISSION_TIMEOUT_MS
     // Only meaningful when `resolvePermission` is actually set — the
     // auto-allow path never reads it, so an irrelevant/default value here
@@ -141,6 +171,20 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
     // manual mode at all.
     if (this.resolvePermission && (!Number.isFinite(this.permissionTimeoutMs) || this.permissionTimeoutMs <= 0)) {
       throw new ValidationError(`permissionTimeoutMs must be a positive finite number, got ${options.permissionTimeoutMs}`)
+    }
+
+    this.turnTimeoutMs = options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS
+    // Unconditional, unlike permissionTimeoutMs's gated check above: every
+    // turn is raced against this, not just an opt-in manual-approval path.
+    // `Infinity` is the escape hatch back to the pre-timeout behaviour: an ACP
+    // turn that legitimately runs past the cap loses its session and its
+    // buffered output, so a caller must be able to opt out rather than having
+    // the only way to say "unbounded" rejected at construction.
+    if (Number.isNaN(this.turnTimeoutMs) || this.turnTimeoutMs <= 0) {
+      throw new ValidationError(`turnTimeoutMs must be a positive number or Infinity, got ${options.turnTimeoutMs}`)
+    }
+    if (Number.isFinite(this.turnTimeoutMs) && this.turnTimeoutMs > MAX_TURN_TIMEOUT_MS) {
+      throw new ValidationError(`turnTimeoutMs must be Infinity or at most ${MAX_TURN_TIMEOUT_MS}, got ${options.turnTimeoutMs}`)
     }
   }
 
@@ -172,19 +216,66 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
 
     this.roomTools.set(context.roomId, tools)
 
-    const connection = await this.ensureConnection()
-    const client = this.client
-    if (!client) {
-      throw new Error("ACP client was not initialized")
+    const session = await this.establishSession(tools, context)
+    if (!session) {
+      return
+    }
+    const { connection, sessionId } = session
+
+    const promptText = this.buildPromptText(message, participantsMessage, contactsMessage, context.roomId, sessionId)
+    this.bootstrappedSessions.add(sessionId)
+
+    let response: PromptResponse
+    try {
+      response = await this.sendPromptWithTimeout(connection, sessionId, promptText)
+    } catch (error) {
+      await this.failTurn(error, connection, sessionId, tools, message, context)
+      return
     }
 
-    const sessionId = await this.getOrCreateSession(context.roomId, connection)
-    client.resetSession(sessionId)
-    client.setPermissionHandler(
-      sessionId,
-      (params) => this.handlePermissionRequest(tools, context.roomId, params),
-    )
+    await this.finishTurn(tools, sessionId, context.roomId, message, response)
+  }
 
+  // Connection/session establishment is genuinely connection-level: on
+  // failure, a global stop() is appropriate since the shared process/
+  // handshake may be broken for every room, not just this one.
+  private async establishSession(
+    tools: AdapterToolsProtocol,
+    context: { roomId: string },
+  ): Promise<{ connection: ClientSideConnection; sessionId: string } | null> {
+    // Captured before the connection is touched: the catch below tears down
+    // what every room shares, so it has to know which connection this turn
+    // was actually working against.
+    const generation = this.connectionGeneration
+
+    try {
+      const connection = await this.ensureConnection()
+      const client = this.client
+      if (!client) {
+        throw new Error("ACP client was not initialized")
+      }
+
+      const sessionId = await this.getOrCreateSession(context.roomId, connection)
+      client.beginSession(sessionId)
+      client.setPermissionHandler(
+        sessionId,
+        (params) => this.handlePermissionRequest(tools, context.roomId, params),
+      )
+      return { connection, sessionId }
+    } catch (error) {
+      await this.stopOwnedConnection(generation, context.roomId)
+      await tools.sendFailure(new AgentFailure(this.provider, asErrorMessage(error)))
+      return null
+    }
+  }
+
+  private buildPromptText(
+    message: PlatformMessage,
+    participantsMessage: string | null,
+    contactsMessage: string | null,
+    roomId: string,
+    sessionId: string,
+  ): string {
     // The platform stores a typed mention as @[[participant_id]]; nothing else
     // in ACP resolves that back to a handle, so the agent reads a bare id as
     // an MCP protocol token instead of as being spoken to.
@@ -196,28 +287,105 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
     // chance ACP gets to see it at all.
     const messageWithContext = [...systemUpdateParts(participantsMessage, contactsMessage), content].join("\n\n")
 
-    const promptText = this.bootstrappedSessions.has(sessionId)
+    return this.bootstrappedSessions.has(sessionId)
       ? messageWithContext
-      : `${this.buildSystemContext(context.roomId, message)}\n\n${messageWithContext}`
+      : `${this.buildSystemContext(roomId, message)}\n\n${messageWithContext}`
+  }
 
-    this.bootstrappedSessions.add(sessionId)
+  // Prompt-scoped: a timeout or a rejected prompt means only this room's
+  // session is done for; the connection and every other room stay up.
+  private async sendPromptWithTimeout(
+    connection: ClientSideConnection,
+    sessionId: string,
+    promptText: string,
+  ): Promise<PromptResponse> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const promptPromise = connection.prompt({
+      sessionId,
+      prompt: [{
+        type: "text",
+        text: promptText,
+      }],
+    })
+    // Prevent an unhandled rejection if this settles after the race below
+    // has already moved on via the timeout branch — Promise.race never
+    // cancels the loser, so this promise is still live either way.
+    promptPromise.catch(() => {})
 
     try {
-      await connection.prompt({
-        sessionId,
-        prompt: [{
-          type: "text",
-          text: promptText,
-        }],
-      })
-    } catch (error) {
-      await this.stop()
-      await tools.sendEvent(`ACP agent error: ${toErrorMessage(error)}`, "error", {
-        acp_error: toErrorMessage(error),
-      })
-      return
+      // `setTimeout` coerces `Infinity` to 1ms, so an unbounded turn has to
+      // skip the race outright rather than pass the delay through.
+      return Number.isFinite(this.turnTimeoutMs)
+        ? await Promise.race([
+          promptPromise,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new AcpTurnTimeoutError()), this.turnTimeoutMs)
+          }),
+        ])
+        : await promptPromise
+    } finally {
+      clearTimeout(timer)
     }
+  }
 
+  private async failTurn(
+    error: unknown,
+    connection: ClientSideConnection,
+    sessionId: string,
+    tools: AdapterToolsProtocol,
+    message: PlatformMessage,
+    context: { roomId: string },
+  ): Promise<void> {
+    const isTimeout = error instanceof AcpTurnTimeoutError
+    if (isTimeout) {
+      // `cancel` is a notification whose write can stay pending indefinitely
+      // behind an agent that has stopped draining its stdin — the very state
+      // this timeout exists to escape. See `abandon`.
+      abandon(
+        () => connection.cancel({ sessionId }),
+        (cancelError) => {
+          this.logger.warn("ACP cancel after turn timeout failed", { roomId: context.roomId, sessionId, error: cancelError })
+        },
+      )
+    }
+    // Whatever the turn streamed before failing is still worth having — on a
+    // 60-minute timeout that can be an hour of a coding agent's output — and
+    // onCleanup below drops the buffer with the session. Best-effort: a reply
+    // that will not post must not displace the failure reported after it.
+    try {
+      await this.flushChunks({
+        tools,
+        sessionId,
+        senderId: message.senderId,
+        senderHandle: message.senderName ?? message.senderType,
+      })
+    } catch (flushError) {
+      this.logger.warn("ACP partial output lost after turn failure", { roomId: context.roomId, sessionId, error: flushError })
+    }
+    // Best-effort, same reasoning as establishSession's failure path: onCleanup's
+    // own operations are simple/local today, but must never be allowed to
+    // swallow the original failure if that changes.
+    try {
+      await this.onCleanup(context.roomId)
+    } catch (cleanupError) {
+      this.logger.warn("ACP onCleanup after turn failure itself failed", { roomId: context.roomId, sessionId, error: cleanupError })
+    }
+    await tools.sendFailure(
+      isTimeout
+        ? new AgentFailure(this.provider, "ACP turn timed out.", "timeout")
+        : isAcpErrorResponse(error)
+          ? agentFailure(this.provider, error.message, String(error.code), error.data)
+          : new AgentFailure(this.provider, asErrorMessage(error)),
+    )
+  }
+
+  private async finishTurn(
+    tools: AdapterToolsProtocol,
+    sessionId: string,
+    roomId: string,
+    message: PlatformMessage,
+    response: PromptResponse,
+  ): Promise<void> {
     await this.flushChunks({
       tools,
       sessionId,
@@ -225,10 +393,31 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
       senderHandle: message.senderName ?? message.senderType,
     })
 
+    // Bookkeeping, not a success signal: this event's metadata is the only
+    // record `ACPClientHistoryConverter` rebuilds room→session from, so it has
+    // to be written for any outcome that leaves the session alive. A turn that
+    // ends on max_tokens would otherwise lose the room's whole session at the
+    // next restart, silently starting a fresh one.
     await tools.sendEvent("ACP client session", "task", {
       acp_client_session_id: sessionId,
-      acp_client_room_id: context.roomId,
+      acp_client_room_id: roomId,
     })
+
+    // A *resolved* prompt() isn't automatically a success — max_tokens/
+    // max_turn_requests/refusal/cancelled are real provider-declared
+    // non-success outcomes today silently treated as end_turn. Whatever
+    // partial content the turn produced is still flushed above, unchanged.
+    // `?.` despite the non-nullable type: response is a deserialized wire
+    // value from an external agent process, and a missing body must not
+    // throw here — it belongs in the failure branch below instead.
+    const stopReason: string | undefined = response?.stopReason
+    if (stopReason !== "end_turn") {
+      await tools.sendFailure(new AgentFailure(
+        this.provider,
+        `ACP turn ended with stop reason: ${stopReason ?? "unknown"}.`,
+        stopReason,
+      ))
+    }
   }
 
   public async onCleanup(roomId: string): Promise<void> {
@@ -238,7 +427,11 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
     if (sessionId) {
       this.activeSessions.delete(sessionId)
       this.bootstrappedSessions.delete(sessionId)
-      this.client?.setPermissionHandler(sessionId, undefined)
+      // Drops this session's buffered chunks along with its permission
+      // handler. The chunks matter now that a failed turn cleans up its room
+      // rather than stopping the adapter: the client survives that, and a
+      // session no room can reach again would hold its output forever.
+      this.client?.resetSession(sessionId)
       this.cancelPendingPermissions(sessionId)
     }
   }
@@ -248,6 +441,9 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
   }
 
   public async stop(): Promise<void> {
+    // Must run first: this is what any in-flight spawnConnection() checks
+    // its own captured generation against.
+    this.connectionGeneration++
     this.spawnPromise = null
     this.connectionState = null
     this.activeSessions.clear()
@@ -272,6 +468,28 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
     }
   }
 
+  /**
+   * Tears down the shared connection, but only if this turn still owns it.
+   * The generation guard in `spawnConnection` stops a superseded attempt from
+   * *installing* itself; the attempt still rejects, and that rejection can
+   * arrive long after a newer connection replaced it. Stopping unconditionally
+   * there would kill a connection this turn never held.
+   *
+   * Best-effort: `stop()` runs externally-supplied teardown that can itself
+   * reject, and the failure that brought us here must still reach the room.
+   */
+  private async stopOwnedConnection(generation: number, roomId: string): Promise<void> {
+    if (generation !== this.connectionGeneration) {
+      return
+    }
+
+    try {
+      await this.stop()
+    } catch (stopError) {
+      this.logger.warn("ACP stop() after connection failure itself failed", { roomId, error: stopError })
+    }
+  }
+
   private rehydrate(history: ACPClientSessionState): void {
     for (const [roomId, sessionId] of Object.entries(history.roomToSession)) {
       if (!this.roomToSession.has(roomId)) {
@@ -293,15 +511,22 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
     if (isCreator) {
       this.spawnPromise = this.spawnConnection()
     }
+    const spawnPromise = this.spawnPromise!
 
     try {
-      return await this.spawnPromise!
+      return await spawnPromise
     } finally {
-      if (isCreator) this.spawnPromise = null
+      // Only the creator clears the slot, and only if it still holds the
+      // promise created above — `stop()` (or a newer attempt superseding
+      // this one) may already have replaced it while this was in flight.
+      if (isCreator && this.spawnPromise === spawnPromise) {
+        this.spawnPromise = null
+      }
     }
   }
 
   private async spawnConnection(): Promise<ClientSideConnection> {
+    const generation = this.connectionGeneration
     const acp = await acpModule.get()
     const client = new BandACPClient()
     const handle = await this.connectionFactory(client as Client, {
@@ -310,15 +535,38 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
       env: this.env,
     })
     const connection = handle.connection
-    const initializeResult = await connection.initialize({
-      protocolVersion: acp.PROTOCOL_VERSION,
-      clientCapabilities: this.clientCapabilities ?? {},
-    })
 
-    if (this.authMethod) {
-      await connection.authenticate({
-        methodId: this.authMethod,
+    let initializeResult: InitializeResponse
+    try {
+      initializeResult = await connection.initialize({
+        protocolVersion: acp.PROTOCOL_VERSION,
+        clientCapabilities: this.clientCapabilities ?? {},
       })
+
+      if (this.authMethod) {
+        await connection.authenticate({
+          methodId: this.authMethod,
+        })
+      }
+    } catch (error) {
+      // handle was never installed anywhere else — this is the only place
+      // left that can stop it. Best-effort, same reasoning as onMessage's
+      // catches: an externally-supplied handle.stop() that itself rejects
+      // must not replace the real handshake failure.
+      try {
+        await handle.stop()
+      } catch (stopError) {
+        this.logger.warn("ACP connection handle stop after handshake failure itself failed", { error: stopError })
+      }
+      throw error
+    }
+
+    if (generation !== this.connectionGeneration) {
+      // stop() (or a newer connection attempt) superseded this one while we
+      // were establishing it. Stop our own handle instead of installing a
+      // stale connection back onto the adapter.
+      await handle.stop()
+      throw new Error("ACP connection attempt superseded by stop()")
     }
 
     this.client = client
@@ -608,14 +856,7 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
         Promise.resolve()
           .then(() => this.resolvePermission!(params, controller.signal))
           .catch((error) => {
-            // Best-effort: a caller-supplied `logger` that itself throws
-            // must not turn "the resolver failed" into an unhandled
-            // rejection escaping this race in its place.
-            try {
-              this.logger.warn("resolvePermission threw; treating as no answer", { error: String(error) })
-            } catch {
-              // ignore — see comment above
-            }
+            this.logger.warn("resolvePermission threw; treating as no answer", { error: String(error) })
             return undefined
           }),
         timeout,
@@ -673,7 +914,7 @@ export class ACPClientAdapter extends SimpleAdapter<ACPClientSessionState, Adapt
       }
 
       if (chunk.chunkType === "text") {
-        await input.tools.sendMessage(chunk.content, [{
+        await deliverReply(input.tools, chunk.content, [{
           id: input.senderId,
           handle: input.senderHandle,
         }])
@@ -757,10 +998,17 @@ export async function createSubprocessConnection(
   }
 }
 
-function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
+// Its only job is letting the turn's catch tell "we gave up waiting" apart
+// from "the agent rejected the prompt" — it never crosses a process boundary.
+class AcpTurnTimeoutError extends Error {}
 
-  return String(error)
+// A structural guard, not `instanceof RequestError`: `connection.prompt(...)`
+// rejects with the plain deserialized wire object (`{code, message, data?}`),
+// never re-wrapped into a `RequestError` instance (that class is only used
+// on the agent side to *construct* an outgoing error response).
+function isAcpErrorResponse(error: unknown): error is { code: number; message: string; data?: unknown } {
+  return typeof error === "object" && error !== null
+    && typeof (error as { code?: unknown }).code === "number"
+    && typeof (error as { message?: unknown }).message === "string"
 }
+
